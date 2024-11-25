@@ -1,6 +1,9 @@
 import 'dart:developer';
 
+import 'package:brookie_babies/bulleted_text.dart';
 import 'package:brookie_babies/carousel.dart';
+import 'package:brookie_babies/packages.dart';
+import 'package:brookie_babies/text_section.dart';
 import 'package:flutter/material.dart';
 
 class HomePage extends StatelessWidget {
@@ -8,12 +11,14 @@ class HomePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Expanded(
+    return const Scaffold(
+      body: SingleChildScrollView(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.start,
           children: <Widget>[
-            CarouselExample()
+            CarouselExample(),
+            TextSection(),
+            Packages()
           ],
         ),
       )

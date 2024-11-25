@@ -18,7 +18,7 @@ class _CarouselExampleState extends State<CarouselExample> {
           itemExtent: 1200,
           shrinkExtent: 200,
           children: List<Widget>.generate(20, (int index) {
-            return UncontainedLayoutCard(index: index, label: 'Item $index');
+            return UncontainedLayoutCard(index: index, label: 'Picture $index');
           }),
         ),
       ),

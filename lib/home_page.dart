@@ -1,6 +1,3 @@
-import 'dart:developer';
-
-import 'package:brookie_babies/bulleted_text.dart';
 import 'package:brookie_babies/carousel.dart';
 import 'package:brookie_babies/packages.dart';
 import 'package:brookie_babies/text_section.dart';

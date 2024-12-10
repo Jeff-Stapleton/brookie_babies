@@ -6,7 +6,7 @@ class TextSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 40, vertical: 20),
+      padding: EdgeInsets.symmetric(horizontal: 120, vertical: 60),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[

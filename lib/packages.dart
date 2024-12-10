@@ -8,8 +8,10 @@ class Packages extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Padding(
       padding: EdgeInsets.all(20),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Wrap(
+        spacing: 25, // Space between elements horizontally
+        runSpacing: 20, // Space between elements vertically
+        alignment: WrapAlignment.center, // Align the cards to the center
         children: [
           PricingCard(
             title: 'Basic', 

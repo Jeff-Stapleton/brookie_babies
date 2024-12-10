@@ -15,11 +15,24 @@ class UncontainedLayoutCard extends StatelessWidget {
     return ColoredBox(
       color: Colors.primaries[index % Colors.primaries.length].withOpacity(0.5),
       child: Center(
-        child: Text(
-          label,
-          style: const TextStyle(color: Colors.white, fontSize: 20),
-          overflow: TextOverflow.clip,
-          softWrap: false,
+        child: Image.network(
+          'https://firebasestorage.googleapis.com/v0/b/brookie-babies.firebasestorage.app/o/_admin%2Fgallery%2FIMG_1672.JPG?alt=media&token=cecc1b32-a3ac-40e3-ad8f-e96ea2132872',
+          loadingBuilder: (BuildContext context, Widget child, ImageChunkEvent? loadingProgress) {
+            if (loadingProgress == null) {
+              return child; // Image has loaded
+            }
+            return CircularProgressIndicator(
+              value: loadingProgress.expectedTotalBytes != null
+                  ? loadingProgress.cumulativeBytesLoaded / (loadingProgress.expectedTotalBytes ?? 1)
+                  : null,
+            ); // Show progress indicator while loading
+          },
+          errorBuilder: (BuildContext context, Object error, StackTrace? stackTrace) {
+            return const Icon(
+              Icons.error,
+              color: Colors.red,
+            ); // Display an error icon if image fails to load
+          },
         ),
       ),
     );

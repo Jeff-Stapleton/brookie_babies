@@ -2,6 +2,12 @@
   "configVersion": 2,
   "packages": [
     {
+      "name": "_flutterfire_internals",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/_flutterfire_internals-1.3.47",
+      "packageUri": "lib/",
+      "languageVersion": "3.2"
+    },
+    {
       "name": "async",
       "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/async-2.11.0",
       "packageUri": "lib/",
@@ -44,6 +50,60 @@
       "languageVersion": "2.12"
     },
     {
+      "name": "firebase_auth",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/firebase_auth-5.3.4",
+      "packageUri": "lib/",
+      "languageVersion": "3.2"
+    },
+    {
+      "name": "firebase_auth_platform_interface",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/firebase_auth_platform_interface-7.4.10",
+      "packageUri": "lib/",
+      "languageVersion": "3.2"
+    },
+    {
+      "name": "firebase_auth_web",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/firebase_auth_web-5.13.5",
+      "packageUri": "lib/",
+      "languageVersion": "3.4"
+    },
+    {
+      "name": "firebase_core",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/firebase_core-3.8.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.2"
+    },
+    {
+      "name": "firebase_core_platform_interface",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/firebase_core_platform_interface-5.3.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.2"
+    },
+    {
+      "name": "firebase_core_web",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/firebase_core_web-2.18.2",
+      "packageUri": "lib/",
+      "languageVersion": "3.4"
+    },
+    {
+      "name": "firebase_storage",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/firebase_storage-12.3.7",
+      "packageUri": "lib/",
+      "languageVersion": "3.2"
+    },
+    {
+      "name": "firebase_storage_platform_interface",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/firebase_storage_platform_interface-5.1.34",
+      "packageUri": "lib/",
+      "languageVersion": "3.2"
+    },
+    {
+      "name": "firebase_storage_web",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/firebase_storage_web-3.10.6",
+      "packageUri": "lib/",
+      "languageVersion": "3.4"
+    },
+    {
       "name": "flutter",
       "rootUri": "file:///Users/jeffstapleton/Documents/flutter/packages/flutter",
       "packageUri": "lib/",
@@ -51,15 +111,63 @@
     },
     {
       "name": "flutter_lints",
-      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/flutter_lints-4.0.0",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/flutter_lints-5.0.0",
       "packageUri": "lib/",
-      "languageVersion": "3.1"
+      "languageVersion": "3.5"
+    },
+    {
+      "name": "flutter_stripe",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/flutter_stripe-11.3.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "flutter_stripe_web",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/flutter_stripe_web-6.3.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.3"
     },
     {
       "name": "flutter_test",
       "rootUri": "file:///Users/jeffstapleton/Documents/flutter/packages/flutter_test",
       "packageUri": "lib/",
       "languageVersion": "3.3"
+    },
+    {
+      "name": "flutter_web_plugins",
+      "rootUri": "file:///Users/jeffstapleton/Documents/flutter/packages/flutter_web_plugins",
+      "packageUri": "lib/",
+      "languageVersion": "3.2"
+    },
+    {
+      "name": "freezed_annotation",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/freezed_annotation-2.4.4",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "http",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/http-1.2.2",
+      "packageUri": "lib/",
+      "languageVersion": "3.3"
+    },
+    {
+      "name": "http_parser",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/http_parser-4.0.2",
+      "packageUri": "lib/",
+      "languageVersion": "2.12"
+    },
+    {
+      "name": "intl",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/intl-0.19.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "json_annotation",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/json_annotation-4.9.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
     },
     {
       "name": "leak_tracker",
@@ -81,9 +189,9 @@
     },
     {
       "name": "lints",
-      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/lints-4.0.0",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/lints-5.0.0",
       "packageUri": "lib/",
-      "languageVersion": "3.1"
+      "languageVersion": "3.5"
     },
     {
       "name": "matcher",
@@ -108,6 +216,18 @@
       "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/path-1.9.0",
       "packageUri": "lib/",
       "languageVersion": "3.0"
+    },
+    {
+      "name": "plugin_platform_interface",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/plugin_platform_interface-2.1.8",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "simple_gesture_detector",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/simple_gesture_detector-0.2.1",
+      "packageUri": "lib/",
+      "languageVersion": "2.12"
     },
     {
       "name": "sky_engine",
@@ -140,6 +260,36 @@
       "languageVersion": "2.18"
     },
     {
+      "name": "stripe_android",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/stripe_android-11.3.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "stripe_ios",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/stripe_ios-11.3.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "stripe_js",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/stripe_js-6.2.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.3"
+    },
+    {
+      "name": "stripe_platform_interface",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/stripe_platform_interface-11.3.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
+      "name": "table_calendar",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/table_calendar-3.1.2",
+      "packageUri": "lib/",
+      "languageVersion": "3.0"
+    },
+    {
       "name": "term_glyph",
       "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/term_glyph-1.2.1",
       "packageUri": "lib/",
@@ -150,6 +300,60 @@
       "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/test_api-0.7.2",
       "packageUri": "lib/",
       "languageVersion": "3.2"
+    },
+    {
+      "name": "typed_data",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/typed_data-1.4.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.5"
+    },
+    {
+      "name": "url_launcher",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/url_launcher-6.3.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.3"
+    },
+    {
+      "name": "url_launcher_android",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/url_launcher_android-6.3.14",
+      "packageUri": "lib/",
+      "languageVersion": "3.5"
+    },
+    {
+      "name": "url_launcher_ios",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/url_launcher_ios-6.3.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.2"
+    },
+    {
+      "name": "url_launcher_linux",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/url_launcher_linux-3.2.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.3"
+    },
+    {
+      "name": "url_launcher_macos",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/url_launcher_macos-3.2.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.3"
+    },
+    {
+      "name": "url_launcher_platform_interface",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/url_launcher_platform_interface-2.3.2",
+      "packageUri": "lib/",
+      "languageVersion": "3.1"
+    },
+    {
+      "name": "url_launcher_web",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/url_launcher_web-2.3.3",
+      "packageUri": "lib/",
+      "languageVersion": "3.3"
+    },
+    {
+      "name": "url_launcher_windows",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/url_launcher_windows-3.1.3",
+      "packageUri": "lib/",
+      "languageVersion": "3.3"
     },
     {
       "name": "vector_math",
@@ -164,13 +368,19 @@
       "languageVersion": "3.3"
     },
     {
+      "name": "web",
+      "rootUri": "file:///Users/jeffstapleton/.pub-cache/hosted/pub.dev/web-1.1.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.4"
+    },
+    {
       "name": "brookie_babies",
       "rootUri": "../",
       "packageUri": "lib/",
       "languageVersion": "3.5"
     }
   ],
-  "generated": "2024-11-25T02:42:04.124950Z",
+  "generated": "2024-12-10T05:04:05.084732Z",
   "generator": "pub",
   "generatorVersion": "3.5.3",
   "flutterRoot": "file:///Users/jeffstapleton/Documents/flutter",

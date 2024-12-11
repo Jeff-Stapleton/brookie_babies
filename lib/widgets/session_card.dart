@@ -1,15 +1,22 @@
-import 'package:brookie_babies/header_four_text.dart';
-import 'package:brookie_babies/header_one_text.dart';
-import 'package:brookie_babies/header_three_text.dart';
-import 'package:brookie_babies/header_two_text.dart';
-import 'package:brookie_babies/subheader_text.dart';
+import 'package:brookie_babies/widgets/header_four_text.dart';
+import 'package:brookie_babies/widgets/header_one_text.dart';
+import 'package:brookie_babies/widgets/subheader_text.dart';
 import 'package:flutter/material.dart';
 
 class SessionCard extends StatelessWidget {
-  const SessionCard({super.key, required this.sessionText, required this.onSessionSelected});
+  const SessionCard({super.key, required this.sessionDate, required this.sessionDescription, required this.onSessionSelected});
 
-  final String sessionText;
+  final DateTime sessionDate;
+  final String sessionDescription;
   final VoidCallback onSessionSelected;
+
+  String getDayOfTheWeek(DateTime date) {
+    List<String> weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    // `weekday` is 1-based
+    return weekdays[date.weekday - 1]; 
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -34,8 +41,8 @@ class SessionCard extends StatelessWidget {
                   Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      HeaderFourText(text: 'WED'),
-                      HeaderOneText(text: '11')
+                      HeaderFourText(text: getDayOfTheWeek(sessionDate)),
+                      HeaderOneText(text: sessionDate.day.toString())
                     ],
                   ),
                   const VerticalDivider(

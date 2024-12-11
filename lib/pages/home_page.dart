@@ -1,7 +1,7 @@
-import 'package:brookie_babies/carousel.dart';
-import 'package:brookie_babies/packages.dart';
-import 'package:brookie_babies/page_footer.dart';
-import 'package:brookie_babies/text_section.dart';
+import 'package:brookie_babies/components/carousel.dart';
+import 'package:brookie_babies/components/packages.dart';
+import 'package:brookie_babies/components/page_footer.dart';
+import 'package:brookie_babies/widgets/text_section.dart';
 import 'package:flutter/material.dart';
 
 class HomePage extends StatelessWidget {

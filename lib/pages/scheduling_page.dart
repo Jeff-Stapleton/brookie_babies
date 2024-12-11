@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import './utils.dart';
-import './session_list.dart';
+import '../utilities/utils.dart';
+import '../components/session_list.dart';
 
 class SchedulingPage extends StatefulWidget {
   const SchedulingPage({super.key, required this.packageName});
@@ -79,7 +79,7 @@ void navigateCheckout() {
             onDaySelected: handleonDaySelected,
             onPageChanged: handleonPageChanged,
           ),
-          SessionList(onSessionSelected: navigateCheckout),
+          SessionList(sessionDate: _selectedDay ?? _focusedDay, onSessionSelected: navigateCheckout),
         ],
       ),
     );

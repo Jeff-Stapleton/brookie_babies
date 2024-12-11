@@ -1,9 +1,9 @@
 import 'dart:developer';
 
-import 'package:brookie_babies/bulleted_list.dart';
-import 'package:brookie_babies/header_two_text.dart';
-import 'package:brookie_babies/scheduling_page.dart';
-import 'package:brookie_babies/subheader_text.dart';
+import 'package:brookie_babies/widgets/bulleted_list.dart';
+import 'package:brookie_babies/widgets/header_two_text.dart';
+import 'package:brookie_babies/pages/scheduling_page.dart';
+import 'package:brookie_babies/widgets/subheader_text.dart';
 import 'package:flutter/material.dart';
 
 class PricingCard extends StatelessWidget {

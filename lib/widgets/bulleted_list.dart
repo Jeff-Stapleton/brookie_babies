@@ -1,4 +1,4 @@
-import 'package:brookie_babies/bulleted_text.dart';
+import 'package:brookie_babies/widgets/bulleted_text.dart';
 import 'package:flutter/material.dart';
 
 class BulletedList extends StatelessWidget {

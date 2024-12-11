@@ -1,4 +1,4 @@
-import 'package:brookie_babies/pricing_card.dart';
+import 'package:brookie_babies/widgets/pricing_card.dart';
 import 'package:flutter/material.dart';
 
 class Packages extends StatelessWidget {
@@ -9,8 +9,8 @@ class Packages extends StatelessWidget {
     return const Padding(
       padding: EdgeInsets.all(20),
       child: Wrap(
-        spacing: 25, // Space between elements horizontally
-        runSpacing: 20, // Space between elements vertically
+        spacing: 32, // Space between elements horizontally
+        runSpacing: 16, // Space between elements vertically
         alignment: WrapAlignment.center, // Align the cards to the center
         children: [
           PricingCard(

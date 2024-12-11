@@ -1,6 +1,6 @@
-import 'package:brookie_babies/checkout_page.dart';
-import 'package:brookie_babies/home_page.dart';
-import 'package:brookie_babies/scheduling_page.dart';
+import 'package:brookie_babies/pages/checkout_page.dart';
+import 'package:brookie_babies/pages/home_page.dart';
+import 'package:brookie_babies/pages/scheduling_page.dart';
 import 'package:brookie_babies/firebase_options.dart';
 
 import 'package:flutter/material.dart';

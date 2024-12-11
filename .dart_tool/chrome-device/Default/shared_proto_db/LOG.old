@@ -1,16 +1,14 @@
-2024/12/09-22:05:04.566 af03 Reusing MANIFEST /private/var/folders/gc/b6xlcchd6d1fczsxly5wdz_h0000gn/T/flutter_tools.CDyMzp/flutter_tools_chrome_device.8hsMI0/Default/shared_proto_db/MANIFEST-000001
-2024/12/09-22:05:04.566 af03 Recovering log #19
-2024/12/09-22:05:04.567 af03 Reusing old log /private/var/folders/gc/b6xlcchd6d1fczsxly5wdz_h0000gn/T/flutter_tools.CDyMzp/flutter_tools_chrome_device.8hsMI0/Default/shared_proto_db/000019.log 
-2024/12/09-22:05:04.567 af03 Delete type=0 #13
-2024/12/09-22:05:04.567 af03 Delete type=0 #7
-2024/12/09-22:05:04.567 af03 Delete type=0 #4
-2024/12/09-22:05:04.567 af03 Delete type=0 #10
-2024/12/09-22:05:04.567 af03 Delete type=0 #16
-2024/12/09-22:05:04.567 af03 Delete type=0 #3
-2024/12/09-22:05:04.567 af03 Delete type=2 #14
-2024/12/09-22:05:04.567 af03 Delete type=2 #17
-2024/12/09-22:05:04.567 af03 Delete type=2 #11
-2024/12/09-22:05:04.567 af03 Delete type=2 #8
-2024/12/09-22:05:04.590 a603 Level-0 table #24: started
-2024/12/09-22:05:04.603 a603 Level-0 table #24: 123412 bytes OK
-2024/12/09-22:05:04.617 a603 Delete type=0 #19
+2024/12/11-00:09:33.895 ba03 Reusing MANIFEST /private/var/folders/gc/b6xlcchd6d1fczsxly5wdz_h0000gn/T/flutter_tools.ZjxEdu/flutter_tools_chrome_device.C7VD4E/Default/shared_proto_db/MANIFEST-000001
+2024/12/11-00:09:33.895 ba03 Recovering log #23
+2024/12/11-00:09:33.896 ba03 Reusing old log /private/var/folders/gc/b6xlcchd6d1fczsxly5wdz_h0000gn/T/flutter_tools.ZjxEdu/flutter_tools_chrome_device.C7VD4E/Default/shared_proto_db/000023.log 
+2024/12/11-00:09:33.896 ba03 Delete type=0 #13
+2024/12/11-00:09:33.896 ba03 Delete type=0 #7
+2024/12/11-00:09:33.896 ba03 Delete type=0 #4
+2024/12/11-00:09:33.896 ba03 Delete type=0 #10
+2024/12/11-00:09:33.896 ba03 Delete type=0 #16
+2024/12/11-00:09:33.896 ba03 Delete type=0 #3
+2024/12/11-00:09:33.896 ba03 Delete type=2 #14
+2024/12/11-00:09:33.896 ba03 Delete type=2 #17
+2024/12/11-00:09:33.896 ba03 Delete type=2 #11
+2024/12/11-00:09:33.896 ba03 Delete type=2 #8
+2024/12/11-00:09:33.896 ba03 Delete type=0 #19

@@ -1,4 +1,7 @@
-import 'package:brookie_babies/header_text.dart';
+import 'package:brookie_babies/header_four_text.dart';
+import 'package:brookie_babies/header_one_text.dart';
+import 'package:brookie_babies/header_three_text.dart';
+import 'package:brookie_babies/header_two_text.dart';
 import 'package:brookie_babies/subheader_text.dart';
 import 'package:flutter/material.dart';
 
@@ -11,7 +14,7 @@ class SessionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 25.0, vertical: 5.0),
+      padding: const EdgeInsets.symmetric(horizontal: 64, vertical: 8),
       child: GestureDetector(
         onTap: onSessionSelected,
         child: Card(
@@ -23,21 +26,21 @@ class SessionCard extends StatelessWidget {
             width: double.infinity,
             height: 150,
             child: Center(
-              child: Row(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 16, horizontal: 64),
+                child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      SubheaderText(text: 'WED'),
-                      HeaderText(text: '11')
+                      HeaderFourText(text: 'WED'),
+                      HeaderOneText(text: '11')
                     ],
                   ),
                   const VerticalDivider(
-                    width: 20,
+                    width: 128,
                     thickness: 1,
-                    indent: 20,
-                    endIndent: 16,
                     color: Colors.grey,
                   ),
                   Column(
@@ -49,10 +52,11 @@ class SessionCard extends StatelessWidget {
                       Row(children: [Icon(Icons.place), SizedBox(width: 16), SubheaderText(text: '10652 S Wild Rice Dr.')])
                     ],
                   ),
-                  SizedBox(width: 16),
+                  SizedBox(width: 64),
                   SubheaderText(text: 'Testing 1 2 3, Testing 1 2 3')
                 ],
               ),
+              )
             ),
           ),
         ),

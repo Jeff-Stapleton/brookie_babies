@@ -1,7 +1,7 @@
 import 'dart:developer';
 
 import 'package:brookie_babies/bulleted_list.dart';
-import 'package:brookie_babies/header_text.dart';
+import 'package:brookie_babies/header_two_text.dart';
 import 'package:brookie_babies/scheduling_page.dart';
 import 'package:brookie_babies/subheader_text.dart';
 import 'package:flutter/material.dart';
@@ -32,7 +32,7 @@ class PricingCard extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            HeaderText(text: title),
+            HeaderTwoText(text: title),
             SubheaderText(text: price),
             const SizedBox(height: 35, width: 350),
             BulletedList(bullets: bullets),

@@ -66,7 +66,7 @@ bucket has files under `_admin/gallery` and CORS is configured (see below).
 | Static analysis | `flutter analyze` |
 | Tests | `flutter test` |
 | Production build | `flutter build web` (output in `build/web`) |
-| Deploy to Firebase Hosting | `firebase deploy --only hosting` |
+| Deploy to Firebase Hosting | `flutter build web --release && firebase deploy --only hosting` |
 
 ### Firebase setup notes
 
@@ -89,20 +89,36 @@ lib/
   utilities/         Calendar helpers
 assets/              Logo
 web/                 Web shell (index.html, manifest, icons)
-.github/workflows/   Firebase Hosting deploy workflows
+.github/workflows/   CI: analyze, test, build and deploy (ci.yml)
 ```
 
 See [AGENT.md](AGENT.md) for an architectural walkthrough, conventions and known issues.
 
 ## Deployment
 
-The GitHub Actions workflows in `.github/workflows/` deploy to Firebase Hosting:
+One GitHub Actions workflow, `.github/workflows/ci.yml`, checks and deploys the
+site. It runs `flutter pub get --enforce-lockfile`,
+`flutter analyze --no-fatal-infos` (lint infos are not fatal yet),
+`flutter test` and `flutter build web --release` on Flutter 3.24.3 (pinned in
+the workflow). It then fails if the web bundle contains a Stripe secret key,
+and otherwise deploys `build/web` to Firebase Hosting:
 
-- On pull request: a preview channel
-- On push to `main`: the live site
+- On pull request to `main`: a preview channel that expires after 7 days. The
+  preview URL is posted on the pull request. Pull requests from forks are
+  checked but not deployed.
+- On push to `main` (or a manual run on `main`): the live site,
+  https://brookie-babies.web.app. The job uses the `production` environment,
+  but GitHub creates it with no protection rules. To make it a real gate, add
+  a deployment-branch rule for `main` (and a reviewer if wanted) and move the
+  live credential into it as an environment secret.
 
-They need the `FIREBASE_SERVICE_ACCOUNT_BROOKIE_BABIES` repository secret.
+Deploys only run when the checks pass. They need the
+`FIREBASE_SERVICE_ACCOUNT_BROOKIE_BABIES` repository secret, which preview
+and live deploys currently share.
 
-> Note: the workflows currently run `npm ci` without a `package.json` and never
-> build the Flutter app, so they need updating before CI deploys will work. Until
-> then, deploy manually with `flutter build web` and `firebase deploy --only hosting`.
+CI stays red at the Stripe key check until the hard-coded key is removed from
+`lib/main.dart`.
+
+`firebase.json` serves `build/web` as a static site and sends app routes to
+`index.html`. To deploy by hand, run `flutter build web --release`, then
+`firebase deploy --only hosting`.

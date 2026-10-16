@@ -10,7 +10,7 @@ session package (Basic / Premium / Ultimate), pick a date and session time, and
 are sent to a Stripe Payment Link to pay.
 
 - Firebase project: `brookie-babies` (see `.firebaserc`)
-- Hosting: Firebase Hosting (web frameworks backend, region `us-west1`)
+- Hosting: Firebase Hosting, serving the static `build/web` output
 - Stage: early MVP. Much of the content is placeholder (see "Known gaps").
 
 Although the `android/`, `ios/`, `macos/`, `linux/` and `windows/` folders exist
@@ -60,10 +60,10 @@ lib/
                           plus sample `kEvents` data copied from table_calendar's example (unused)
 assets/logo.png           Only declared asset (pubspec.yaml)
 web/                      index.html, manifest, icons
-test/widget_test.dart     Stale default counter test (see Known gaps)
-firebase.json             Hosting config + FlutterFire platform metadata
+test/widget_test.dart     Smoke test: pumps Packages and checks the three pricing cards
+firebase.json             Hosting config (public build/web, SPA rewrite) + FlutterFire platform metadata
 cors.json                 CORS rule for the Storage bucket (GET from any origin)
-.github/workflows/        Firebase Hosting deploy on PR (preview) and on push to main (live)
+.github/workflows/ci.yml  CI: analyze, test, build web; deploy preview on PR, live on push to main
 ```
 
 ## User flow
@@ -85,10 +85,16 @@ does not use them (`/schedule` passes an empty package name, which falls through
 flutter pub get                 # install deps
 flutter run -d chrome           # run locally (web)
 flutter analyze                 # lints
-flutter test                    # tests (currently fails, see below)
+flutter test                    # tests (Dart VM)
 flutter build web               # production build -> build/web
-firebase deploy --only hosting  # manual deploy (requires firebase CLI + access)
+firebase deploy --only hosting  # manual deploy: run flutter build web first (build/web is what gets deployed)
 ```
+
+CI (`.github/workflows/ci.yml`) runs `flutter pub get --enforce-lockfile`,
+`flutter analyze --no-fatal-infos`, `flutter test` and
+`flutter build web --release` on Flutter 3.24.3, then fails if `build/web`
+contains a Stripe secret key. If those pass, it deploys a preview channel for
+pull requests and the live site for pushes to `main`.
 
 Storage CORS (needed for the carousel images to load in the browser):
 
@@ -114,12 +120,15 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   must never ship in client code. It should be revoked in the Stripe dashboard,
   removed from the source (and ideally git history), and replaced by a
   server-created PaymentIntent `client_secret` (e.g. from a Cloud Function).
-  Never add new secrets to this repo.
-- **CI deploys are broken as written**: both workflows run `npm ci` but there is
-  no `package.json`, and they never install Flutter or run `flutter build web`.
+  Never add new secrets to this repo. CI's Stripe key check fails every run
+  until this key is removed.
 - `build/` is committed to git (Flutter build output). It should be in `.gitignore`.
-- `test/widget_test.dart` is the default counter test and fails; it also
-  calls `MyApp()` without initializing Firebase.
+  CI deletes it before building.
+- Lint infos are not fatal in CI yet; analyzer warnings and errors are.
+- Tests run on the Dart VM, so they must not import `main.dart` or
+  `checkout_page.dart`, which pull in web-only libraries. `HomePage` also needs
+  Firebase (the carousel calls Firebase Storage). The only test is a smoke test
+  of `Packages`.
 - Placeholder content: lorem ipsum in `text_section.dart`; all three packages share
   the same bullets; session times, address and description in `session_card.dart`
   are hard-coded; footer social buttons only `print`; copyright says

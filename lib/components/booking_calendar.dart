@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/utils.dart';
 import 'package:brookie_babies/widgets/focus_ring.dart';
@@ -8,7 +10,7 @@ import 'package:table_calendar/table_calendar.dart';
 /// shape of the logo's disc.
 ///
 /// [TableCalendar] dressed in the design system: month view only, weeks start
-/// on Sunday, days outside the month left blank.
+/// on Sunday, days outside the month left blank, days with openings dotted.
 class BookingCalendar extends StatefulWidget {
   const BookingCalendar({
     super.key,
@@ -18,6 +20,7 @@ class BookingCalendar extends StatefulWidget {
     required this.selectedDay,
     required this.onDaySelected,
     this.isOpen,
+    this.edgeToEdge = false,
   });
 
   /// The bookable range. Days outside it can't be chosen.
@@ -34,8 +37,17 @@ class BookingCalendar extends StatefulWidget {
   /// past days.
   final bool Function(DateTime day)? isOpen;
 
+  /// Whether the calendar spans the window from edge to edge, as a band with
+  /// hairlines above and below instead of a card. For windows too narrow to
+  /// fit a card of [minCardWidth] inside the page gutter.
+  final bool edgeToEdge;
+
   /// The card's widest; the days stay [BrookieSize.day] apart or more.
   static const maxWidth = 400.0;
+
+  /// The narrowest card that still fits seven full-size days with room for
+  /// their focus rings. Narrower than this, lay the calendar [edgeToEdge].
+  static const minCardWidth = 7 * BrookieSize.day + 2 * BrookieSpace.s2 + 2;
 
   @override
   State<BookingCalendar> createState() => _BookingCalendarState();
@@ -44,11 +56,21 @@ class BookingCalendar extends StatefulWidget {
 class _BookingCalendarState extends State<BookingCalendar> {
   late DateTime _focusedDay = _clamp(widget.selectedDay ?? widget.firstDay);
 
+  final _previousMonth = FocusNode(debugLabel: 'Previous month');
+  final _nextMonth = FocusNode(debugLabel: 'Next month');
+
   DateTime get _first => _date(widget.firstDay);
   DateTime get _last => _date(widget.lastDay);
 
   // TableCalendar hands out days as UTC midnights; compare in the same terms.
   static DateTime _date(DateTime day) => DateTime.utc(day.year, day.month, day.day);
+
+  @override
+  void dispose() {
+    _previousMonth.dispose();
+    _nextMonth.dispose();
+    super.dispose();
+  }
 
   DateTime _clamp(DateTime day) {
     final date = _date(day);
@@ -66,7 +88,19 @@ class _BookingCalendarState extends State<BookingCalendar> {
   bool _isLastMonth(DateTime month) => month.year == _last.year && month.month == _last.month;
 
   void _showMonth(int offset) {
-    setState(() => _focusedDay = _clamp(DateTime.utc(_focusedDay.year, _focusedDay.month + offset)));
+    final month = _clamp(DateTime.utc(_focusedDay.year, _focusedDay.month + offset));
+    // At the window's edge the button just pressed switches off, and keyboard
+    // focus would fall back to the top bar. Hand it to the other month button
+    // instead, once the rebuild has switched that one on.
+    final pressed = offset > 0 ? _nextMonth : _previousMonth;
+    final other = offset > 0 ? _previousMonth : _nextMonth;
+    final atEdge = offset > 0 ? _isLastMonth(month) : _isFirstMonth(month);
+    if (atEdge && pressed.hasFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && other.canRequestFocus) other.requestFocus();
+      });
+    }
+    setState(() => _focusedDay = month);
   }
 
   void _select(DateTime day) {
@@ -79,31 +113,62 @@ class _BookingCalendarState extends State<BookingCalendar> {
     final c = BrookieColors.of(context);
     final still = MediaQuery.disableAnimationsOf(context);
     final weekday = BrookieType.small.copyWith(color: c.inkSoft);
+    // The weekday row grows with the text so its letters keep their room.
+    final weekdayHeight = math.max(
+      28.0,
+      MediaQuery.textScalerOf(context).scale(weekday.fontSize!) * weekday.height! + BrookieSpace.s2,
+    );
+
+    final edgeToEdge = widget.edgeToEdge;
+    final decoration = edgeToEdge
+        ? BoxDecoration(
+            color: c.surface,
+            border: Border.symmetric(horizontal: BorderSide(color: c.line)),
+          )
+        : BoxDecoration(
+            color: c.surface,
+            border: Border.all(color: c.line),
+            borderRadius: BorderRadius.circular(BrookieRadius.md),
+          );
 
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: BookingCalendar.maxWidth),
+      constraints: BoxConstraints(maxWidth: edgeToEdge ? double.infinity : BookingCalendar.maxWidth),
       child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: c.surface,
-          border: Border.all(color: c.line),
-          borderRadius: BorderRadius.circular(BrookieRadius.md),
-        ),
+        decoration: decoration,
         child: LayoutBuilder(builder: (context, constraints) {
-          // On the narrowest phones, trade card padding for full-size days.
-          final roomy = constraints.maxWidth >= 7 * BrookieSize.day + 2 * BrookieSpace.s4 + 2;
-          final side = roomy ? BrookieSpace.s4 : BrookieSpace.s2;
-          return Padding(
-            padding: EdgeInsets.fromLTRB(side, BrookieSpace.s3, side, BrookieSpace.s3),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _MonthHeader(
+          final width = constraints.maxWidth;
+          final double side;
+          if (edgeToEdge) {
+            // Seven full-size days across the window, the rest split evenly.
+            side = ((width - 7 * BrookieSize.day) / 2).clamp(BrookieSpace.s1, BrookieSpace.s4);
+          } else {
+            // On narrow phones, trade card padding for full-size days.
+            final roomy = width >= 7 * BrookieSize.day + 2 * BrookieSpace.s4 + 2;
+            side = roomy ? BrookieSpace.s4 : BrookieSpace.s2;
+          }
+          // The month and the legend line up with the page in a band, and with
+          // the days in a card.
+          final chrome = edgeToEdge ? BrookieSpace.s4 : side;
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(chrome, BrookieSpace.s3, chrome, 0),
+                child: _MonthHeader(
                   month: _focusedDay,
+                  previousFocusNode: _previousMonth,
+                  nextFocusNode: _nextMonth,
                   onPrevious: _isFirstMonth(_focusedDay) ? null : () => _showMonth(-1),
                   onNext: _isLastMonth(_focusedDay) ? null : () => _showMonth(1),
                 ),
-                const SizedBox(height: BrookieSpace.s2),
-                TableCalendar<void>(
+              ),
+              const SizedBox(height: BrookieSpace.s2),
+              // Its own group, so Tab reads the days a week at a time instead
+              // of sorting them in with the session times beside the calendar.
+              FocusTraversalGroup(
+                child: TableCalendar<void>(
                   firstDay: _first,
                   lastDay: _last,
                   focusedDay: _focusedDay,
@@ -116,7 +181,7 @@ class _BookingCalendarState extends State<BookingCalendar> {
                   availableGestures: AvailableGestures.horizontalSwipe,
                   startingDayOfWeek: StartingDayOfWeek.sunday,
                   rowHeight: BrookieSize.day + BrookieSpace.s1,
-                  daysOfWeekHeight: 28,
+                  daysOfWeekHeight: weekdayHeight,
                   pageAnimationEnabled: !still,
                   pageAnimationDuration: kBrookieFadeDuration,
                   formatAnimationDuration: still ? Duration.zero : kBrookieFadeDuration,
@@ -128,7 +193,14 @@ class _BookingCalendarState extends State<BookingCalendar> {
                   // Past and closed days get their semantics too, so a screen
                   // reader hears them as unavailable rather than skipping them.
                   loadEventsForDisabledDays: true,
-                  calendarStyle: const CalendarStyle(outsideDaysVisible: false, cellMargin: EdgeInsets.zero),
+                  calendarStyle: CalendarStyle(
+                    outsideDaysVisible: false,
+                    cellMargin: EdgeInsets.zero,
+                    // The month pages clip at their edges. The padding sits
+                    // inside them, so the chosen day's ring and the focus ring
+                    // on the outer columns and the last week stay whole.
+                    tablePadding: EdgeInsets.fromLTRB(side, 0, side, BrookieSpace.s3),
+                  ),
                   daysOfWeekStyle: DaysOfWeekStyle(
                     dowTextFormatter: (day, locale) => weekdayInitial(day),
                     weekdayStyle: weekday,
@@ -150,8 +222,12 @@ class _BookingCalendarState extends State<BookingCalendar> {
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+              Padding(
+                padding: EdgeInsets.fromLTRB(chrome, 0, chrome, BrookieSpace.s4),
+                child: const _Legend(),
+              ),
+            ],
           );
         }),
       ),
@@ -161,27 +237,30 @@ class _BookingCalendarState extends State<BookingCalendar> {
 
 /// "October 2026" between the previous and next month buttons.
 class _MonthHeader extends StatelessWidget {
-  const _MonthHeader({required this.month, required this.onPrevious, required this.onNext});
+  const _MonthHeader({
+    required this.month,
+    required this.previousFocusNode,
+    required this.nextFocusNode,
+    required this.onPrevious,
+    required this.onNext,
+  });
 
   final DateTime month;
+  final FocusNode previousFocusNode;
+  final FocusNode nextFocusNode;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
 
   @override
   Widget build(BuildContext context) {
-    final c = BrookieColors.of(context);
-    // The theme's icon buttons stay ink when disabled; past the booking
-    // window they step back to ink-soft.
-    final style = ButtonStyle(
-      foregroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.disabled) ? c.inkSoft : c.ink),
-    );
+    // Past the booking window the buttons switch off and step back to
+    // ink-soft (the theme's disabled icon button).
     return Row(
       children: [
         IconButton(
           onPressed: onPrevious,
+          focusNode: previousFocusNode,
           tooltip: 'Previous month',
-          style: style,
           icon: const Icon(Icons.chevron_left),
         ),
         Expanded(
@@ -196,8 +275,8 @@ class _MonthHeader extends StatelessWidget {
         ),
         IconButton(
           onPressed: onNext,
+          focusNode: nextFocusNode,
           tooltip: 'Next month',
-          style: style,
           icon: const Icon(Icons.chevron_right),
         ),
       ],
@@ -205,8 +284,44 @@ class _MonthHeader extends StatelessWidget {
   }
 }
 
-/// One day: a 44px disc. Ink numerals for days with openings, ink-soft for the
-/// rest, a fine ring for today, and butter with an ink ring when chosen.
+/// The 4px dot that marks a day with openings.
+class _OpeningsDot extends StatelessWidget {
+  const _OpeningsDot({required this.color});
+
+  final Color color;
+
+  static const size = 4.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: size,
+      child: DecoratedBox(decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+    );
+  }
+}
+
+/// Explains the dot under the days: "Openings that day".
+class _Legend extends StatelessWidget {
+  const _Legend();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = BrookieColors.of(context);
+    final style = BrookieType.small.copyWith(color: c.inkSoft);
+    return Row(
+      children: [
+        _OpeningsDot(color: c.ink),
+        const SizedBox(width: BrookieSpace.s2),
+        Flexible(child: Text('Openings that day', style: style)),
+      ],
+    );
+  }
+}
+
+/// One day: a 44px disc. Ink numerals with a dot beneath for days with
+/// openings, ink-soft for the rest, a fine ring for today, and butter with an
+/// ink ring when chosen.
 class _DayDisc extends StatefulWidget {
   const _DayDisc({
     required this.day,
@@ -229,6 +344,14 @@ class _DayDisc extends StatefulWidget {
 class _DayDiscState extends State<_DayDisc> {
   bool _hovered = false;
   bool _focused = false;
+
+  /// The most room a numeral gets, centered in the disc: its line box at 1.5
+  /// times the label size. Jost's figures sit in the middle of the line box,
+  /// so even at that size they end clear of the openings dot.
+  static const _numeralBox = Size(BrookieSize.day - 2 * BrookieSpace.s1, 30);
+
+  /// The openings dot sits this far above the disc's bottom edge.
+  static const _dotInset = 6.0;
 
   @override
   Widget build(BuildContext context) {
@@ -273,22 +396,41 @@ class _DayDiscState extends State<_DayDisc> {
             duration: selected || MediaQuery.disableAnimationsOf(context) ? Duration.zero : kBrookieStateDuration,
             width: BrookieSize.day,
             height: BrookieSize.day,
-            alignment: Alignment.center,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: fill,
-              border: Border.all(color: widget.today && !selected ? c.lineStrong : Colors.transparent),
               // Butter is nearly invisible on paper, so the chosen day also
               // gets a 1.5px ink ring.
               boxShadow: selected ? [BoxShadow(color: c.ink, spreadRadius: 1.5)] : null,
             ),
-            child: Text(
-              '${widget.day.day}',
-              // Unavailable days are set lighter as well as softer.
-              style: BrookieType.label.copyWith(
-                color: numeral,
-                fontWeight: bookable || selected ? null : FontWeight.w400,
-              ),
+            // Today's ring is painted over the disc rather than set as its
+            // border, which would pad the numeral and the dot inward.
+            foregroundDecoration: widget.today && !selected
+                ? BoxDecoration(shape: BoxShape.circle, border: Border.all(color: c.lineStrong))
+                : null,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Large text grows to 1.5 times, then shrinks to fit rather
+                // than wrapping or running into the dot.
+                SizedBox.fromSize(
+                  size: _numeralBox,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '${widget.day.day}',
+                      maxLines: 1,
+                      softWrap: false,
+                      // Unavailable days are set lighter as well as softer.
+                      style: BrookieType.label.copyWith(
+                        color: numeral,
+                        fontWeight: bookable || selected ? null : FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                ),
+                if (bookable) Positioned(bottom: _dotInset, child: _OpeningsDot(color: numeral)),
+              ],
             ),
           ),
         ),

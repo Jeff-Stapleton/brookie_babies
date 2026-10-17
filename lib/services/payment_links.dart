@@ -1,4 +1,7 @@
-/// Stripe Payment Links, keyed by package title.
+import 'package:brookie_babies/models/session_package.dart';
+
+/// Stripe Payment Links, keyed by [SessionPackage.name]: one for every
+/// package in [SessionPackage.all].
 ///
 /// Interim: these will be replaced by Stripe Checkout Sessions created by a
 /// Cloud Function, which takes the user from their verified sign-in rather

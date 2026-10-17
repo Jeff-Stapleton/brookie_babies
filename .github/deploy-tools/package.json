@@ -1,0 +1,8 @@
+{
+  "name": "brookie-babies-deploy-tools",
+  "description": "Firebase CLI for the deploy-backend CI job, pinned with its whole dependency tree by package-lock.json",
+  "private": true,
+  "dependencies": {
+    "firebase-tools": "15.34.0"
+  }
+}

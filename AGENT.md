@@ -85,7 +85,11 @@ firestore.rules           Customers can read only their own bookings; no client 
 storage.rules             Only _admin/gallery/ (carousel) is readable; everything else denied
 firebase.json             Hosting config (public build/web, SPA rewrite), functions, rules, FlutterFire metadata
 cors.json                 CORS rule for the Storage bucket (GET from any origin)
-.github/workflows/ci.yml  CI: analyze, test, build web; deploy preview on PR, live on push to main
+scripts/
+  setup-gcp-deployer.sh   One-time (owner): keyless CI deploys: WIF pool/provider, github-deployer SA + roles
+  setup-github-production.sh  One-time (owner): restrict the `production` environment to main
+.github/deploy-tools/     Pinned Firebase CLI (package.json + package-lock.json) for the deploy-backend job
+.github/workflows/ci.yml  CI: analyze, test, build; preview on PR; on main: deploy backend, then live site
 ```
 
 ## User flow
@@ -133,7 +137,7 @@ firebase deploy --only hosting  # manual deploy: run flutter build web first (bu
 # Cloud Functions (Node 24; on this Mac it's Homebrew's keg-only node@24)
 npm ci --prefix functions       # install deps from package-lock.json
 npm test --prefix functions     # tsc build + node:test unit tests
-firebase deploy --only functions,firestore:rules,storage   # backend deploy, by hand (README)
+firebase deploy --only functions,firestore:rules,storage   # backend deploy by hand; CI does it on pushes to main
 ```
 
 CI (`.github/workflows/ci.yml`) runs `flutter pub get --enforce-lockfile`,
@@ -142,8 +146,13 @@ CI (`.github/workflows/ci.yml`) runs `flutter pub get --enforce-lockfile`,
 or `build/web` contains a Stripe secret key, webhook secret or private key. If
 those pass, it deploys a preview channel for
 pull requests and the live site for pushes to `main`. A separate `functions`
-job runs `npm ci`, `npm run build` and `npm test` in `functions/`. CI never
-deploys functions or rules; the hosting deploys use `--only hosting`.
+job runs `npm ci`, `npm run build` and `npm test` in `functions/`. On pushes
+to `main`, `deploy-backend` deploys the functions and rules (keyless, through
+Workload Identity Federation as `github-deployer`; a dry run until the
+repository variable `BACKEND_DEPLOY_LIVE` is `true`), then `deploy-live`
+deploys Hosting. The Hosting deploys use `--only hosting`. One-time setup:
+`scripts/setup-gcp-deployer.sh` and `scripts/setup-github-production.sh`
+(README, "Automatic backend deploys").
 
 Storage CORS (needed for the carousel images to load in the browser):
 
@@ -207,6 +216,14 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
 - Rules aren't filters: the bookings query must be
   `where('uid', isEqualTo: uid)` or Firestore rejects it. Sort on the client;
   an `orderBy` would need a composite index (there's no `firestore.indexes.json`).
+- CI deploys the backend as `github-deployer`, which deliberately has no
+  direct permission to turn on APIs, read secret values or change IAM. The
+  code and rules it deploys can still reach all data, so push access to `main`
+  is the real boundary. Before merging a function that adds a secret, a
+  non-secret param (needs a committed `functions/.env`), a new trigger type, a
+  custom `serviceAccount` or a new API, prepare the project (README, "Before
+  merging something new"), or the `deploy-backend` job fails. Once
+  `BACKEND_DEPLOY_LIVE` is `true`, that failure also holds back the live site.
 - `getGalleryDownloadUrl` signs URLs through the IAM signBlob API, which needs
   Service Account Token Creator on the functions' runtime service account
   (README, "Deploying the backend").

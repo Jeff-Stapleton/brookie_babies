@@ -1,17 +1,14 @@
 # TODO
 
-Open items for sign-in, bookings and photo downloads. Last updated 2026-10-17.
+Open items for sign-in, bookings and photo downloads. Last updated 2026-10-17 (after PR #7).
 
-## 1. Test photo downloads, then merge PR #7
+## 1. Test photo downloads
 
-The backend is deployed: the `getGalleryDownloadUrl` function, the Firestore
-and Storage rules, and the signing permission. What's left is one real
-download.
+PR #7 is merged and the backend is deployed: the `getGalleryDownloadUrl`
+function, the Firestore and Storage rules, and the signing permission. What's
+left is one real download, on the live site: https://brookie-babies.web.app
 
-Preview: https://brookie-babies--pr7-feat-profile-page-zycqsulq.web.app
-(preview links expire 7 days after the last push to the PR).
-
-- [ ] **Sign in** on the preview with your Google account.
+- [ ] **Sign in** on the site with your Google account.
 - [ ] **Copy your user ID:** Firebase console → Authentication → Users →
       your account's **User UID**.
 - [ ] **Create a test booking:** Firestore Database → Start collection
@@ -27,12 +24,11 @@ Preview: https://brookie-babies--pr7-feat-profile-page-zycqsulq.web.app
       Copy the generated document ID.
 - [ ] **Upload photos:** Storage → folder `galleries` → folder named exactly
       that document ID → upload 2 or 3 photos.
-- [ ] **Download:** on the preview, open the avatar menu → **My sessions**.
+- [ ] **Download:** open the avatar menu → **My sessions**.
       The booking shows under **Past**. Click **Download all photos**: you
       should see "Preparing your photos…", then a zip downloads.
 - [ ] **Privacy check:** sign in with a second Google account; it should
       show no sessions.
-- [ ] **Merge PR #7** once the download works.
 - [ ] Optional: delete the test booking and its `galleries/` folder.
 
 If the download fails, note the message shown on the page. The function's
@@ -69,6 +65,21 @@ Functions → getGalleryDownloadUrl → Logs.
   - the **Price IDs** for Basic, Premium and Ultimate
   - the **real session schedule**: days, start times, session length,
     address and timezone
-- [ ] Optional: **deploy functions and rules from CI** on merges to `main`.
-      Pick keyless GitHub-to-Google sign-in (Workload Identity Federation,
-      recommended) or a deploy-only service account key.
+- [ ] **Turn on automatic backend deploys** (README, "Automatic backend
+      deploys"):
+  1. `brew install --cask gcloud-cli`, then `gcloud auth login`.
+  2. From the repo root: `bash scripts/setup-gcp-deployer.sh`.
+  3. `bash scripts/setup-github-production.sh` (while nothing is merging).
+  4. Wait about 5 minutes, then merge the CI pull request. Its push to `main`
+     runs **Deploy functions and rules** as a dry run. Check that it's green.
+  5. `gh variable set BACKEND_DEPLOY_LIVE --body true`, then watch the next
+     run (the first real deploy).
+- [ ] **Hardening (optional, after the above):**
+  - Move the Hosting deploy key `FIREBASE_SERVICE_ACCOUNT_BROOKIE_BABIES` into
+    a `production` environment secret (any branch can read it today), or
+    switch Hosting deploys to keyless sign-in too.
+  - Give the functions a dedicated runtime service account with only what
+    they need (Firestore, the Storage bucket, signing their own links)
+    instead of the default compute account. This is worth doing if the setup
+    script warns that the compute account has Editor.
+  - Add a branch ruleset on `main` that blocks force-pushes and deletion.

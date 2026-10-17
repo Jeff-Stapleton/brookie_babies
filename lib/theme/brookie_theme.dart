@@ -214,6 +214,10 @@ abstract final class BrookieType {
   /// One per page at most, on paper. Never near the logo.
   static final display = _style(_sans, 64, 68, FontWeight.w300, letterSpacingEm: -0.015);
 
+  /// [display] on phones (below [BrookieBreakpoint.gutter]), where 64px would
+  /// fill the first screen after the hero.
+  static final displayCompact = _style(_sans, 44, 48, FontWeight.w300, letterSpacingEm: -0.015);
+
   /// Page titles.
   static final headline = _style(_sans, 40, 46, FontWeight.w300, letterSpacingEm: -0.01);
 
@@ -305,7 +309,8 @@ abstract final class BrookieBreakpoint {
   /// Gutters widen from [BrookieSpace.s4] to [BrookieSpace.s5].
   static const double gutter = 600;
 
-  /// Package cards sit side by side.
+  /// From here package cards may sit side by side, once all three fit their
+  /// longest button label on one line (Packages measures it; about 830px).
   static const double packages = 720;
 
   /// Sections space out to [BrookieSpace.s8]; the calendar and its session
@@ -381,7 +386,7 @@ ThemeData brookieTheme(Brightness brightness) {
   const controlPadding = EdgeInsets.symmetric(horizontal: BrookieSpace.s5);
 
   // Focus: a solid 2px ring outside the control. Never removed.
-  BorderSide focusRing() => BorderSide(color: c.focus, width: 2, strokeAlign: BorderSide.strokeAlignOutside);
+  BorderSide focusRing() => brookieFocusSide(c.focus);
 
   return ThemeData(
     useMaterial3: true,
@@ -513,8 +518,9 @@ ThemeData brookieTheme(Brightness brightness) {
     ),
     popupMenuTheme: PopupMenuThemeData(
       color: c.surface,
-      elevation: 8,
-      shadowColor: Colors.black.withValues(alpha: brightness == Brightness.dark ? 0.6 : 0.18),
+      // Edges come from hairlines; only photographs and dialogs cast shadows.
+      elevation: 0,
+      shadowColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(BrookieRadius.md),
@@ -558,13 +564,24 @@ ThemeData brookieTheme(Brightness brightness) {
     dividerTheme: DividerThemeData(color: c.line, thickness: 1, space: 1),
     textSelectionTheme: TextSelectionThemeData(
       cursorColor: c.ink,
-      selectionColor: c.butter.withValues(alpha: 0.7),
+      // Light ink on full butter is 1.4:1 in Darkroom; a thinner wash keeps
+      // selected text readable (about 7:1).
+      selectionColor: c.butter.withValues(alpha: brightness == Brightness.dark ? 0.3 : 0.7),
     ),
     pageTransitionsTheme: PageTransitionsTheme(builders: {
       for (final platform in TargetPlatform.values) platform: const _FadePageTransitionsBuilder(),
     }),
   );
 }
+
+/// The keyboard focus ring as a button side: a 2px gap, then a solid 2px ring.
+///
+/// strokeAlign 3 centers the 2px stroke 3px outside the control's edge, so it
+/// covers 2–4px out. Pass [BrookieColors.onButter] on a butter fill. On a
+/// photograph use [FocusRing.onPhoto] instead (lib/widgets/focus_ring.dart).
+/// In a widget-level ButtonStyle, return [BorderSide.none] rather than null
+/// for "no ring": null falls back to the theme's ring.
+BorderSide brookieFocusSide(Color color) => BorderSide(color: color, width: 2, strokeAlign: 3);
 
 /// The button style for the one action on a photograph, such as the hero's
 /// "Book a session": butter, like the logo's disc. Never on paper.
@@ -589,6 +606,8 @@ ButtonStyle onPhotoButtonStyle(BuildContext context) {
 class _FadePageTransitionsBuilder extends PageTransitionsBuilder {
   const _FadePageTransitionsBuilder();
 
+  static final _fade = CurveTween(curve: Curves.easeOut);
+
   @override
   Duration get transitionDuration => kBrookieFadeDuration;
 
@@ -604,6 +623,8 @@ class _FadePageTransitionsBuilder extends PageTransitionsBuilder {
     Widget child,
   ) {
     if (MediaQuery.disableAnimationsOf(context)) return child;
-    return FadeTransition(opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut), child: child);
+    // drive() rather than a CurvedAnimation, which this method (run every
+    // frame of a transition) would create, and leak, each time.
+    return FadeTransition(opacity: animation.drive(_fade), child: child);
   }
 }

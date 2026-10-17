@@ -10,11 +10,15 @@ import 'package:flutter/material.dart';
 /// signed out; when signed in, a butter avatar that opens the account menu
 /// ("Your sessions", "Sign out").
 class AccountButton extends StatelessWidget {
-  const AccountButton({super.key, this.onPhoto = false});
+  const AccountButton({super.key, this.onPhoto = false, this.showSessionsLink = true});
 
   /// Whether the button sits on a photograph (the home page's hero) rather
   /// than on paper.
   final bool onPhoto;
+
+  /// Whether the account menu links to "Your sessions". False on that page
+  /// itself, so the menu doesn't open a second copy of it.
+  final bool showSessionsLink;
 
   @override
   Widget build(BuildContext context) {

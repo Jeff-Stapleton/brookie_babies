@@ -70,7 +70,7 @@ class _SchedulingPageState extends State<SchedulingPage> {
       return;
     }
     final services = AppServices.of(context);
-    final user = services.auth.currentUser ?? await showSignInDialog(context);
+    final user = services.auth.currentUser ?? await showSignInDialog(context, toBook: true);
     if (user == null || !mounted) return;
 
     final uri = paymentLinkUri(widget.packageName, uid: user.uid, email: user.email)!;

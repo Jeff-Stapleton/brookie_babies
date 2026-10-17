@@ -40,6 +40,12 @@ class SessionTime {
         : '${_clock(start)} $startPeriod–${_clock(end)} $endPeriod';
   }
 
+  /// A single time of day as the site writes it: "9:00 am", "2:30 pm".
+  static String clockLabel(int hour, int minute) {
+    final minutes = hour * 60 + minute;
+    return '${_clock(minutes)} ${_period(minutes)}';
+  }
+
   static String _clock(int minutes) {
     final hour = minutes ~/ 60 % 12;
     return '${hour == 0 ? 12 : hour}:${(minutes % 60).toString().padLeft(2, '0')}';

@@ -9,19 +9,23 @@ import 'package:flutter/services.dart';
 
 /// Asks the visitor to sign in with Google. Completes with the signed-in user,
 /// or null if they dismiss the dialog.
-Future<AppUser?> showSignInDialog(BuildContext context) {
+Future<AppUser?> showSignInDialog(BuildContext context, {bool toBook = false}) {
   _KeyboardInput.listen();
   return showDialog<AppUser>(
     context: context,
     animationStyle: MediaQuery.disableAnimationsOf(context)
         ? AnimationStyle.noAnimation
         : const AnimationStyle(duration: kBrookieFadeDuration, reverseDuration: kBrookieFadeDuration),
-    builder: (context) => const SignInDialog(),
+    builder: (context) => SignInDialog(toBook: toBook),
   );
 }
 
 class SignInDialog extends StatefulWidget {
-  const SignInDialog({super.key});
+  const SignInDialog({super.key, this.toBook = false});
+
+  /// Whether the family is signing in to book a session (from the booking
+  /// page) rather than to see their sessions and photos.
+  final bool toBook;
 
   @override
   State<SignInDialog> createState() => _SignInDialogState();

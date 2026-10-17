@@ -15,6 +15,16 @@ import 'package:flutter/rendering.dart';
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
+  /// Goes back to the home page and scrolls to the packages, as "See
+  /// packages" on the other pages promises. The home page is always the first
+  /// route, deep links included.
+  static void showPackages(BuildContext context) {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    _packagesRequests.value++;
+  }
+
+  static final _packagesRequests = ValueNotifier<int>(0);
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -31,12 +41,21 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadPhotos();
+    HomePage._packagesRequests.addListener(_onPackagesRequested);
   }
 
   @override
   void dispose() {
+    HomePage._packagesRequests.removeListener(_onPackagesRequested);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onPackagesRequested() {
+    // After the pop has rebuilt this page.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollToPackages();
+    });
   }
 
   Future<void> _loadPhotos() async {

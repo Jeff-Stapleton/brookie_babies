@@ -62,7 +62,7 @@ class FunctionsGalleryService implements GalleryService {
 }
 
 const kGalleryErrorFallback =
-    "We couldn't get your photos ready just now. Large galleries can take a "
+    'We couldn’t get your photos ready just now. Large galleries can take a '
     'few minutes, so please try again shortly.';
 
 /// The message to show for a `getGalleryDownloadUrl` error [code]. The
@@ -71,11 +71,11 @@ const kGalleryErrorFallback =
 String galleryErrorMessage(String code, String? message) {
   switch (code) {
     case 'failed-precondition':
-      return message ?? "Your photos aren't ready yet.";
+      return message ?? 'Your photos aren’t ready yet.';
     case 'not-found':
-      return "We couldn't find this session.";
+      return 'We couldn’t find this session’s photos. Refresh the page to try again.';
     case 'unauthenticated':
-      return 'Please sign in again.';
+      return 'Your sign-in has expired. Sign out, sign in again, then download your photos.';
     default:
       // Includes timeouts and dropped connections while a large zip is being
       // built; the build keeps going on the server and is cached, so a retry

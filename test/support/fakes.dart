@@ -6,6 +6,8 @@ import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/auth_service.dart';
 import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
+import 'package:brookie_babies/services/portfolio_service.dart';
+import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:flutter/material.dart';
 
 const testUser = AppUser(uid: 'uid123', email: 'parent@example.com', displayName: 'Pat Parent');
@@ -90,6 +92,26 @@ class FakeGalleryService implements GalleryService {
   void fail(Object error) => _pending!.completeError(error);
 }
 
+/// [PortfolioService] that returns fixed [photos] (the first `limit` of
+/// them), or throws [error].
+class FakePortfolioService implements PortfolioService {
+  FakePortfolioService([this.photos = const []]);
+
+  final List<Uri> photos;
+  Object? error;
+
+  /// The `limit` of the last [photoUrls] call.
+  int? requestedLimit;
+
+  @override
+  Future<List<Uri>> photoUrls({int? limit}) async {
+    requestedLimit = limit;
+    final error = this.error;
+    if (error != null) throw error;
+    return limit == null ? photos : photos.take(limit).toList();
+  }
+}
+
 /// Records the URLs the app opens instead of launching them.
 class FakeUrlOpener {
   final opened = <({Uri url, String? windowName})>[];
@@ -105,16 +127,19 @@ Widget testApp({
   required AuthService auth,
   BookingService? bookings,
   GalleryService? gallery,
+  PortfolioService? portfolio,
   FakeUrlOpener? urlOpener,
   bool isEmbeddedBrowser = false,
+  Brightness brightness = Brightness.light,
   required Widget home,
 }) {
   return AppServices(
     auth: auth,
     bookings: bookings ?? FakeBookingService(),
     gallery: gallery ?? FakeGalleryService(),
+    portfolio: portfolio ?? FakePortfolioService(),
     openUrl: (urlOpener ?? FakeUrlOpener()).call,
     isEmbeddedBrowser: isEmbeddedBrowser,
-    child: MaterialApp(home: home),
+    child: MaterialApp(theme: brookieTheme(brightness), home: home),
   );
 }

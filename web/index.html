@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
@@ -17,22 +17,72 @@
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <!-- The viewport Flutter installs, set early so the loading screen is sized
+       for phones. flt-viewport marks it as Flutter's own, so debug builds
+       don't warn when the engine swaps in its identical tag. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" flt-viewport>
+  <title>Brooke Stapleton Photography</title>
+  <meta name="description" content="Book a photo session with Brooke Stapleton Photography, then download your edited photos.">
 
-  <!-- iOS meta tags & icons -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="brookie_babies">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <!-- Browser chrome in paper, Print or Darkroom to follow the device. These
+       come before the theme-color tag Flutter appends, so they take priority. -->
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f6f6f3" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141412" media="(prefers-color-scheme: dark)">
 
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
+  <!-- Link previews in messages and social posts. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Brooke Stapleton Photography">
+  <meta property="og:title" content="Brooke Stapleton Photography">
+  <meta property="og:description" content="Book a photo session with Brooke Stapleton Photography, then download your edited photos.">
+  <meta property="og:url" content="https://brookie-babies.web.app/">
+  <meta property="og:image" content="https://brookie-babies.web.app/icons/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Brooke Stapleton Photography logo">
+  <meta name="twitter:card" content="summary_large_image">
 
-  <title>brookie_babies</title>
+  <!-- Icons, and adding the site to a home screen. -->
+  <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="manifest" href="manifest.json">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Brookie Babies">
+
+  <!-- Loading screen: the logo on paper until Flutter paints its first frame. -->
+  <style>
+    :root { --paper: #f6f6f3; }
+    @media (prefers-color-scheme: dark) { :root { --paper: #141412; } }
+    html, body { margin: 0; height: 100%; background: var(--paper); }
+    #splash {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--paper);
+      transition: opacity 200ms ease-out;
+    }
+    #splash.done { opacity: 0; pointer-events: none; }
+    /* The file's transparent margin is uneven; nudge so the disc sits dead centre. */
+    #splash img { width: 240px; height: auto; transform: translate(1.2%, 2.4%); }
+    @media (prefers-reduced-motion: reduce) { #splash { transition: none; } }
+  </style>
 </head>
 <body>
+  <div id="splash">
+    <img src="icons/logo.png" width="551" height="453" alt="Brooke Stapleton Photography">
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var splash = document.getElementById('splash');
+      splash.classList.add('done');
+      setTimeout(function () { splash.remove(); }, 250);
+    }, { once: true });
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

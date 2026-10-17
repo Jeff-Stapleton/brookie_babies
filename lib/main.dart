@@ -6,7 +6,10 @@ import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/auth_service.dart';
 import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
+import 'package:brookie_babies/services/portfolio_service.dart';
+import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/embedded_browser.dart';
+import 'package:brookie_babies/widgets/focus_ring.dart';
 
 import 'package:flutter/material.dart';
 
@@ -14,20 +17,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:web/web.dart' as web;
 
 
 Map<String, Widget Function(BuildContext)> routes = {
   '/schedule': (context) => const SchedulingPage(packageName: '',),
-  // "My sessions", also linkable as https://brookie-babies.web.app/#/profile.
+  // "Your sessions", also linkable as https://brookie-babies.web.app/#/profile.
   '/profile': (context) => const ProfilePage(),
 };
-
-ThemeData theme = ThemeData(
-  colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-  useMaterial3: true,
-);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,6 +38,7 @@ Future<void> main() async {
     bookings: FirestoreBookingService(FirebaseFirestore.instance),
     // The functions are deployed to us-central1 (functions/src/index.ts).
     gallery: FunctionsGalleryService(FirebaseFunctions.instanceFor(region: 'us-central1')),
+    portfolio: StoragePortfolioService(FirebaseStorage.instance),
     isEmbeddedBrowser: isEmbeddedBrowser(web.window.navigator.userAgent),
   ));
 }
@@ -49,12 +49,14 @@ class MyApp extends StatelessWidget {
     required this.auth,
     required this.bookings,
     required this.gallery,
+    required this.portfolio,
     required this.isEmbeddedBrowser,
   });
 
   final AuthService auth;
   final BookingService bookings;
   final GalleryService gallery;
+  final PortfolioService portfolio;
   final bool isEmbeddedBrowser;
 
   // This widget is the root of your application.
@@ -64,13 +66,24 @@ class MyApp extends StatelessWidget {
       auth: auth,
       bookings: bookings,
       gallery: gallery,
+      portfolio: portfolio,
       openUrl: launchUrl,
       isEmbeddedBrowser: isEmbeddedBrowser,
       child: MaterialApp(
-        title: 'Flutter Demo',
+        title: 'Brooke Stapleton Photography',
+        // Paper, for the browser's theme color and the app switcher.
+        color: BrookieColors.light.paper,
         routes: routes,
-        theme: theme,
-        home: HomePage(),
+        // Print by default; Darkroom when the device asks for dark.
+        theme: brookieTheme(Brightness.light),
+        darkTheme: brookieTheme(Brightness.dark),
+        // Tab and the arrow keys scroll the focused control well into view,
+        // so its focus ring is never cut off at the window's edge.
+        builder: (context, child) => FocusTraversalGroup(
+          policy: ReadingOrderTraversalPolicy(requestFocusCallback: requestFocusInView),
+          child: child!,
+        ),
+        home: const HomePage(),
       ),
     );
   }

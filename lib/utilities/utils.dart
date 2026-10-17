@@ -1,44 +1,43 @@
-import 'dart:collection';
+// Dates as the site writes them, and the window families can book in.
+//
+// The site is English only, and package:intl isn't a direct dependency, so
+// the names are spelled out here.
 
-import 'package:table_calendar/table_calendar.dart';
+const _weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-class Event {
-  final String title;
+const _months = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
-  const Event(this.title);
+/// A day in a heading: "Saturday, October 24".
+String formatDayHeading(DateTime date) => '${_weekdays[date.weekday - 1]}, ${_months[date.month - 1]} ${date.day}';
 
-  @override
-  String toString() => title;
+/// A day in a list: "Sat, Oct 24". Given [now], a day in another year gets
+/// its year: "Sat, Dec 13, 2025".
+String formatDayShort(DateTime date, {DateTime? now}) {
+  final day = '${_weekdays[date.weekday - 1].substring(0, 3)}, ${_months[date.month - 1].substring(0, 3)} ${date.day}';
+  return now == null || now.year == date.year ? day : '$day, ${date.year}';
 }
 
-final kEvents = LinkedHashMap<DateTime, List<Event>>(
-  equals: isSameDay,
-  hashCode: getHashCode,
-)..addAll(_kEventSource);
+/// A calendar's month: "October 2026".
+String formatMonth(DateTime date) => '${_months[date.month - 1]} ${date.year}';
 
-final _kEventSource = Map.fromIterable(List.generate(50, (index) => index),
-    key: (item) => DateTime.utc(kFirstDay.year, kFirstDay.month, item * 5),
-    value: (item) => List.generate(
-        item % 4 + 1, (index) => Event('Event $item | ${index + 1}')))
-  ..addAll({
-    kToday: [
-      const Event('Today\'s Event 1'),
-      const Event('Today\'s Event 2'),
-    ],
-  });
+/// A calendar's weekday heading: "S" for Saturday and Sunday alike.
+String weekdayInitial(DateTime date) => _weekdays[date.weekday - 1][0];
 
-int getHashCode(DateTime key) {
-  return key.day * 1000000 + key.month * 10000 + key.year;
-}
+/// The first day families can book: today. Nobody books the past.
+DateTime firstBookableDay(DateTime now) => DateTime(now.year, now.month, now.day);
 
-List<DateTime> daysInRange(DateTime first, DateTime last) {
-  final dayCount = last.difference(first).inDays + 1;
-  return List.generate(
-    dayCount,
-    (index) => DateTime.utc(first.year, first.month, first.day + index),
-  );
-}
-
-final kToday = DateTime.now();
-final kFirstDay = DateTime(kToday.year, kToday.month - 3, kToday.day);
-final kLastDay = DateTime(kToday.year, kToday.month + 3, kToday.day);
+/// The last day families can book, about three months out.
+DateTime lastBookableDay(DateTime now) => DateTime(now.year, now.month + 3, now.day);

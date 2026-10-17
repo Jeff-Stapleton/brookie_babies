@@ -2,9 +2,13 @@ import 'package:brookie_babies/components/sign_in_dialog.dart';
 import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/services/auth_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/widgets/focus_ring.dart';
+import 'package:brookie_babies/widgets/google_sign_in_button.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -117,12 +121,143 @@ void main() {
     expect(Focus.of(tester.element(find.text('Continue with Google'))).hasPrimaryFocus, isTrue);
   });
 
-  testWidgets('"Continue with Google" is the primary button, with no icon', (tester) async {
+  for (final toBook in [false, true]) {
+    testWidgets('the primary action is Google’s own button${toBook ? ' when signing in to book' : ''}',
+        (tester) async {
+      await openDialog(tester, toBook: toBook);
+
+      expect(find.widgetWithText(GoogleSignInButton, 'Continue with Google'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Cancel'), findsOneWidget);
+      // Not the system's ink button, and no Material icon standing in for the G.
+      final surface = tester.widget<Material>(
+          find.descendant(of: find.byType(GoogleSignInButton), matching: find.byType(Material)));
+      expect(surface.color, isNot(BrookieColors.light.ink));
+      expect(find.byIcon(Icons.login), findsNothing);
+      final logo = tester.widget<Image>(find.descendant(of: find.byType(GoogleSignInButton), matching: find.byType(Image)));
+      expect(logo.image, GoogleSignInButton.logo);
+      expect((logo.image as AssetImage).assetName, 'assets/google/g_logo.png');
+    });
+  }
+
+  testWidgets('Google’s button: the G at 20px and Google’s spacing, on a 52px pill like Cancel', (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await openDialog(tester);
 
-    expect(find.widgetWithText(FilledButton, 'Continue with Google'), findsOneWidget);
-    expect(find.widgetWithText(TextButton, 'Cancel'), findsOneWidget);
-    expect(find.byIcon(Icons.login), findsNothing);
+    final button = tester.getRect(find.byType(GoogleSignInButton));
+    final logo = tester.getRect(find.descendant(of: find.byType(GoogleSignInButton), matching: find.byType(Image)));
+    final label = tester.getRect(find.text('Continue with Google'));
+    // As tall as Cancel, so the two sit level when side by side (the test
+    // font is too wide for that here).
+    expect(button.height, BrookieSize.control);
+    expect(tester.getSize(find.widgetWithText(TextButton, 'Cancel')).height, button.height);
+    expect(logo.size, const Size.square(20));
+    expect(logo.left - button.left, moreOrLessEquals(12));
+    expect(label.left - logo.right, moreOrLessEquals(10));
+    expect(button.right - label.right, moreOrLessEquals(12));
+    expect(logo.center.dy, moreOrLessEquals(button.center.dy));
+    final surface = tester.widget<Material>(
+        find.descendant(of: find.byType(GoogleSignInButton), matching: find.byType(Material)));
+    expect(surface.shape, isA<StadiumBorder>());
+  });
+
+  testWidgets('Google’s button: Roboto Medium at 14px, as Google specifies', (tester) async {
+    await openDialog(tester);
+
+    final style = tester.renderObject<RenderParagraph>(find.text('Continue with Google')).text.style!;
+    expect(style.fontFamily, 'Roboto');
+    expect(style.fontWeight, FontWeight.w500);
+    expect(style.fontSize, 14);
+  });
+
+  for (final (brightness, fill, edge, label) in [
+    (Brightness.light, const Color(0xFFFFFFFF), const Color(0xFF747775), const Color(0xFF1F1F1F)),
+    (Brightness.dark, const Color(0xFF131314), const Color(0xFF8E918F), const Color(0xFFE3E3E3)),
+  ]) {
+    testWidgets('Google’s button takes Google’s ${brightness == Brightness.light ? 'light' : 'dark'} scheme in '
+        '${brightness == Brightness.light ? 'Print' : 'Darkroom'}', (tester) async {
+      await openDialog(tester, brightness: brightness);
+
+      final surface = tester.widget<Material>(
+          find.descendant(of: find.byType(GoogleSignInButton), matching: find.byType(Material)));
+      expect(surface.color, fill);
+      expect((surface.shape! as OutlinedBorder).side, BorderSide(color: edge));
+      expect(tester.renderObject<RenderParagraph>(find.text('Continue with Google')).text.style!.color, label);
+      expect(surface.elevation, 0);
+    });
+  }
+
+  testWidgets('Google’s button is one button named "Continue with Google"; the G adds nothing', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await openDialog(tester);
+
+    expect(
+      tester.getSemantics(find.byType(GoogleSignInButton)),
+      isSemantics(
+        label: 'Continue with Google',
+        isButton: true,
+        isEnabled: true,
+        hasEnabledState: true,
+        isFocusable: true,
+        isFocused: true,
+        hasTapAction: true,
+      ),
+    );
+    // The G is part of the button's look, not an image of its own.
+    expect(find.semantics.byPredicate((node) => node.getSemanticsData().flagsCollection.isImage), findsNothing);
+    semantics.dispose();
+  });
+
+  testWidgets('Google’s button: opened by a click, its focus shows no ring', (tester) async {
+    await openDialog(tester);
+
+    expect(Focus.of(tester.element(find.text('Continue with Google'))).hasPrimaryFocus, isTrue);
+    expect(tester.widget<FocusRing>(find.descendant(of: find.byType(GoogleSignInButton), matching: find.byType(FocusRing))).visible,
+        isFalse);
+  });
+
+  testWidgets('Google’s button: keyboard focus keeps Google’s edge and rings it past a gap', (tester) async {
+    await tester.pumpWidget(testApp(auth: auth, home: _Opener(onResult: (_) {})));
+    // Opened from the keyboard.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final google = find.byType(GoogleSignInButton);
+    expect(Focus.of(tester.element(find.text('Continue with Google'))).hasPrimaryFocus, isTrue);
+    final ring = tester.widget<FocusRing>(find.descendant(of: google, matching: find.byType(FocusRing)));
+    expect(ring.visible, isTrue);
+    expect(ring.color, isNull); // the system's focus color
+    final surface = tester.widget<Material>(find.descendant(of: google, matching: find.byType(Material)));
+    expect((surface.shape! as OutlinedBorder).side, const BorderSide(color: Color(0xFF747775)));
+    // The ring paints outside the button, so the button mustn't clip it.
+    expect(surface.clipBehavior, Clip.none);
+
+    // Tab to Cancel and back.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pumpAndSettle();
+    expect(tester.widget<FocusRing>(find.descendant(of: google, matching: find.byType(FocusRing))).visible, isFalse);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pumpAndSettle();
+    expect(tester.widget<FocusRing>(find.descendant(of: google, matching: find.byType(FocusRing))).visible, isTrue);
+  });
+
+  testWidgets('Google’s button: hover lays Google’s 8% state layer over its fill', (tester) async {
+    await openDialog(tester);
+    final hover = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await hover.addPointer(location: tester.getCenter(find.byType(GoogleSignInButton)));
+    addTearDown(hover.removePointer);
+    await tester.pumpAndSettle();
+
+    final surface = tester.widget<Material>(
+        find.descendant(of: find.byType(GoogleSignInButton), matching: find.byType(Material)));
+    expect(surface.color, Color.alphaBlend(const Color(0xFF303030).withValues(alpha: 0.08), const Color(0xFFFFFFFF)));
+    expect(tester.widget<FocusRing>(find.descendant(of: find.byType(GoogleSignInButton), matching: find.byType(FocusRing))).visible,
+        isFalse);
   });
 
   testWidgets('on a narrow phone, the actions stack full width, primary first', (tester) async {
@@ -131,7 +266,7 @@ void main() {
     addTearDown(tester.view.reset);
     await openDialog(tester);
 
-    final primary = tester.getRect(find.widgetWithText(FilledButton, 'Continue with Google'));
+    final primary = tester.getRect(find.byType(GoogleSignInButton));
     final cancel = tester.getRect(find.widgetWithText(TextButton, 'Cancel'));
     expect(primary.width, cancel.width);
     expect(primary.bottom, lessThan(cancel.top));
@@ -155,6 +290,9 @@ void main() {
     expect(find.text('Open in your browser to sign in'), findsOneWidget);
     expect(find.text('Copy link'), findsOneWidget);
     expect(find.text('Continue with Google'), findsNothing);
+    // Copying a link is the system's own primary button, not Google's.
+    expect(find.byType(GoogleSignInButton), findsNothing);
+    expect(find.widgetWithText(FilledButton, 'Copy link'), findsOneWidget);
     expect(find.byType(SelectableText), findsOneWidget);
   });
 

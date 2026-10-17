@@ -1,5 +1,6 @@
 import 'package:brookie_babies/components/account_button.dart';
 import 'package:brookie_babies/components/sign_in_dialog.dart';
+import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -49,5 +50,16 @@ void main() {
 
     expect(find.byType(SignInDialog), findsNothing);
     expect(find.text('P'), findsOneWidget);
+  });
+
+  testWidgets('signed in: "My sessions" opens the profile page', (tester) async {
+    await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser)));
+
+    await tester.tap(find.byType(CircleAvatar));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('My sessions'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ProfilePage), findsOneWidget);
   });
 }

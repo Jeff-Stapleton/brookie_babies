@@ -1,0 +1,26 @@
+{
+  "name": "brookie-babies-functions",
+  "description": "Cloud Functions for Brookie Babies",
+  "private": true,
+  "main": "lib/index.js",
+  "engines": {
+    "node": "24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test --enable-source-maps \"lib/**/*.test.js\"",
+    "gcp-build": ""
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.0",
+    "firebase-functions": "^7.4.0",
+    "yazl": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
+    "typescript": "~5.9.3",
+    "yauzl": "^3.4.0"
+  }
+}

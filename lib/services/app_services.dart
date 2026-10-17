@@ -1,4 +1,6 @@
 import 'package:brookie_babies/services/auth_service.dart';
+import 'package:brookie_babies/services/booking_service.dart';
+import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:flutter/widgets.dart';
 
 /// Opens [url]. url_launcher's `launchUrl` matches this type.
@@ -10,12 +12,16 @@ class AppServices extends InheritedWidget {
   const AppServices({
     super.key,
     required this.auth,
+    required this.bookings,
+    required this.gallery,
     required this.openUrl,
     this.isEmbeddedBrowser = false,
     required super.child,
   });
 
   final AuthService auth;
+  final BookingService bookings;
+  final GalleryService gallery;
   final OpenUrl openUrl;
 
   /// True in in-app browsers (Instagram, Facebook, ...) where Google blocks
@@ -33,6 +39,8 @@ class AppServices extends InheritedWidget {
   @override
   bool updateShouldNotify(AppServices oldWidget) =>
       auth != oldWidget.auth ||
+      bookings != oldWidget.bookings ||
+      gallery != oldWidget.gallery ||
       openUrl != oldWidget.openUrl ||
       isEmbeddedBrowser != oldWidget.isEmbeddedBrowser;
 }

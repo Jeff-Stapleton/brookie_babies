@@ -6,6 +6,7 @@ import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/auth_service.dart';
 import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
+import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/embedded_browser.dart';
 
 import 'package:flutter/material.dart';
@@ -23,11 +24,6 @@ Map<String, Widget Function(BuildContext)> routes = {
   // "My sessions", also linkable as https://brookie-babies.web.app/#/profile.
   '/profile': (context) => const ProfilePage(),
 };
-
-ThemeData theme = ThemeData(
-  colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-  useMaterial3: true,
-);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -67,9 +63,11 @@ class MyApp extends StatelessWidget {
       openUrl: launchUrl,
       isEmbeddedBrowser: isEmbeddedBrowser,
       child: MaterialApp(
-        title: 'Flutter Demo',
+        title: 'Brooke Stapleton Photography',
         routes: routes,
-        theme: theme,
+        // Print by default; Darkroom when the device asks for dark.
+        theme: brookieTheme(Brightness.light),
+        darkTheme: brookieTheme(Brightness.dark),
         home: HomePage(),
       ),
     );

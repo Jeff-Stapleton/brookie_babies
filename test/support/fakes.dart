@@ -6,6 +6,7 @@ import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/auth_service.dart';
 import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
+import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:flutter/material.dart';
 
 const testUser = AppUser(uid: 'uid123', email: 'parent@example.com', displayName: 'Pat Parent');
@@ -107,6 +108,7 @@ Widget testApp({
   GalleryService? gallery,
   FakeUrlOpener? urlOpener,
   bool isEmbeddedBrowser = false,
+  Brightness brightness = Brightness.light,
   required Widget home,
 }) {
   return AppServices(
@@ -115,6 +117,6 @@ Widget testApp({
     gallery: gallery ?? FakeGalleryService(),
     openUrl: (urlOpener ?? FakeUrlOpener()).call,
     isEmbeddedBrowser: isEmbeddedBrowser,
-    child: MaterialApp(home: home),
+    child: MaterialApp(theme: brookieTheme(brightness), home: home),
   );
 }

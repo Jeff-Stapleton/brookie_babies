@@ -57,6 +57,8 @@ class _SignInDialogState extends State<SignInDialog> {
   Widget build(BuildContext context) {
     if (AppServices.of(context).isEmbeddedBrowser) {
       return AlertDialog(
+        // Scrolls on short screens rather than overflowing.
+        scrollable: true,
         title: const Text('Open in your browser to sign in'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -86,6 +88,7 @@ class _SignInDialogState extends State<SignInDialog> {
 
     final error = _error;
     return AlertDialog(
+      scrollable: true,
       title: const Text('Sign in to book'),
       content: Column(
         mainAxisSize: MainAxisSize.min,

@@ -153,7 +153,12 @@ export async function getGalleryDownload(
   if (!booking || booking.uid !== uid) {
     throw new HttpsError("not-found", MESSAGES.notFound);
   }
-  if (booking.status !== "paid") {
+  // Bookings are typed in by hand; accept " Paid " the same way the Flutter
+  // client (Booking.fromMap) does, so it never shows a download that fails.
+  if (
+    typeof booking.status !== "string" ||
+    booking.status.trim().toLowerCase() !== "paid"
+  ) {
     throw new HttpsError("failed-precondition", MESSAGES.notPaid);
   }
   if (booking.photosReady !== true) {

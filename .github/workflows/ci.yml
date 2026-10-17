@@ -113,7 +113,7 @@ jobs:
 
   deploy-preview:
     name: Deploy preview channel
-    needs: check
+    needs: [check, functions]
     # Fork pull requests get no secrets, so they are checked but not deployed.
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -144,7 +144,7 @@ jobs:
 
   deploy-live:
     name: Deploy live site
-    needs: check
+    needs: [check, functions]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 15

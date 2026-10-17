@@ -295,9 +295,18 @@ describe("getGalleryDownload: access checks", {timeout: 10_000}, () => {
 
   test("an unpaid booking is refused", async () => {
     bucket.put("galleries/b1/a.jpg", "photo");
-    for (const status of ["pending", "cancelled", "refunded", undefined, "PAID"]) {
+    for (const status of ["pending", "cancelled", "refunded", undefined, 42, "paid later"]) {
       addBooking(BOOKING_ID, {status});
       await assertHttpsError(call(), "failed-precondition", MESSAGES.notPaid);
+    }
+  });
+
+  test("a hand-typed status like ' Paid ' counts as paid, as in the app", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const status of ["PAID", " Paid "]) {
+      addBooking(BOOKING_ID, {status});
+      const result = await call();
+      assert.equal(result.photoCount, 1);
     }
   });
 

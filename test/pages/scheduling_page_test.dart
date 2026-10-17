@@ -4,8 +4,8 @@ import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/pages/home_page.dart';
 import 'package:brookie_babies/pages/scheduling_page.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/widgets/empty_state.dart';
 import 'package:brookie_babies/widgets/session_slot.dart';
-import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -154,7 +154,11 @@ void main() {
     final auth = FakeAuthService();
     await pumpPage(tester, auth, packageName: '');
 
-    expect(find.byType(InlineMessage), findsOneWidget);
+    final band = find.byType(EmptyState);
+    expect(band, findsOneWidget);
+    expect(find.descendant(of: band, matching: find.text('Choose a package first, then pick a time for your session.')),
+        findsOneWidget);
+    expect(find.descendant(of: band, matching: find.widgetWithText(OutlinedButton, 'See packages')), findsOneWidget);
     expect(continueButton(), findsNothing);
     expect(find.byType(SessionSlot), findsNothing);
     expect(find.byType(SignInDialog), findsNothing);
@@ -391,6 +395,53 @@ void main() {
   });
 
   for (final (name, size) in [('a phone', Size(390, 844)), ('a desktop', Size(1440, 900))]) {
+    testWidgets('keyboard: the arrow keys move day to day and never slide the month, on $name', (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      // Flutter's bindings on the web, where the arrow keys scroll the
+      // nearest scroll view: here, the calendar's month pages.
+      await tester.pumpWidget(testApp(
+        auth: FakeAuthService(signedInAs: testUser),
+        urlOpener: urlOpener,
+        home: Shortcuts(
+          shortcuts: const {
+            SingleActivator(LogicalKeyboardKey.arrowUp): ScrollIntent(direction: AxisDirection.up),
+            SingleActivator(LogicalKeyboardKey.arrowDown): ScrollIntent(direction: AxisDirection.down),
+            SingleActivator(LogicalKeyboardKey.arrowLeft): ScrollIntent(direction: AxisDirection.left),
+            SingleActivator(LogicalKeyboardKey.arrowRight): ScrollIntent(direction: AxisDirection.right),
+          },
+          child: SchedulingPage(packageName: 'Premium', now: saturdayMorning),
+        ),
+      ));
+      await tester.ensureVisible(find.byType(BookingCalendar));
+      await tester.pumpAndSettle();
+      final months = tester
+          .state<ScrollableState>(find.descendant(of: find.byType(PageView), matching: find.byType(Scrollable)))
+          .position;
+      final month = months.pixels;
+      Focus.of(tester.element(find.descendant(of: find.byType(BookingCalendar), matching: find.text('20'))))
+          .requestFocus();
+      await tester.pump();
+
+      for (final (key, day) in [
+        (LogicalKeyboardKey.arrowRight, '21'),
+        (LogicalKeyboardKey.arrowDown, '28'),
+        (LogicalKeyboardKey.arrowLeft, '27'),
+        (LogicalKeyboardKey.arrowUp, '20'),
+        (LogicalKeyboardKey.arrowLeft, '19'),
+      ]) {
+        await tester.sendKeyEvent(key);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(months.pixels, month, reason: '$key mid-way');
+        await tester.pumpAndSettle();
+        expect(focusedLabel(tester), day, reason: '$key');
+        expect(months.pixels, month, reason: '$key');
+        expect(find.text('October 2026'), findsOneWidget);
+      }
+    });
+
     testWidgets('keyboard: Tab reads the days in order, then the times, on $name', (tester) async {
       await pumpPage(tester, FakeAuthService(signedInAs: testUser), size: size);
 
@@ -445,14 +496,25 @@ void main() {
     expect(tester.getRect(find.byType(SessionSlot).first).left, BrookieSpace.s4);
   });
 
-  testWidgets('stacked on a tablet: the times keep their width and the button fits its label', (tester) async {
-    await pumpPage(tester, FakeAuthService(signedInAs: testUser), size: const Size(768, 1024));
+  for (final width in [600.0, 768.0, 899.0]) {
+    testWidgets('stacked at ${width.round()}px: the times end with the calendar; the button fits its label',
+        (tester) async {
+      await pumpPage(tester, FakeAuthService(signedInAs: testUser), size: Size(width, 1024));
 
-    final slot = tester.getRect(find.byType(SessionSlot).first);
-    final calendar = tester.getRect(find.byType(BookingCalendar));
-    expect(slot.top, greaterThan(calendar.bottom));
-    expect(slot.width, 520);
-    expect(tester.getSize(continueButton()).width, lessThan(slot.width));
+      final slot = tester.getRect(find.byType(SessionSlot).first);
+      final calendar = tester.getRect(find.byType(BookingCalendar));
+      expect(slot.top, greaterThan(calendar.bottom));
+      expect(calendar.width, BookingCalendar.maxWidth);
+      expect(slot.left, calendar.left);
+      expect(slot.right, calendar.right);
+      expect(tester.getSize(continueButton()).width, lessThan(slot.width));
+    });
+  }
+
+  testWidgets('side by side, the times keep their own width', (tester) async {
+    await pumpPage(tester, FakeAuthService(signedInAs: testUser), size: const Size(1440, 900));
+
+    expect(tester.getSize(find.byType(SessionSlot).first).width, 520);
   });
 
   testWidgets('on a phone the button fills the column', (tester) async {

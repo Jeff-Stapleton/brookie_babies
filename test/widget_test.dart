@@ -112,7 +112,7 @@ void main() {
     });
   }
 
-  for (final width in [360.0, 390.0, 600.0, 760.0]) {
+  for (final width in [360.0, 390.0, 600.0, 760.0, 820.0]) {
     testWidgets('cards stack on a ${width.round()}px window', (tester) async {
       await pumpPackages(tester, size: Size(width, 900));
 
@@ -122,6 +122,21 @@ void main() {
         expect(cards[i].top, greaterThan(cards[i - 1].bottom));
       }
       expect(tester.takeException(), isNull);
+    });
+  }
+
+  // Phones fill the column; on a tablet the stack keeps a phone's measure at
+  // the left of the column, rather than stretching its buttons across it.
+  for (final (width, cardWidth) in [(360.0, 328.0), (390.0, 358.0), (600.0, 520.0), (768.0, 520.0), (820.0, 520.0)]) {
+    testWidgets('stacked cards are ${cardWidth.round()}px wide on a ${width.round()}px window', (tester) async {
+      await pumpPackages(tester, size: Size(width, 900));
+
+      final gutter = width >= BrookieBreakpoint.gutter ? BrookieSpace.s5 : BrookieSpace.s4;
+      expect(tester.getTopLeft(find.text('Choose your package')).dx, gutter);
+      for (final card in cardRects(tester)) {
+        expect(card.left, gutter);
+        expect(card.width, cardWidth);
+      }
     });
   }
 

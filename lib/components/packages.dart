@@ -54,8 +54,9 @@ class _PackagesState extends State<Packages> {
   }
 }
 
-/// The cards side by side at equal height from [BrookieBreakpoint.packages],
-/// stacked below that.
+/// The cards side by side at equal height once the window is at least
+/// [BrookieBreakpoint.packages] and each card fits its longest button label on
+/// one line (about 830px); stacked otherwise.
 class _PackageCards extends StatelessWidget {
   const _PackageCards({required this.chosen, required this.onChoose});
 
@@ -63,6 +64,11 @@ class _PackageCards extends StatelessWidget {
   final ValueChanged<SessionPackage> onChoose;
 
   static const _gap = BrookieSpace.s4;
+
+  /// Stacked cards' widest, the same as the booking page's times beside its
+  /// calendar: on a tablet they keep a phone's measure rather than stretching
+  /// their buttons across the page.
+  static const _stackedMaxWidth = 520.0;
 
   /// The narrowest card whose longest button label still fits on one line.
   double _minCardWidth(BuildContext context) {
@@ -102,14 +108,20 @@ class _PackageCards extends StatelessWidget {
       // narrow for "Continue with Ultimate"; stack them rather than wrap it.
       final sideBySide = wideWindow && cardWidth >= _minCardWidth(context);
       if (!sideBySide) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final package in packages) ...[
-              if (package != packages.first) const SizedBox(height: _gap),
-              card(package),
-            ],
-          ],
+        return Align(
+          alignment: AlignmentDirectional.topStart,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _stackedMaxWidth),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final package in packages) ...[
+                  if (package != packages.first) const SizedBox(height: _gap),
+                  card(package),
+                ],
+              ],
+            ),
+          ),
         );
       }
       return IntrinsicHeight(

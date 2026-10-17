@@ -113,7 +113,7 @@ void main() {
     testWidgets('the empty state at ${width.toInt()}px: nothing overflows', (tester) async {
       await pump(tester, const ProfilePage(), width: width);
 
-      expect(find.textContaining('No sessions to show yet.'), findsOneWidget);
+      expect(find.textContaining('No sessions yet.'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 

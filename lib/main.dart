@@ -9,6 +9,7 @@ import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/services/portfolio_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/embedded_browser.dart';
+import 'package:brookie_babies/widgets/focus_ring.dart';
 
 import 'package:flutter/material.dart';
 
@@ -76,6 +77,12 @@ class MyApp extends StatelessWidget {
         // Print by default; Darkroom when the device asks for dark.
         theme: brookieTheme(Brightness.light),
         darkTheme: brookieTheme(Brightness.dark),
+        // Tab and the arrow keys scroll the focused control well into view,
+        // so its focus ring is never cut off at the window's edge.
+        builder: (context, child) => FocusTraversalGroup(
+          policy: ReadingOrderTraversalPolicy(requestFocusCallback: requestFocusInView),
+          child: child!,
+        ),
         home: const HomePage(),
       ),
     );

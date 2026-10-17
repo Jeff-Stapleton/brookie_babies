@@ -58,8 +58,10 @@ lib/
     auth_service.dart     AuthService interface + FirebaseAuthService (Google popup sign-in)
     booking_service.dart  BookingService + FirestoreBookingService (live query of the user's bookings)
     gallery_service.dart  GalleryService + FunctionsGalleryService (calls getGalleryDownloadUrl)
-    portfolio_service.dart PortfolioService + StoragePortfolioService (home page photo links from _admin/gallery)
+    portfolio_service.dart PortfolioService + StoragePortfolioService (home page photo links: image files in
+                          _admin/gallery by name, at most `limit`, each fetched on its own so one failure drops one photo)
     payment_links.dart    Stripe Payment Link per package, tagged with the user's uid/email
+                          (test/models/session_package_test.dart checks every SessionPackage has one)
   pages/                  Full screens
     home_page.dart        Hero, introduction, featured photos, packages, footer; HomePage.showPackages()
     scheduling_page.dart  "Book a session": calendar + session times, then sign-in and the Payment Link
@@ -70,7 +72,7 @@ lib/
     packages.dart         "Choose your package" and the PackageCards; remembers the chosen package
     booking_calendar.dart TableCalendar restyled as the design system's DateCalendar
     session_list.dart     The chosen day's heading and its SessionSlots (a radio group)
-    account_button.dart   "Sign in" chip, or the butter avatar with the account menu
+    account_button.dart   "Sign in" chip, or the butter avatar with the account menu (MenuAnchor: arrow keys, Escape)
     sign_in_dialog.dart   showSignInDialog(): Google sign-in, or open-in-browser help in in-app browsers
     booking_card.dart     One session on "Your sessions"; paid sessions with photos ready get "Download all photos"
     page_footer.dart      Logo and copyright
@@ -83,6 +85,7 @@ lib/
     focus_ring.dart       FocusRing: the 2px-gap focus ring for custom controls, and its on-photo variant
     network_photo.dart    A photograph with a placeholder and a fade-in
     account_avatar.dart   The butter initial disc
+    brookie_logo.dart     BrookieLogo: assets/logo.png at its fixed aspect, so nothing moves when it loads
   utilities/
     utils.dart            Date formatters ("Saturday, October 24", "Sat, Oct 24") and the booking window
     embedded_browser.dart Detects in-app browsers (Instagram, Facebook, TikTok, Pinterest, Android WebViews, ...)
@@ -92,6 +95,7 @@ web/                      index.html (title, meta, link previews, paper loading 
                           (favicon, app icons and og-image are made from assets/logo.png)
 test/                     Widget and unit tests; mirrors lib/
   support/fakes.dart      Fake auth, booking, gallery, portfolio and URL services, and testApp() for widget tests
+  support/fake_photos.dart FakePhotoServer: network photos in widget tests stay loading or fail on cue
   widget_test.dart        The package cards: layout at many widths (loads the real Jost font), choosing, selection
 functions/                Cloud Functions, TypeScript on Node 24 (own package.json; not a Dart package)
   src/index.ts            Function definitions (region us-central1); getGalleryDownloadUrl

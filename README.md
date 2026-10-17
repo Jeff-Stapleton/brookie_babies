@@ -127,8 +127,10 @@ order. The **first file by name is the full-screen photo** behind the logo, so
 pick one whose subject's face is clear of the center (the logo covers the
 middle) and name it so it sorts first, for example `00-hero.jpg`. The next six
 appear below the introduction, in full rows only (three across on wider
-screens, two on phones; a leftover photo is left out). Use JPEG, PNG or WebP;
-everything in this folder is public.
+screens, two on phones; a leftover photo is left out). Only JPEG, PNG and WebP
+files are shown (export iPhone HEIC photos first), hidden files such as
+`.DS_Store` are skipped, and only the first seven by name are used. Everything
+in this folder is public.
 
 ## Delivering photos
 

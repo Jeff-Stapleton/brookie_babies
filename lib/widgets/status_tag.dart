@@ -38,9 +38,12 @@ class StatusTag extends StatelessWidget {
               Icon(icon, size: 14, color: colors.foreground),
               const SizedBox(width: BrookieSpace.s1),
             ],
-            Text(
-              label,
-              style: BrookieType.small.copyWith(color: colors.foreground, fontWeight: FontWeight.w500),
+            // Wraps rather than overflowing a narrow card at large text sizes.
+            Flexible(
+              child: Text(
+                label,
+                style: BrookieType.small.copyWith(color: colors.foreground, fontWeight: FontWeight.w500),
+              ),
             ),
           ],
         ),

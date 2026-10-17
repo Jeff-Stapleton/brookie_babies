@@ -585,19 +585,19 @@ BorderSide brookieFocusSide(Color color) => BorderSide(color: color, width: 2, s
 
 /// The button style for the one action on a photograph, such as the hero's
 /// "Book a session": butter, like the logo's disc. Never on paper.
+///
+/// It draws no focus ring of its own (no single color shows on every
+/// photograph): wrap the button in [FocusRing.onPhoto]
+/// (lib/widgets/focus_ring.dart), shown while it has focus.
 ButtonStyle onPhotoButtonStyle(BuildContext context) {
   final c = BrookieColors.of(context);
   return ButtonStyle(
     backgroundColor: WidgetStatePropertyAll(c.butter),
     foregroundColor: WidgetStatePropertyAll(c.onButter),
     iconColor: WidgetStatePropertyAll(c.onButter),
-    side: WidgetStateProperty.resolveWith((states) {
-      if (states.contains(WidgetState.focused)) {
-        return BorderSide(color: c.butter, width: 2, strokeAlign: BorderSide.strokeAlignOutside);
-      }
-      if (states.contains(WidgetState.hovered)) return BorderSide(color: c.onButter, width: 1.5);
-      return null;
-    }),
+    // None rather than null when focused, or the theme's ink ring comes back.
+    side: WidgetStateProperty.resolveWith((states) =>
+        states.contains(WidgetState.hovered) ? BorderSide(color: c.onButter, width: 1.5) : BorderSide.none),
   );
 }
 

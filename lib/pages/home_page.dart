@@ -33,9 +33,12 @@ class _HomePageState extends State<HomePage> {
   final _scrollController = ScrollController();
   final _packagesKey = GlobalKey();
 
-  /// The portfolio photographs, sorted by name; null while loading. The first
-  /// is the hero, the rest are featured below the introduction.
+  /// The portfolio photographs, sorted by name; null while loading.
   List<Uri>? _photos;
+
+  /// Photographs that couldn't be loaded. They are left out: the hero moves
+  /// on to the next one, and the featured grid closes up.
+  final _failedPhotos = <Uri>{};
 
   @override
   void initState() {
@@ -62,13 +65,17 @@ class _HomePageState extends State<HomePage> {
     final portfolio = AppServices.of(context).portfolio;
     List<Uri> photos;
     try {
-      photos = await portfolio.photoUrls();
+      photos = await portfolio.photoUrls(limit: 1 + FeaturedPhotos.maxCount);
     } catch (e) {
       // The page still works without photographs, so carry on without them.
       log('Could not list the portfolio photos: $e');
       photos = const [];
     }
     if (mounted) setState(() => _photos = photos);
+  }
+
+  void _leaveOut(Uri photo) {
+    if (mounted) setState(() => _failedPhotos.add(photo));
   }
 
   /// Scrolls so the packages section starts at the top of the window, with
@@ -89,7 +96,12 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final photos = _photos ?? const <Uri>[];
+    // The first is the hero, the rest are featured below the introduction.
+    final photos = [
+      for (final photo in _photos ?? const <Uri>[])
+        if (!_failedPhotos.contains(photo)) photo,
+    ];
+    final hero = photos.isEmpty ? null : photos.first;
     final sectionGap = BrookieLayout.sectionGap(context);
     return Scaffold(
       body: SingleChildScrollView(
@@ -98,9 +110,10 @@ class _HomePageState extends State<HomePage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             HomeHero(
-              photo: photos.isEmpty ? null : photos.first,
+              photo: hero,
               loading: _photos == null,
               onBook: _scrollToPackages,
+              onPhotoFailed: hero == null ? null : () => _leaveOut(hero),
             ),
             SizedBox(height: sectionGap),
             const _Introduction(),
@@ -108,6 +121,7 @@ class _HomePageState extends State<HomePage> {
               child: FeaturedPhotos(
                 photos: photos.skip(1).toList(),
                 padding: const EdgeInsets.only(top: BrookieSpace.s6),
+                onPhotoFailed: _leaveOut,
               ),
             ),
             SizedBox(height: sectionGap),
@@ -135,9 +149,7 @@ class _Introduction extends StatelessWidget {
     final phone = MediaQuery.sizeOf(context).width < BrookieBreakpoint.gutter;
     // Display is set for wide screens; on a phone it would take the whole
     // first screen after the hero.
-    final display = phone
-        ? text.displayLarge?.copyWith(fontSize: 44, height: 48 / 44, letterSpacing: -0.015 * 44)
-        : text.displayLarge;
+    final display = phone ? text.displayLarge?.merge(BrookieType.displayCompact) : text.displayLarge;
     return ContentWidth(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

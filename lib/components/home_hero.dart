@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:brookie_babies/components/account_button.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/widgets/brookie_logo.dart';
+import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:brookie_babies/widgets/network_photo.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -13,7 +15,7 @@ import 'package:flutter/material.dart';
 /// composition sits on a quiet band, with the primary button in place of the
 /// butter one, which is only for photographs.
 class HomeHero extends StatefulWidget {
-  const HomeHero({super.key, required this.photo, required this.loading, required this.onBook});
+  const HomeHero({super.key, required this.photo, required this.loading, required this.onBook, this.onPhotoFailed});
 
   /// The photograph, or null while [loading] or if there is none.
   final Uri? photo;
@@ -22,6 +24,10 @@ class HomeHero extends StatefulWidget {
   final bool loading;
 
   final VoidCallback onBook;
+
+  /// Called when [photo] can't be loaded, so the page can offer another.
+  /// Until it does, the hero shows the quiet band.
+  final VoidCallback? onPhotoFailed;
 
   @override
   State<HomeHero> createState() => _HomeHeroState();
@@ -34,14 +40,15 @@ class _HomeHeroState extends State<HomeHero> {
   /// phone held sideways still sees the whole composition on one screen.
   static const _minHeight = 360.0;
 
-  /// The logo's disc is this fraction of assets/logo.png's width; the
-  /// lettering overhangs it. The design system sizes the logo by its disc.
-  static const _discFraction = 0.73;
-
   @override
   void didUpdateWidget(HomeHero oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.photo != widget.photo) _photoFailed = false;
+  }
+
+  void _onPhotoFailed() {
+    setState(() => _photoFailed = true);
+    widget.onPhotoFailed?.call();
   }
 
   @override
@@ -66,7 +73,7 @@ class _HomeHeroState extends State<HomeHero> {
           fit: StackFit.expand,
           children: [
             if (photo != null)
-              NetworkPhoto(url: photo, onFailed: () => setState(() => _photoFailed = true))
+              NetworkPhoto(key: ValueKey(photo), url: photo, onFailed: _onPhotoFailed)
             else
               ColoredBox(color: BrookieColors.of(context).surfaceSunk),
             Center(
@@ -75,15 +82,12 @@ class _HomeHeroState extends State<HomeHero> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Used exactly as supplied: never recolored, cropped or redrawn.
-                    Image.asset('assets/logo.png', width: disc / _discFraction, excludeFromSemantics: true),
-                    if (onPhoto) ...[
-                      const SizedBox(height: BrookieSpace.s6 - _PhotoButton.ringSpace),
-                      _PhotoButton(onPressed: widget.onBook, child: const Text('Book a session')),
-                    ] else ...[
-                      const SizedBox(height: BrookieSpace.s6),
+                    BrookieLogo(width: disc / BrookieLogo.discFraction),
+                    const SizedBox(height: BrookieSpace.s6),
+                    if (onPhoto)
+                      _PhotoButton(onPressed: widget.onBook, child: const Text('Book a session'))
+                    else
                       FilledButton(onPressed: widget.onBook, child: const Text('Book a session')),
-                    ],
                   ],
                 ),
               ),
@@ -96,15 +100,10 @@ class _HomeHeroState extends State<HomeHero> {
   }
 }
 
-/// The butter button on a photograph. Its focus ring is two-tone, on-butter
-/// inside and butter outside, so it shows on light and dark photographs
-/// alike; a butter ring alone on a butter button only looks like a slightly
-/// bigger button.
+/// The butter button on a photograph, with the two-tone focus ring that
+/// shows on light and dark photographs alike.
 class _PhotoButton extends StatefulWidget {
   const _PhotoButton({required this.onPressed, required this.child});
-
-  /// Room for the focus ring, kept when unfocused so focus moves nothing.
-  static const ringSpace = 4.0;
 
   final VoidCallback onPressed;
   final Widget child;
@@ -116,30 +115,19 @@ class _PhotoButton extends StatefulWidget {
 class _PhotoButtonState extends State<_PhotoButton> {
   bool _focused = false;
 
+  /// Larger than any height the pill can reach, so the ring stays a pill.
+  static const _pillRadius = 999.0;
+
   @override
   Widget build(BuildContext context) {
-    final c = BrookieColors.of(context);
-    final style = onPhotoButtonStyle(context).copyWith(
-      side: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.focused)) {
-          return BorderSide(color: c.onButter, width: 2, strokeAlign: BorderSide.strokeAlignOutside);
-        }
-        if (states.contains(WidgetState.hovered)) return BorderSide(color: c.onButter, width: 1.5);
-        return null;
-      }),
-    );
-    return DecoratedBox(
-      decoration: ShapeDecoration(
-        shape: StadiumBorder(side: BorderSide(color: _focused ? c.butter : Colors.transparent, width: 2)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(_PhotoButton.ringSpace),
-        child: FilledButton(
-          onPressed: widget.onPressed,
-          onFocusChange: (focused) => setState(() => _focused = focused),
-          style: style,
-          child: widget.child,
-        ),
+    return FocusRing.onPhoto(
+      visible: _focused,
+      borderRadius: _pillRadius,
+      child: FilledButton(
+        onPressed: widget.onPressed,
+        onFocusChange: (focused) => setState(() => _focused = focused),
+        style: onPhotoButtonStyle(context),
+        child: widget.child,
       ),
     );
   }

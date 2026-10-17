@@ -14,12 +14,15 @@ through Stripe. The site is hosted on Firebase.
 - **Packages**: Basic ($25), Premium ($50) and Ultimate ($99) pricing cards.
 - **Scheduling**: a calendar (`table_calendar`) with a list of available sessions
   for the selected day.
-- **Payment**: choosing a session opens the matching Stripe Payment Link.
+- **Sign-in**: Google sign-in through Firebase Auth. Customers sign in before
+  paying.
+- **Payment**: choosing a session opens the matching Stripe Payment Link,
+  tagged with the customer's account so the payment can be matched to them.
 
 ## Tech stack
 
 - Flutter 3.47.7 (Material 3), **web target only**
-- Firebase: Core, Storage, Hosting (project `brookie-babies`)
+- Firebase: Core, Auth (Google), Storage, Hosting (project `brookie-babies`)
 - Stripe: Payment Links
 - `table_calendar`, `url_launcher`
 
@@ -83,10 +86,13 @@ bucket has files under `_admin/gallery` and CORS is configured (see below).
 ```
 lib/
   main.dart          App entry point, Firebase init, theme, routes
+  models/            Data types (signed-in user)
+  services/          Auth, app-wide services, Stripe Payment Links
   pages/             Home and Scheduling screens
-  components/        Page sections (carousel, packages, session list, footer)
+  components/        Page sections (carousel, packages, session list, footer,
+                     account button, sign-in dialog)
   widgets/           Reusable widgets (cards, text styles, lists)
-  utilities/         Calendar helpers
+  utilities/         Calendar and browser helpers
 assets/              Logo
 web/                 Web shell (index.html, manifest, icons)
 .github/workflows/   CI: analyze, test, build and deploy (ci.yml)

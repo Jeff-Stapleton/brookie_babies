@@ -1,3 +1,4 @@
+import 'package:brookie_babies/components/account_button.dart';
 import 'package:brookie_babies/components/carousel.dart';
 import 'package:brookie_babies/components/packages.dart';
 import 'package:brookie_babies/components/page_footer.dart';
@@ -45,6 +46,7 @@ class HomePage extends StatelessWidget {
                     ),
                   )
                 ),
+                const Positioned(top: 16, right: 16, child: AccountButton()),
               ],
             ),
             TextSection(),

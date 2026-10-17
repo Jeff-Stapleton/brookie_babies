@@ -9,18 +9,17 @@ class SessionList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: MediaQuery.of(context).size.height - 396,
-      child: SingleChildScrollView(
-        child: Column(
-          children: [
-            SessionCard(sessionDate: sessionDate, sessionDescription: '', onSessionSelected: onSessionSelected),
-            SessionCard(sessionDate: sessionDate, sessionDescription: '', onSessionSelected: onSessionSelected),
-            SessionCard(sessionDate: sessionDate, sessionDescription: '', onSessionSelected: onSessionSelected),
-            SessionCard(sessionDate: sessionDate, sessionDescription: '', onSessionSelected: onSessionSelected),
-            SessionCard(sessionDate: sessionDate, sessionDescription: '', onSessionSelected: onSessionSelected),
-          ],
-        ),
+    // Scrolls within whatever height the parent gives it (SchedulingPage wraps
+    // it in Expanded), so six-week months don't overflow.
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          SessionCard(sessionDate: sessionDate, sessionDescription: '', onSessionSelected: onSessionSelected),
+          SessionCard(sessionDate: sessionDate, sessionDescription: '', onSessionSelected: onSessionSelected),
+          SessionCard(sessionDate: sessionDate, sessionDescription: '', onSessionSelected: onSessionSelected),
+          SessionCard(sessionDate: sessionDate, sessionDescription: '', onSessionSelected: onSessionSelected),
+          SessionCard(sessionDate: sessionDate, sessionDescription: '', onSessionSelected: onSessionSelected),
+        ],
       ),
     );
   }

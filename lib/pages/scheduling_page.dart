@@ -3,10 +3,13 @@ import 'dart:developer';
 import 'package:flutter/material.dart';
 
 import 'package:table_calendar/table_calendar.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../utilities/utils.dart';
-import '../components/session_list.dart';
+import 'package:brookie_babies/components/account_button.dart';
+import 'package:brookie_babies/components/session_list.dart';
+import 'package:brookie_babies/components/sign_in_dialog.dart';
+import 'package:brookie_babies/services/app_services.dart';
+import 'package:brookie_babies/services/payment_links.dart';
+import 'package:brookie_babies/utilities/utils.dart';
 
 class SchedulingPage extends StatefulWidget {
   const SchedulingPage({super.key, required this.packageName});
@@ -21,30 +24,22 @@ class _SchedulingPageState extends State<SchedulingPage> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
 
-Future<void> _navigateToUrl(String url) async {
-  final Uri uri = Uri.parse(url);
-  if (await canLaunchUrl(uri)) {
-    await launchUrl(uri);
-  } else {
-    log('Could not launch $url');
-  }
-}
-
-void navigateCheckout() {
-  switch (widget.packageName) {
-    case 'Basic':
-      _navigateToUrl('https://buy.stripe.com/7sI7tD0KTfBedwccMM');
-      break;
-    case 'Premium':
-      _navigateToUrl('https://buy.stripe.com/9AQ9BL9hpbkY4ZGeUV');
-      break;
-    case 'Ultimate':
-      _navigateToUrl('https://buy.stripe.com/aEUcNXctB74IfEk002');
-      break;
-    default:
+  /// Opens the package's Stripe Payment Link, asking the visitor to sign in
+  /// first so the payment can be matched to their account.
+  Future<void> navigateCheckout() async {
+    if (!kPaymentLinks.containsKey(widget.packageName)) {
       log('Unknown package type');
+      return;
+    }
+    final services = AppServices.of(context);
+    final user = services.auth.currentUser ?? await showSignInDialog(context);
+    if (user == null || !mounted) return;
+
+    final uri = paymentLinkUri(widget.packageName, uid: user.uid, email: user.email)!;
+    // Same tab: after the sign-in dialog, opening a new tab is no longer part
+    // of the tap, so the browser could block it as a popup.
+    await services.openUrl(uri, webOnlyWindowName: '_self');
   }
-}
 
   bool handleSelectedDayPredicate(DateTime day) {
     return isSameDay(_selectedDay, day);
@@ -68,6 +63,7 @@ void navigateCheckout() {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pick a Session Time'),
+        actions: const [AccountButton(), SizedBox(width: 16)],
       ),
       body: Column(
         children: [
@@ -79,7 +75,9 @@ void navigateCheckout() {
             onDaySelected: handleonDaySelected,
             onPageChanged: handleonPageChanged,
           ),
-          SessionList(sessionDate: _selectedDay ?? _focusedDay, onSessionSelected: navigateCheckout),
+          Expanded(
+            child: SessionList(sessionDate: _selectedDay ?? _focusedDay, onSessionSelected: navigateCheckout),
+          ),
         ],
       ),
     );

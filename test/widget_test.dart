@@ -1,7 +1,7 @@
 // Smoke test for the pricing section of the home page.
 //
 // It pumps the Packages section on its own, so it needs neither Firebase nor
-// the web-only checkout page, and runs on the default (VM) test platform.
+// AppServices, and runs on the default (VM) test platform.
 
 import 'package:brookie_babies/components/packages.dart';
 import 'package:flutter/material.dart';

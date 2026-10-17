@@ -1,6 +1,8 @@
 # Single CI/CD workflow: analyze, test and build the Flutter web app, then
 # deploy build/web to Firebase Hosting (preview channel for pull requests,
 # live site for pushes to main). Deploys only run if the checks pass.
+# The Cloud Functions in functions/ are built and tested here but deployed by
+# hand (see README, "Deploying the backend").
 
 name: CI
 
@@ -78,9 +80,40 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  functions:
+    name: Build and test Cloud Functions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # Matches "engines" in functions/package.json and the nodejs24
+          # runtime in firebase.json.
+          node-version: 24
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      # Fails instead of silently rewriting package-lock.json.
+      - run: npm ci
+
+      - run: npm run build
+
+      # Unit tests with in-memory Firestore and Storage fakes; nothing here
+      # talks to the real Firebase project.
+      - run: npm test
+
   deploy-preview:
     name: Deploy preview channel
-    needs: check
+    needs: [check, functions]
     # Fork pull requests get no secrets, so they are checked but not deployed.
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -111,7 +144,7 @@ jobs:
 
   deploy-live:
     name: Deploy live site
-    needs: check
+    needs: [check, functions]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -1,0 +1,23 @@
+rules_version = '2';
+
+// Firestore security rules. Deploy with `firebase deploy --only firestore:rules`.
+//
+// Only what is matched below is allowed; everything else is denied. Cloud
+// Functions (Admin SDK) and the Firebase console bypass these rules, so they
+// can still create and edit bookings.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // bookings/{bookingId}: {uid, email, packageName, date, time, location,
+    // status, photosReady, createdAt}. Written only by the server or the
+    // photographer; a signed-in customer can read their own.
+    //
+    // Queries must filter on the caller's uid
+    // (`where('uid', isEqualTo: currentUser.uid)`), or Firestore refuses the
+    // whole query instead of filtering it.
+    match /bookings/{bookingId} {
+      allow get, list: if request.auth != null
+                       && resource.data.uid == request.auth.uid;
+    }
+  }
+}

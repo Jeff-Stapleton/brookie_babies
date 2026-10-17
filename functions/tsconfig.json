@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    // NodeNext without "type": "module" in package.json compiles to CommonJS,
+    // which firebase-functions v7 loads directly.
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "strict": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "rootDir": "src",
+    "outDir": "lib",
+    "sourceMap": true
+  },
+  "include": ["src"]
+}

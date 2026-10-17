@@ -1,9 +1,11 @@
 import 'package:brookie_babies/components/sign_in_dialog.dart';
 import 'package:brookie_babies/models/app_user.dart';
+import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/services/app_services.dart';
 import 'package:flutter/material.dart';
 
-/// "Sign in" when signed out; an avatar with an account menu when signed in.
+/// "Sign in" when signed out; an avatar with an account menu ("My sessions",
+/// "Sign out") when signed in.
 class AccountButton extends StatelessWidget {
   const AccountButton({super.key});
 
@@ -28,6 +30,12 @@ class AccountButton extends StatelessWidget {
             PopupMenuItem<void>(
               enabled: false,
               child: Text(user.email ?? user.displayName ?? 'Signed in'),
+            ),
+            PopupMenuItem<void>(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (context) => const ProfilePage()),
+              ),
+              child: const Text('My sessions'),
             ),
             PopupMenuItem<void>(
               onTap: auth.signOut,

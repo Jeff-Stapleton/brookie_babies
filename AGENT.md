@@ -30,6 +30,9 @@ Always run and build with `-d chrome` / `flutter build web`.
 | Calendar | `table_calendar` |
 | Payments | Stripe Payment Links via `url_launcher` |
 | Auth | `firebase_auth`: Google sign-in (popup) behind `AuthService` |
+| Bookings | `cloud_firestore`: `bookings` collection, read-only for customers, behind `BookingService` |
+| Photo downloads | `cloud_functions`: `getGalleryDownloadUrl` (in `functions/`) behind `GalleryService` |
+| Backend | Cloud Functions for Firebase, TypeScript on Node 24 (`functions/`); Firestore and Storage security rules |
 | Lints | `flutter_lints` (`analysis_options.yaml`, default rules) |
 
 ## Layout
@@ -41,15 +44,20 @@ lib/
                           regenerate with `flutterfire configure`.
   models/
     app_user.dart         AppUser: the signed-in customer (uid, email, name)
+    booking.dart          Booking: one session, parsed from a Firestore `bookings` document
   services/
-    app_services.dart     AppServices InheritedWidget: AuthService, openUrl, isEmbeddedBrowser
+    app_services.dart     AppServices InheritedWidget: auth, bookings, gallery, openUrl, isEmbeddedBrowser
     auth_service.dart     AuthService interface + FirebaseAuthService (Google popup sign-in)
+    booking_service.dart  BookingService + FirestoreBookingService (live query of the user's bookings)
+    gallery_service.dart  GalleryService + FunctionsGalleryService (calls getGalleryDownloadUrl)
     payment_links.dart    Stripe Payment Link per package, tagged with the user's uid/email
   pages/                  Full screens
     home_page.dart        Landing page: carousel + logo + "Book Now", account button, packages, footer
     scheduling_page.dart  TableCalendar + SessionList; sign-in, then Stripe Payment Link per package
+    profile_page.dart     "My sessions": account, upcoming and past sessions (route /profile)
   components/             Page sections composed from widgets
-    account_button.dart   "Sign in" button, or avatar menu with "Sign out"
+    account_button.dart   "Sign in" button, or avatar menu with "My sessions" and "Sign out"
+    booking_card.dart     One session; paid sessions with photos ready get "Download all photos"
     sign_in_dialog.dart   showSignInDialog(): Google sign-in, or open-in-browser help in in-app browsers
     carousel.dart         CarouselExample: auto-advancing PageView of images from Firebase Storage
     packages.dart         Three PricingCards (titles/prices/bullets are hard-coded here)
@@ -67,9 +75,15 @@ lib/
 assets/logo.png           Only declared asset (pubspec.yaml)
 web/                      index.html, manifest, icons
 test/                     Widget and unit tests; mirrors lib/
-  support/fakes.dart      FakeAuthService, FakeUrlOpener and testApp() for widget tests
+  support/fakes.dart      Fake auth, booking, gallery and URL services, and testApp() for widget tests
   widget_test.dart        Smoke test: pumps Packages and checks the three pricing cards
-firebase.json             Hosting config (public build/web, SPA rewrite) + FlutterFire platform metadata
+functions/                Cloud Functions, TypeScript on Node 24 (own package.json; not a Dart package)
+  src/index.ts            Function definitions (region us-central1); getGalleryDownloadUrl
+  src/gallery.ts          Core logic with injected Firestore/Storage, so tests use in-memory fakes
+  src/gallery.test.ts     node:test unit tests
+firestore.rules           Customers can read only their own bookings; no client writes
+storage.rules             Only _admin/gallery/ (carousel) is readable; everything else denied
+firebase.json             Hosting config (public build/web, SPA rewrite), functions, rules, FlutterFire metadata
 cors.json                 CORS rule for the Storage bucket (GET from any origin)
 .github/workflows/ci.yml  CI: analyze, test, build web; deploy preview on PR, live on push to main
 ```
@@ -87,8 +101,20 @@ cors.json                 CORS rule for the Storage bucket (GET from any origin)
    payment shows which account paid. This is interim: the plan is to replace
    Payment Links with Checkout Sessions created by a Cloud Function.
 
+4. Account menu → "My sessions" (`ProfilePage`, also at `/#/profile`) lists the
+   user's `bookings`, split into upcoming and past. A paid session with
+   `photosReady: true` has "Download all photos" (past paid sessions without it
+   say the photos are being edited): `getGalleryDownloadUrl`
+   checks the booking belongs to the caller, zips `galleries/<bookingId>/` (cached
+   in `gallery-zips/`), and returns a signed link that expires after an hour,
+   opened in the same tab.
+
 The account button (top right of the home page and in the scheduling page's app
 bar) signs in and out at any time.
+
+Nothing in the app creates bookings yet: the Payment Links don't carry the date
+or time. Until server-created Checkout Sessions write them, the photographer
+adds them by hand in the Firestore console (fields in the README).
 
 A named route `/schedule` exists in `main.dart` but the main flow does not use
 it (it passes an empty package name, which falls through to "Unknown package
@@ -103,6 +129,11 @@ flutter analyze                 # lints
 flutter test                    # tests (Dart VM)
 flutter build web               # production build -> build/web
 firebase deploy --only hosting  # manual deploy: run flutter build web first (build/web is what gets deployed)
+
+# Cloud Functions (Node 24; on this Mac it's Homebrew's keg-only node@24)
+npm ci --prefix functions       # install deps from package-lock.json
+npm test --prefix functions     # tsc build + node:test unit tests
+firebase deploy --only functions,firestore:rules,storage   # backend deploy, by hand (README)
 ```
 
 CI (`.github/workflows/ci.yml`) runs `flutter pub get --enforce-lockfile`,
@@ -110,7 +141,9 @@ CI (`.github/workflows/ci.yml`) runs `flutter pub get --enforce-lockfile`,
 `flutter build web --release` on Flutter 3.47.7. It fails if any tracked file
 or `build/web` contains a Stripe secret key, webhook secret or private key. If
 those pass, it deploys a preview channel for
-pull requests and the live site for pushes to `main`.
+pull requests and the live site for pushes to `main`. A separate `functions`
+job runs `npm ci`, `npm run build` and `npm test` in `functions/`. CI never
+deploys functions or rules; the hosting deploys use `--only hosting`.
 
 Storage CORS (needed for the carousel images to load in the browser):
 
@@ -163,14 +196,27 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   dialog explains how to open the page in Safari or Chrome instead.
 - The Payment Link tags (`client_reference_id`, `locked_prefilled_email`) come
   from the URL, which anyone can edit, so they identify the payer for
-  bookkeeping only. Don't grant access to anything (such as photos) based on
-  them.
+  bookkeeping only. A booking entered by hand from them gives that uid access
+  to the photos, so the README has the photographer check the uid's account
+  against an email known from outside Stripe (the Stripe email comes from the
+  same editable link).
+- `firestore.rules` and `storage.rules` are the source of truth; deploying them
+  replaces whatever is set in the console. Customers' photos live in
+  `galleries/<bookingId>/` and are only handed out as signed URLs; never put
+  them under `_admin/gallery/`, which is public.
+- Rules aren't filters: the bookings query must be
+  `where('uid', isEqualTo: uid)` or Firestore rejects it. Sort on the client;
+  an `orderBy` would need a composite index (there's no `firestore.indexes.json`).
+- `getGalleryDownloadUrl` signs URLs through the IAM signBlob API, which needs
+  Service Account Token Creator on the functions' runtime service account
+  (README, "Deploying the backend").
 - Placeholder content: lorem ipsum in `text_section.dart`; all three packages share
   the same bullets; session times, address and description in `session_card.dart`
   are hard-coded; footer social buttons only `print`; copyright says
   "Your Company Name"; `MaterialApp.title` is "Flutter Demo"; `pubspec.yaml` and
   `web/index.html` descriptions are "A new Flutter project."
-- Selected date and time are not passed to Stripe or stored anywhere, so
-  bookings are not recorded.
+- Selected date and time are not passed to Stripe or stored anywhere, so the
+  app doesn't create bookings yet; they are entered by hand in the Firestore
+  console until server-created Checkout Sessions write them.
 - `CarouselExample._timer` is `late` and is only assigned after the Storage call
   completes, so disposing the widget before that throws.

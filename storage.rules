@@ -1,0 +1,19 @@
+rules_version = '2';
+
+// Cloud Storage security rules. Deploy with `firebase deploy --only storage`.
+//
+// Only what is matched below is allowed; everything else is denied,
+// including customers' photos (galleries/**) and their zips
+// (gallery-zips/**), which are only handed out through short-lived signed
+// URLs from the getGalleryDownloadUrl function. Uploads in the Firebase
+// console and the Admin SDK bypass these rules.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Home page carousel. Anyone may read (get and list: the app uses
+    // listAll); nobody may write from the app.
+    match /_admin/gallery/{allPaths=**} {
+      allow read: if true;
+    }
+  }
+}

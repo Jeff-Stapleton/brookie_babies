@@ -7,7 +7,11 @@ import 'package:flutter/material.dart';
 /// "Sign in" when signed out; an avatar with an account menu ("My sessions",
 /// "Sign out") when signed in.
 class AccountButton extends StatelessWidget {
-  const AccountButton({super.key});
+  const AccountButton({super.key, this.onPhoto = false});
+
+  /// Whether the button sits on a photograph (the home page's hero) rather
+  /// than on paper.
+  final bool onPhoto;
 
   @override
   Widget build(BuildContext context) {

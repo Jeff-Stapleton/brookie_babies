@@ -1,4 +1,3 @@
-import 'package:brookie_babies/pages/checkout_page.dart';
 import 'package:brookie_babies/pages/home_page.dart';
 import 'package:brookie_babies/pages/scheduling_page.dart';
 import 'package:brookie_babies/firebase_options.dart';
@@ -10,7 +9,6 @@ import 'package:firebase_core/firebase_core.dart';
 
 Map<String, Widget Function(BuildContext)> routes = {
   '/schedule': (context) => const SchedulingPage(packageName: '',),
-  '/checkout': (context) => const CheckoutPage(clientSecret: ''),
 };
 
 ThemeData theme = ThemeData(

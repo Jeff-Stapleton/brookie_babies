@@ -15,10 +15,8 @@ are sent to a Stripe Payment Link to pay.
 
 Although the `android/`, `ios/`, `macos/`, `linux/` and `windows/` folders exist
 (from `flutter create`), **only web is supported**:
-- `lib/firebase_options.dart` only configures web; every other platform throws
-  `UnsupportedError` at startup.
-- `lib/pages/checkout_page.dart` imports `flutter_stripe_web` and `package:web`,
-  which only compile for web.
+`lib/firebase_options.dart` only configures web; every other platform throws
+`UnsupportedError` at startup.
 
 Always run and build with `-d chrome` / `flutter build web`.
 
@@ -26,11 +24,11 @@ Always run and build with `-d chrome` / `flutter build web`.
 
 | Concern | Package |
 |---|---|
-| UI framework | Flutter (Material 3), Dart SDK `^3.5.3` |
+| UI framework | Flutter 3.47.7 (Material 3), pinned in CI |
 | Firebase bootstrap | `firebase_core` |
 | Carousel images | `firebase_storage` (lists `gs://brookie-babies.firebasestorage.app/_admin/gallery`) |
 | Calendar | `table_calendar` |
-| Payments | Stripe Payment Links via `url_launcher`; `flutter_stripe` / `flutter_stripe_web` (experimental checkout page) |
+| Payments | Stripe Payment Links via `url_launcher` |
 | Auth | `firebase_auth` is a dependency but is **not used** anywhere yet |
 | Lints | `flutter_lints` (`analysis_options.yaml`, default rules) |
 
@@ -44,7 +42,6 @@ lib/
   pages/                  Full screens
     home_page.dart        Landing page: carousel + logo + "Book Now", packages, footer
     scheduling_page.dart  TableCalendar + SessionList; routes to Stripe Payment Link per package
-    checkout_page.dart    Experimental Stripe ExpressCheckoutElement page (web-only, not in the main flow)
   components/             Page sections composed from widgets
     carousel.dart         CarouselExample: auto-advancing PageView of images from Firebase Storage
     packages.dart         Three PricingCards (titles/prices/bullets are hard-coded here)
@@ -75,9 +72,9 @@ cors.json                 CORS rule for the Storage bucket (GET from any origin)
    `navigateCheckout()`, which opens the Stripe Payment Link for that package
    (`buy.stripe.com/...` URLs hard-coded in `scheduling_page.dart`).
 
-Named routes `/schedule` and `/checkout` exist in `main.dart` but the main flow
-does not use them (`/schedule` passes an empty package name, which falls through to
-"Unknown package type").
+A named route `/schedule` exists in `main.dart` but the main flow does not use
+it (it passes an empty package name, which falls through to "Unknown package
+type").
 
 ## Commands
 
@@ -92,7 +89,7 @@ firebase deploy --only hosting  # manual deploy: run flutter build web first (bu
 
 CI (`.github/workflows/ci.yml`) runs `flutter pub get --enforce-lockfile`,
 `flutter analyze --no-fatal-infos`, `flutter test` and
-`flutter build web --release` on Flutter 3.24.3. It fails if any tracked file
+`flutter build web --release` on Flutter 3.47.7. It fails if any tracked file
 or `build/web` contains a Stripe secret key, webhook secret or private key. If
 those pass, it deploys a preview channel for
 pull requests and the live site for pushes to `main`.
@@ -126,11 +123,14 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
 - `build/`, `.dart_tool/` and `.flutter-plugins*` are gitignored. `.dart_tool/`
   contains the Chrome profile used by `flutter run -d chrome`, including Firebase
   Auth tokens after a local sign-in, so never force-add it.
+- Use Flutter 3.47.7, the version CI pins. CI runs
+  `flutter pub get --enforce-lockfile`, and running `pub get` on another Flutter
+  version rewrites the SDK-pinned packages in `pubspec.lock`, which then fails CI.
 - Lint infos are not fatal in CI yet; analyzer warnings and errors are.
-- Tests run on the Dart VM, so they must not import `main.dart` or
-  `checkout_page.dart`, which pull in web-only libraries. `HomePage` also needs
-  Firebase (the carousel calls Firebase Storage). The only test is a smoke test
-  of `Packages`.
+- Tests run on the Dart VM, so code under test must not import web-only
+  libraries (`package:web`, `dart:js_interop`). `main.dart` and `HomePage` need
+  Firebase (the carousel calls Firebase Storage), so tests don't pump them. The
+  only test is a smoke test of `Packages`.
 - Placeholder content: lorem ipsum in `text_section.dart`; all three packages share
   the same bullets; session times, address and description in `session_card.dart`
   are hard-coded; footer social buttons only `print`; copyright says
@@ -138,7 +138,5 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   `web/index.html` descriptions are "A new Flutter project."
 - Selected date and time are not passed to Stripe or stored anywhere, so
   bookings are not recorded.
-- `package:web` is imported in `checkout_page.dart` but not declared in
-  `pubspec.yaml` (it only resolves transitively).
 - `CarouselExample._timer` is `late` and is only assigned after the Storage call
   completes, so disposing the widget before that throws.

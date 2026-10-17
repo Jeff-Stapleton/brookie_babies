@@ -100,8 +100,9 @@ One GitHub Actions workflow, `.github/workflows/ci.yml`, checks and deploys the
 site. It runs `flutter pub get --enforce-lockfile`,
 `flutter analyze --no-fatal-infos` (lint infos are not fatal yet),
 `flutter test` and `flutter build web --release` on Flutter 3.24.3 (pinned in
-the workflow). It then fails if the web bundle contains a Stripe secret key,
-and otherwise deploys `build/web` to Firebase Hosting:
+the workflow). It fails if any tracked file or the web bundle contains a Stripe
+secret key, webhook secret or private key, and otherwise deploys `build/web` to
+Firebase Hosting:
 
 - On pull request to `main`: a preview channel that expires after 7 days. The
   preview URL is posted on the pull request. Pull requests from forks are
@@ -116,8 +117,8 @@ Deploys only run when the checks pass. They need the
 `FIREBASE_SERVICE_ACCOUNT_BROOKIE_BABIES` repository secret, which preview
 and live deploys currently share.
 
-CI stays red at the Stripe key check until the hard-coded key is removed from
-`lib/main.dart`.
+This repository is public. Never commit secrets or service account keys; see
+the security note in [AGENT.md](AGENT.md).
 
 `firebase.json` serves `build/web` as a static site and sends app routes to
 `index.html`. To deploy by hand, run `flutter build web --release`, then

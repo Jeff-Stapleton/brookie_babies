@@ -67,3 +67,28 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# Flutter/Dart build output and tool state. .dart_tool/ also holds the Chrome
+# profile `flutter run -d chrome` uses (cookies, IndexedDB with Firebase Auth
+# tokens), so it must never be committed.
+.dart_tool/
+/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+.DS_Store
+
+# Credentials. This repo is public: never commit service account keys or
+# Stripe/webhook secrets. Cloud Functions read secrets from Secret Manager.
+*firebase-adminsdk*.json
+*service-account*.json
+*serviceAccount*.json
+brookie-babies-*.json
+.secret.local
+.runtimeconfig.json
+.env.*
+
+# Cloud Functions build output and emulator exports
+functions/lib/
+emulator-data/

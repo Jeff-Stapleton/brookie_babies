@@ -1,23 +1,24 @@
 {
-    "name": "brookie_babies",
-    "short_name": "brookie_babies",
+    "name": "Brooke Stapleton Photography",
+    "short_name": "Brookie Babies",
+    "description": "Book a photo session with Brooke Stapleton Photography, then download your edited photos.",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#f6f6f3",
+    "theme_color": "#f6f6f3",
     "prefer_related_applications": false,
     "icons": [
         {
             "src": "icons/Icon-192.png",
             "sizes": "192x192",
-            "type": "image/png"
+            "type": "image/png",
+            "purpose": "any"
         },
         {
             "src": "icons/Icon-512.png",
             "sizes": "512x512",
-            "type": "image/png"
+            "type": "image/png",
+            "purpose": "any"
         },
         {
             "src": "icons/Icon-maskable-192.png",

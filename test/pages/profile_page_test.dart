@@ -1,7 +1,9 @@
 import 'package:brookie_babies/components/sign_in_dialog.dart';
+import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/models/booking.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
+import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,6 +16,7 @@ const _past = '2001-05-06';
 Booking _booking(String id, {
   String date = _past,
   String? time,
+  String? location,
   String status = 'paid',
   bool photosReady = true,
   String packageName = 'Premium',
@@ -22,10 +25,15 @@ Booking _booking(String id, {
     'packageName': packageName,
     'date': date,
     'time': time,
+    'location': location,
     'status': status,
     'photosReady': photosReady,
   })!;
 }
+
+/// The [StatusTag] labelled [label].
+StatusTag _tag(WidgetTester tester, String label) =>
+    tester.widget<StatusTag>(find.widgetWithText(StatusTag, label));
 
 void main() {
   late FakeGalleryService gallery;
@@ -34,14 +42,17 @@ void main() {
   Future<FakeAuthService> pumpProfile(
     WidgetTester tester, {
     bool signedIn = true,
+    AppUser user = testUser,
     FakeBookingService? bookings,
+    Brightness brightness = Brightness.light,
   }) async {
-    final auth = FakeAuthService(signedInAs: signedIn ? testUser : null);
+    final auth = FakeAuthService(signedInAs: signedIn ? user : null);
     await tester.pumpWidget(testApp(
       auth: auth,
       bookings: bookings ?? FakeBookingService(),
       gallery: gallery,
       urlOpener: urlOpener,
+      brightness: brightness,
       home: const ProfilePage(),
     ));
     await tester.pumpAndSettle();
@@ -56,6 +67,9 @@ void main() {
   testWidgets('signed out: asks the visitor to sign in', (tester) async {
     await pumpProfile(tester, signedIn: false);
 
+    // The top bar's title and the page's headline.
+    expect(find.text('Your sessions'), findsNWidgets(2));
+    expect(find.text('Sign in to see your sessions and download your photos.'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
     await tester.pumpAndSettle();
 
@@ -70,6 +84,29 @@ void main() {
     expect(find.text('parent@example.com'), findsOneWidget);
     expect(bookings.watchedUids, [testUser.uid]);
     expect(find.textContaining('No sessions to show yet.'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'See packages'), findsOneWidget);
+  });
+
+  testWidgets('a long name and email fit a narrow phone', (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await pumpProfile(
+      tester,
+      user: const AppUser(
+        uid: 'u2',
+        email: 'a.very.long.address.for.a.family@example.com',
+        displayName: 'Alexandra Montgomery-Fitzwilliam',
+      ),
+      bookings: FakeBookingService([
+        _booking('b1', status: 'pending', packageName: 'Ultimate', location: '1234 Long Street Name, Salt Lake City'),
+      ]),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Sign out'), findsOneWidget);
+    expect(find.text('Payment pending'), findsOneWidget);
   });
 
   testWidgets('Sign out returns to the signed-out view', (tester) async {
@@ -118,6 +155,7 @@ void main() {
     await pumpProfile(tester, bookings: FakeBookingService([_booking('b1')], 1));
 
     expect(find.textContaining("Some of your sessions couldn't be shown"), findsOneWidget);
+    expect(find.byType(InlineMessage), findsOneWidget);
     expect(find.text('Premium session'), findsOneWidget);
   });
 
@@ -153,8 +191,17 @@ void main() {
     gallery.fail(const GalleryException("Your photos aren't ready yet."));
     await tester.pumpAndSettle();
 
-    expect(find.text("Your photos aren't ready yet."), findsOneWidget);
+    expect(find.widgetWithText(InlineMessage, "Your photos aren't ready yet."), findsOneWidget);
     expect(urlOpener.opened, isEmpty);
+  });
+
+  testWidgets('paid sessions are tagged "Paid"; ready photos say so', (tester) async {
+    await pumpProfile(tester, bookings: FakeBookingService([_booking('b1')]));
+
+    expect(_tag(tester, 'Paid').tone, StatusTone.success);
+    expect(_tag(tester, 'Paid').icon, Icons.check);
+    expect(_tag(tester, 'Ready to download').tone, StatusTone.success);
+    expect(find.widgetWithIcon(FilledButton, Icons.download_outlined), findsOneWidget);
   });
 
   testWidgets('past session without photos yet: explains they are being edited', (tester) async {
@@ -170,21 +217,70 @@ void main() {
       _booking('p', date: _future, status: 'pending'),
     ]));
 
-    expect(find.text('Cancelled'), findsOneWidget);
-    expect(find.text('Payment pending'), findsOneWidget);
+    expect(_tag(tester, 'Cancelled').tone, StatusTone.neutral);
+    expect(_tag(tester, 'Payment pending').tone, StatusTone.neutral);
+    expect(find.text('Paid'), findsNothing);
     expect(find.text('Download all photos'), findsNothing);
   });
 
-  testWidgets('shows the date and start time', (tester) async {
-    await pumpProfile(tester, bookings: FakeBookingService([_booking('b1', date: '2001-05-06', time: '14:30')]));
+  testWidgets('refunded sessions are labelled', (tester) async {
+    await pumpProfile(tester, bookings: FakeBookingService([_booking('r', status: 'refunded')]));
 
-    expect(find.text('Sunday, May 6, 2001'), findsOneWidget);
-    expect(find.text('2:30 PM'), findsOneWidget);
+    expect(_tag(tester, 'Refunded').tone, StatusTone.neutral);
+    expect(find.text('Download all photos'), findsNothing);
+  });
+
+  testWidgets('shows the date, start time and place', (tester) async {
+    await pumpProfile(tester, bookings: FakeBookingService([
+      _booking('b1', date: '2001-05-06', time: '14:30', location: 'Liberty Park'),
+    ]));
+
+    expect(find.text('Sun, May 6, 2001'), findsOneWidget);
+    expect(find.text('2:30 pm'), findsOneWidget);
+    expect(find.text('Liberty Park'), findsOneWidget);
+    expect(find.byIcon(Icons.event_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.schedule_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.place_outlined), findsOneWidget);
+  });
+
+  testWidgets('times are lowercase with no leading zero', (tester) async {
+    await pumpProfile(tester, bookings: FakeBookingService([
+      _booking('morning', time: '09:05'),
+      _booking('noon', time: '12:00'),
+      _booking('midnight', time: '00:30'),
+      _booking('evening', time: '23:45'),
+    ]));
+
+    expect(find.text('9:05 am'), findsOneWidget);
+    expect(find.text('12:00 pm'), findsOneWidget);
+    expect(find.text('12:30 am'), findsOneWidget);
+    expect(find.text('11:45 pm'), findsOneWidget);
+  });
+
+  testWidgets('dates this year leave out the year', (tester) async {
+    final year = DateTime.now().year;
+    await pumpProfile(tester, bookings: FakeBookingService([_booking('b1', date: '$year-12-31')]));
+
+    expect(find.textContaining(RegExp(r'^[A-Z][a-z]{2}, Dec 31$')), findsOneWidget);
   });
 
   testWidgets('says so when bookings fail to load', (tester) async {
     await pumpProfile(tester, bookings: FakeBookingService()..error = Exception('permission-denied'));
 
-    expect(find.text("We couldn't load your sessions. Please try again later."), findsOneWidget);
+    expect(
+      find.widgetWithText(InlineMessage, "We couldn't load your sessions. Refresh the page to try again."),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('renders in Darkroom', (tester) async {
+    await pumpProfile(
+      tester,
+      brightness: Brightness.dark,
+      bookings: FakeBookingService([_booking('b1'), _booking('b2', date: _future, status: 'pending')]),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Paid'), findsOneWidget);
   });
 }

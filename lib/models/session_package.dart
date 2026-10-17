@@ -1,5 +1,9 @@
-/// A session package families can book. Each one has a Stripe Payment Link
-/// under the same [name] (services/payment_links.dart).
+/// A session package families can book.
+///
+/// Each one needs a Stripe Payment Link under the same [name]
+/// (services/payment_links.dart); test/models/session_package_test.dart checks
+/// the two lists match. Booking treats a package without a link as unknown
+/// and sends the family back to the packages.
 class SessionPackage {
   const SessionPackage({required this.name, required this.price, required this.inclusions});
 

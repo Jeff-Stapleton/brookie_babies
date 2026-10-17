@@ -92,3 +92,6 @@ brookie-babies-*.json
 # Cloud Functions build output and emulator exports
 functions/lib/
 emulator-data/
+
+# google-github-actions/auth writes short-lived credentials here in CI
+gha-creds-*.json

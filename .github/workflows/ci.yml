@@ -1,8 +1,7 @@
-# Single CI/CD workflow: analyze, test and build the Flutter web app, then
-# deploy build/web to Firebase Hosting (preview channel for pull requests,
-# live site for pushes to main). Deploys only run if the checks pass.
-# The Cloud Functions in functions/ are built and tested here but deployed by
-# hand (see README, "Deploying the backend").
+# Single CI/CD workflow: analyze, test and build the Flutter web app and the
+# Cloud Functions, then deploy. Pull requests get a Hosting preview channel.
+# Pushes to main deploy the functions and Firestore/Storage rules (keyless,
+# see deploy-backend), then the live site. Deploys only run if the checks pass.
 
 name: CI
 
@@ -142,10 +141,106 @@ jobs:
           # Exact version instead of the default `latest`; bump deliberately.
           firebaseToolsVersion: 15.32.1
 
-  deploy-live:
-    name: Deploy live site
+  # Deploys the Cloud Functions and the Firestore/Storage rules. No stored key:
+  # google-github-actions/auth trades this job's GitHub OIDC token for
+  # short-lived credentials of the github-deployer service account (Workload
+  # Identity Federation). Google only accepts tokens from this repository's
+  # "production" environment on main (scripts/setup-gcp-deployer.sh), and
+  # GitHub only lets main deploy to that environment
+  # (scripts/setup-github-production.sh).
+  #
+  # Until the repository variable BACKEND_DEPLOY_LIVE is "true", this is a dry
+  # run: it signs in, checks that the APIs, billing and service identities are
+  # in place and compiles the rules and functions, without changing anything.
+  # It doesn't exercise the upload/update/release permissions; the first live
+  # run does (README, "Automatic backend deploys").
+  deploy-backend:
+    name: Deploy functions and rules
     needs: [check, functions]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    # firebase-tools keeps its first access token (valid one hour) for the
+    # whole deploy, so stay well under that.
+    timeout-minutes: 30
+    environment:
+      name: production
+    permissions:
+      contents: read
+      id-token: write # lets the auth step request this job's GitHub OIDC token
+    steps:
+      # Must run before the auth step: checkout cleans the workspace, which
+      # would delete the credentials file.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          # Newest 24.x rather than whatever the runner has cached: Node
+          # 24.17.0 breaks the token exchange (nodejs/node#63989).
+          check-latest: true
+          cache: npm
+          cache-dependency-path: |
+            functions/package-lock.json
+            .github/deploy-tools/package-lock.json
+
+      # id-token: write applies to the whole job, so any code that runs here
+      # (install scripts, the functions build, the deploy) could request the
+      # OIDC token. The protection is that every package is pinned by a
+      # committed lockfile, not the order of the steps.
+      #
+      # The functions predeploy (tsc) and function discovery need these.
+      - run: npm ci
+        working-directory: functions
+
+      # The Firebase CLI with its whole dependency tree pinned by
+      # .github/deploy-tools/package-lock.json, and no install scripts (only
+      # the optional re2 has one). Same version that did the first, manual
+      # deploy; bump deliberately.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: .github/deploy-tools
+      - run: echo "$GITHUB_WORKSPACE/.github/deploy-tools/node_modules/.bin" >> "$GITHUB_PATH"
+
+      # Exchanges this job's GitHub OIDC token at Google, so a wrong provider
+      # or a token the attribute condition rejects fails here ("Failed to
+      # generate Google Cloud federated token"). A missing impersonation
+      # binding or permission shows up in the deploy step instead. Writes a
+      # short-lived credentials file for GOOGLE_APPLICATION_CREDENTIALS; a post
+      # step deletes it.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/375587092017/locations/global/workloadIdentityPools/github-actions/providers/brookie-babies-prod
+          service_account: github-deployer@brookie-babies.iam.gserviceaccount.com
+
+      - name: Deploy functions and rules
+        env:
+          # firebase-tools 15.34.0 otherwise insists on actAs for the App
+          # Engine default service account (firebase/firebase-tools#11227).
+          # Only its advisory checks are skipped; Google still enforces every
+          # permission on the real API calls.
+          FIREBASE_SKIP_INFORMATIONAL_IAM: "true"
+          DRY_RUN: ${{ vars.BACKEND_DEPLOY_LIVE != 'true' && '--dry-run' || '' }}
+        # --force: delete functions that were removed from the source.
+        # Never add --debug here: this repository's logs are public, and debug
+        # output includes API responses such as the signed URL the function
+        # source is uploaded to. Debug locally instead (README).
+        run: firebase deploy --only functions,firestore:rules,storage --project brookie-babies --non-interactive --force ${DRY_RUN:+"$DRY_RUN"}
+
+  deploy-live:
+    name: Deploy live site
+    # After the backend. Once real backend deploys are on (BACKEND_DEPLOY_LIVE
+    # is "true"), a failed backend deploy also holds back the site, so it never
+    # goes live ahead of the functions and rules it relies on. A failed dry run
+    # doesn't block it, since nothing would have been deployed anyway.
+    needs: [check, functions, deploy-backend]
+    if: >-
+      ${{ !cancelled() &&
+      needs.check.result == 'success' &&
+      needs.functions.result == 'success' &&
+      (needs.deploy-backend.result == 'success' || vars.BACKEND_DEPLOY_LIVE != 'true') &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:

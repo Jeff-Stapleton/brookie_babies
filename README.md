@@ -76,7 +76,7 @@ bucket has files under `_admin/gallery` and CORS is configured (see below).
 | Production build | `flutter build web` (output in `build/web`) |
 | Deploy to Firebase Hosting | `flutter build web --release && firebase deploy --only hosting` |
 | Cloud Functions build and tests | `npm ci --prefix functions && npm test --prefix functions` |
-| Deploy functions and rules | `firebase deploy --only functions,firestore:rules,storage` (see [Deploying the backend](#deploying-the-backend)) |
+| Deploy functions and rules by hand | `firebase deploy --only functions,firestore:rules,storage` (CI does this on pushes to `main`; see [Deploying the backend](#deploying-the-backend)) |
 
 ### Firebase setup notes
 
@@ -142,25 +142,29 @@ The first download builds a zip of the whole folder, which can take a few minute
 ## Deployment
 
 One GitHub Actions workflow, `.github/workflows/ci.yml`, checks and deploys the
-site. It runs `flutter pub get --enforce-lockfile`,
+site and the backend. It runs `flutter pub get --enforce-lockfile`,
 `flutter analyze --no-fatal-infos` (lint infos are not fatal yet),
 `flutter test` and `flutter build web --release` on Flutter 3.47.7 (pinned in
-the workflow). It fails if any tracked file or the web bundle contains a Stripe
-secret key, webhook secret or private key, and otherwise deploys `build/web` to
-Firebase Hosting:
+the workflow), and builds and tests the Cloud Functions. It fails if any
+tracked file or the web bundle contains a Stripe secret key, webhook secret or
+private key. It deploys `build/web` to Firebase Hosting:
 
 - On pull request to `main`: a preview channel that expires after 7 days. The
   preview URL is posted on the pull request. Pull requests from forks are
   checked but not deployed.
-- On push to `main` (or a manual run on `main`): the live site,
-  https://brookie-babies.web.app. The job uses the `production` environment,
-  but GitHub creates it with no protection rules. To make it a real gate, add
-  a deployment-branch rule for `main` (and a reviewer if wanted) and move the
-  live credential into it as an environment secret.
+- On push to `main` (or a manual run on `main`): first the Cloud Functions and
+  Firestore/Storage rules (see [Automatic backend deploys](#automatic-backend-deploys)),
+  then the live site, https://brookie-babies.web.app. Both jobs use the
+  `production` environment, which `scripts/setup-github-production.sh`
+  restricts to `main`.
 
-Deploys only run when the checks pass. They need the
-`FIREBASE_SERVICE_ACCOUNT_BROOKIE_BABIES` repository secret, which preview
-and live deploys currently share.
+Deploys only run when the checks pass. The backend deploy uses no stored key.
+The Hosting deploys use the `FIREBASE_SERVICE_ACCOUNT_BROOKIE_BABIES`
+repository secret, which preview and live deploys share. It's a
+repository-level secret, so the `main`-only environment rule doesn't protect
+it, and any workflow on any branch of this repository can read it. Moving it
+into a `production` environment secret, or switching Hosting to keyless
+sign-in too, is on the TODO list.
 
 This repository is public. Never commit secrets or service account keys; see
 the security note in [AGENT.md](AGENT.md).
@@ -171,37 +175,87 @@ the security note in [AGENT.md](AGENT.md).
 
 ### Deploying the backend
 
-`functions/` holds the `getGalleryDownloadUrl` Cloud Function. `firestore.rules` and `storage.rules` hold the security rules. CI builds and tests them but does not deploy them, so you deploy them by hand.
+`functions/` holds the Cloud Functions, and `firestore.rules` and `storage.rules` hold the security rules. They were first deployed by hand on 2026-10-17. CI now deploys them on every push to `main`. Do the one-time setup below **before** the change that added this reaches `main`.
 
-**One-time setup**
+These files are the source of truth: each deploy **replaces the Firestore and Storage rules set in the Firebase console**, so change rules here, not in the console. Only `_admin/gallery/` (the carousel) is publicly readable, customers can read only their own bookings, and nothing can be written from the app.
 
-1. **Blaze plan:** Firebase console → Usage and billing → Modify plan. Cloud Functions require it. Set a budget alert while you're there.
-2. **Tools:** install Node 24 and the Firebase CLI (`npm install -g firebase-tools`), then run `firebase login`.
-3. **Firestore:** the database already exists (Native mode, `nam5`), so there is nothing to do.
-4. **Allow the function to sign download links.** It signs them with its own service account through Google's IAM API rather than a key file, so it needs:
+#### Automatic backend deploys
+
+The `deploy-backend` job in `.github/workflows/ci.yml` runs on every push to `main` after the checks pass, and before the live site deploys:
+
+```bash
+firebase deploy --only functions,firestore:rules,storage --project brookie-babies --non-interactive --force
+```
+
+- **No stored key.** The job trades its GitHub sign-in token for credentials that expire within the hour, belonging to the `github-deployer` service account (Workload Identity Federation). Google only accepts tokens from this repository's `production` environment on `main`, and GitHub only lets `main` deploy to that environment.
+- **No direct access, but not a sandbox.** `github-deployer` has no direct permission to read bookings, photos or secret values, to turn Google Cloud APIs on or off, or to change who has access to the project. What it deploys can still reach all of that: functions run as `375587092017-compute@developer.gserviceaccount.com`, and a rules change can open up any data. So anyone who can push to `main`, or get code into the npm packages the deploy installs, effectively has access to all customer data. Keep push access to this repository limited to the owner. The setup script warns if the runtime account has broad (Editor) access.
+- **Small no-change deploys.** Unchanged functions are skipped, and the rules are re-released as-is.
+- **The site waits for the backend once real deploys are on.** With `BACKEND_DEPLOY_LIVE` set to `true`, a failed backend deploy also holds back the live site, so the site never goes live ahead of the functions it calls. In dry-run mode the site deploys regardless. Deploy backend changes by hand before merging site code that depends on them.
+- `--force` deletes any function that has been removed from `functions/src`.
+
+**One-time setup** (project owner, from the repository root). Do steps 1-3 before merging the change that adds `deploy-backend`. Until then, every push to `main` fails the **Deploy functions and rules** job at the Google sign-in step. The live site still deploys.
+
+1. Install the Google Cloud CLI and sign in with the same Google account you use for Firebase:
    ```bash
-   gcloud services enable iamcredentials.googleapis.com --project=brookie-babies
-   gcloud iam service-accounts add-iam-policy-binding \
-     375587092017-compute@developer.gserviceaccount.com \
-     --member="serviceAccount:375587092017-compute@developer.gserviceaccount.com" \
-     --role="roles/iam.serviceAccountTokenCreator" \
-     --project=brookie-babies
+   brew install --cask gcloud-cli
+   gcloud auth login
    ```
-   Or use the Google Cloud console:
-   - APIs & Services → enable **IAM Service Account Credentials API**.
-   - IAM & Admin → Service Accounts → `375587092017-compute@developer.gserviceaccount.com` → Permissions → Grant access → enter that same account as the principal, with the role **Service Account Token Creator**.
+2. `bash scripts/setup-gcp-deployer.sh` turns on the APIs it needs, creates the identity pool and provider, creates the `github-deployer` service account and its custom role with the permissions above, and lets only this repository's `production` jobs on `main` act as it. It never creates a key, and it's safe to re-run.
+3. `bash scripts/setup-github-production.sh` restricts the `production` environment to `main`. Run it while nothing is being merged.
+4. Wait about 5 minutes for the changes to take effect, then merge. If it's already merged, use **Actions → CI → Run workflow** on `main`. The **Deploy functions and rules** job runs as a **dry run**, which changes nothing. It checks:
+   - sign-in;
+   - that the required APIs, billing and service identities are in place;
+   - that the rules and functions compile.
 
-   Without this, downloads fail with "We couldn't prepare your photos" and the function log shows a `signBlob` permission error. If the log shows permission errors reading Firestore or Storage instead, also grant that account **Cloud Datastore User** and **Storage Object Admin**.
+   It does **not** test the permissions to upload, update and release.
+5. Once that job is green, turn on real deploys:
+   ```bash
+   gh variable set BACKEND_DEPLOY_LIVE --body true
+   ```
+   (Or Settings → Secrets and variables → Actions → Variables.) Watch the next run: it's the first real test of the deploy permissions. To pause automatic deploys, set the variable to anything else, and the job goes back to dry runs.
 
-**Deploy** (from the repository root):
+**If the job fails:**
+- **"Failed to generate Google Cloud federated token" in the sign-in step:** the identity pool, provider or condition doesn't match. Re-run `scripts/setup-gcp-deployer.sh`, wait 5 minutes, and re-run the job.
+- **Failures in the deploy step:** the error usually names the API call that failed. For more detail, run the same deploy locally as the owner with `firebase deploy --only functions,firestore:rules,storage --debug` (add `--dry-run` to change nothing). Don't add `--debug` in CI: this repository's logs are public, and debug output includes API responses such as the signed URL the function source is uploaded to.
+- **A 403:** the error names the missing permission. Add it to `scripts/setup-gcp-deployer.sh` and re-run the script.
+
+**Before merging something new**, prepare the project, because `github-deployer` deliberately can't. Otherwise the CI deploy fails:
+
+- **A function that uses a secret** (`defineSecret`, for example a Stripe key):
+  1. Run `firebase functions:secrets:set NAME`.
+  2. Grant `375587092017-compute@developer.gserviceaccount.com` **Secret Manager Secret Accessor** on that secret.
+  3. Grant `github-deployer@brookie-babies.iam.gserviceaccount.com` **Secret Manager Viewer** on that secret.
+- **A function that uses a non-secret param** (`defineString`, `defineInt` and so on, for example a Stripe Price ID): CI deploys non-interactively, so every param needs a value in a committed `functions/.env`.
+  - Add `!functions/.env` to `.gitignore`, since `.env` files are ignored by default.
+  - Put only non-sensitive values there; use `defineSecret` for anything sensitive.
+- **A new kind of trigger.** Add the permissions it needs to `CUSTOM_ROLE_PERMISSIONS` in `scripts/setup-gcp-deployer.sh` and re-run the script:
+  - **Firestore triggers:** `datastore.databases.getMetadata`.
+  - **Scheduled functions:** `cloudscheduler.jobs.get`, `create`, `update` and `delete`.
+  - **Storage and Pub/Sub triggers:** these need owner-only setup the first time, so deploy them once by hand from the feature branch before merging.
+- **A function with its own `serviceAccount`:** add `"<that account> roles/iam.serviceAccountUser"` to `SA_ROLE_GRANTS` in the script and re-run it.
+- **A Google Cloud API that isn't on yet:** turn it on in the console.
+
+**Deploying by hand** still works. Run it from an up-to-date `main`, except in the case above where you deploy a new trigger type from its branch:
 
 ```bash
 npm ci --prefix functions
 firebase deploy --only functions,firestore:rules,storage
 ```
 
-The first functions deploy turns on a few Google Cloud APIs and asks how long to keep container images. The default is fine.
+#### Function runtime permissions
 
-> **Warning:** this deploy **replaces the Firestore and Storage rules currently set in the Firebase console**. Copy the current rules first (Firestore Database → Rules, and Storage → Rules) so you can compare or restore them. Afterwards only `_admin/gallery/` (the carousel) is publicly readable, customers can read only their own bookings, and nothing can be written from the app. Check that the home page carousel still loads after deploying.
+The functions run as `375587092017-compute@developer.gserviceaccount.com`, which in this project has no broad (Editor) access. `scripts/setup-functions-runtime.sh` (project owner, once, idempotent) gives it exactly what `getGalleryDownloadUrl` needs:
+
+- **Reading bookings:** read-only Firestore access (`roles/datastore.viewer`).
+- **Reading photos and saving the zips:** object access on the Storage bucket only (`roles/storage.objectUser`).
+- **Signing the download links:** Service Account Token Creator on itself only. The script removes any project-wide Token Creator grant, which would let the functions act as every service account in the project.
+
+Signing also needs the **IAM Service Account Credentials API**, which is turned on.
+
+If downloads fail with "We couldn't get your photos ready just now", check the function's log:
+- **A Firestore or Storage permission error:** re-run the script.
+- **A `signBlob` error:** check the Token Creator grant and the API.
+
+When a new function needs other data, add the role to this script, scoped as narrowly as possible.
 
 Optional: add a Storage lifecycle rule that deletes objects under `gallery-zips/` after 30 days to save storage. Zips are rebuilt automatically the next time someone downloads.

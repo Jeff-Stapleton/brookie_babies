@@ -18,16 +18,16 @@ through Stripe. The site is hosted on Firebase.
 
 ## Tech stack
 
-- Flutter (Material 3) / Dart `^3.5.3`, **web target only**
+- Flutter 3.47.7 (Material 3), **web target only**
 - Firebase: Core, Storage, Hosting (project `brookie-babies`)
-- Stripe: Payment Links, plus `flutter_stripe_web` (experimental)
+- Stripe: Payment Links
 - `table_calendar`, `url_launcher`
 
 ## Getting started
 
 ### Prerequisites
 
-1. **Flutter SDK** (stable channel, with Dart 3.5.3 or newer)
+1. **Flutter SDK 3.47.7** (stable channel; the version CI uses)
    - macOS: `brew install --cask flutter`
    - Other platforms: see https://docs.flutter.dev/get-started/install
 2. **Google Chrome** (to run the web app locally)
@@ -83,7 +83,7 @@ bucket has files under `_admin/gallery` and CORS is configured (see below).
 ```
 lib/
   main.dart          App entry point, Firebase init, theme, routes
-  pages/             Home, Scheduling, Checkout screens
+  pages/             Home and Scheduling screens
   components/        Page sections (carousel, packages, session list, footer)
   widgets/           Reusable widgets (cards, text styles, lists)
   utilities/         Calendar helpers
@@ -99,7 +99,7 @@ See [AGENT.md](AGENT.md) for an architectural walkthrough, conventions and known
 One GitHub Actions workflow, `.github/workflows/ci.yml`, checks and deploys the
 site. It runs `flutter pub get --enforce-lockfile`,
 `flutter analyze --no-fatal-infos` (lint infos are not fatal yet),
-`flutter test` and `flutter build web --release` on Flutter 3.24.3 (pinned in
+`flutter test` and `flutter build web --release` on Flutter 3.47.7 (pinned in
 the workflow). It fails if any tracked file or the web bundle contains a Stripe
 secret key, webhook secret or private key, and otherwise deploys `build/web` to
 Firebase Hosting:

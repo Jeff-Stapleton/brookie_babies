@@ -49,7 +49,7 @@ jobs:
         with:
           channel: stable
           # The version that generated pubspec.lock. Upgrade deliberately.
-          flutter-version: 3.24.3
+          flutter-version: 3.47.7
           cache: true
 
       # Fail instead of silently rewriting pubspec.lock.

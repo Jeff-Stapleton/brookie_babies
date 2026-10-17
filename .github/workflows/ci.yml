@@ -1,0 +1,143 @@
+# Single CI/CD workflow: analyze, test and build the Flutter web app, then
+# deploy build/web to Firebase Hosting (preview channel for pull requests,
+# live site for pushes to main). Deploys only run if the checks pass.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per ref. Superseded pull request runs are cancelled. Runs on main
+# are never cancelled while running; a newer run replaces any run still
+# waiting, so the latest commit is what goes live.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Analyze, test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # build/ and .dart_tool/ are still committed. Delete them so stale
+      # output can't leak into the analysis or the deployed build.
+      - name: Remove committed build output
+        run: rm -rf build .dart_tool
+
+      # Known gap: this action uses actions/cache by tag (not SHA) and does not
+      # check the SDK download's sha256. Both come from Google/GitHub over TLS.
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          # The version that generated pubspec.lock. Upgrade deliberately.
+          flutter-version: 3.24.3
+          cache: true
+
+      # Fail instead of silently rewriting pubspec.lock.
+      - run: flutter pub get --enforce-lockfile
+
+      # Infos (style lints) are not fatal yet because there is a backlog of
+      # them; warnings and errors still fail the build.
+      - run: flutter analyze --no-fatal-infos
+
+      - run: flutter test
+
+      - run: flutter build web --release
+
+      # Never upload or deploy a bundle that contains a Stripe secret key.
+      - name: Fail if a Stripe secret key is in the web bundle
+        run: |
+          if grep -rqE '\b(sk|rk)_(live|test)_[0-9A-Za-z]{10,}' build/web; then
+            echo '::error::Stripe secret key found in build/web'
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-build
+          path: build/web
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy-preview:
+    name: Deploy preview channel
+    needs: check
+    # Fork pull requests get no secrets, so they are checked but not deployed.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      # For firebase.json and .firebaserc.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Deploy only the fresh build, not the committed build/ folder.
+      - name: Remove committed build output
+        run: rm -rf build
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-build
+          path: build/web
+
+      - uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0.11.0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BROOKIE_BABIES }}
+          projectId: brookie-babies
+          expires: 7d
+          # Exact version instead of the default `latest`; bump deliberately.
+          firebaseToolsVersion: 15.32.1
+
+  deploy-live:
+    name: Deploy live site
+    needs: check
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://brookie-babies.web.app
+    permissions:
+      contents: read
+    steps:
+      # For firebase.json and .firebaserc.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Deploy only the fresh build, not the committed build/ folder.
+      - name: Remove committed build output
+        run: rm -rf build
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-build
+          path: build/web
+
+      - uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0.11.0
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BROOKIE_BABIES }}
+          projectId: brookie-babies
+          channelId: live
+          # Exact version instead of the default `latest`; bump deliberately.
+          firebaseToolsVersion: 15.32.1

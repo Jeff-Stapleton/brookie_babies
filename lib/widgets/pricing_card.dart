@@ -1,5 +1,3 @@
-import 'dart:developer';
-
 import 'package:brookie_babies/widgets/bulleted_list.dart';
 import 'package:brookie_babies/widgets/header_two_text.dart';
 import 'package:brookie_babies/pages/scheduling_page.dart';

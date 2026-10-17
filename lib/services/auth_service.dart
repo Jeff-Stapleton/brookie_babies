@@ -1,0 +1,87 @@
+import 'dart:developer';
+
+import 'package:brookie_babies/models/app_user.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+/// Thrown by [AuthService.signInWithGoogle] with a message to show the user.
+class SignInException implements Exception {
+  const SignInException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// Customer sign-in. [FirebaseAuthService] is the real implementation; tests
+/// use a fake.
+abstract class AuthService {
+  /// Emits the user whenever they sign in or out. Use [currentUser] as the
+  /// initial value; a new listener may not get one right away.
+  Stream<AppUser?> get authStateChanges;
+
+  AppUser? get currentUser;
+
+  /// Opens the Google sign-in popup. Returns null if the user closes it.
+  ///
+  /// Call this first thing in a tap handler, before any `await`, or the
+  /// browser may block the popup.
+  Future<AppUser?> signInWithGoogle();
+
+  Future<void> signOut();
+}
+
+class FirebaseAuthService implements AuthService {
+  FirebaseAuthService(this._auth);
+
+  final FirebaseAuth _auth;
+
+  // A new stream per call: FirebaseAuth's stream stops working for good once
+  // its last listener cancels, so it can't be cached.
+  @override
+  Stream<AppUser?> get authStateChanges =>
+      _auth.authStateChanges().map(_toAppUser);
+
+  @override
+  AppUser? get currentUser => _toAppUser(_auth.currentUser);
+
+  // Popup rather than redirect: the site (web.app) and the auth domain
+  // (firebaseapp.com) differ, which breaks redirect sign-in in current
+  // browsers, and a redirect would reload the app and lose the chosen session.
+  @override
+  Future<AppUser?> signInWithGoogle() async {
+    final provider = GoogleAuthProvider()
+      ..setCustomParameters({'prompt': 'select_account'});
+    try {
+      final credential = await _auth.signInWithPopup(provider);
+      return _toAppUser(credential.user);
+    } on FirebaseAuthException catch (e) {
+      switch (e.code) {
+        case 'popup-closed-by-user':
+        case 'cancelled-popup-request':
+          return null;
+        case 'popup-blocked':
+          throw const SignInException(
+              'Your browser blocked the sign-in window. Allow pop-ups for this '
+              'site, or open this page in Safari or Chrome, and try again.');
+        default:
+          log('Google sign-in failed: ${e.code} ${e.message}');
+          throw const SignInException(
+              'Sign-in failed. Please try again, or open this page in Safari '
+              'or Chrome.');
+      }
+    }
+  }
+
+  @override
+  Future<void> signOut() => _auth.signOut();
+
+  static AppUser? _toAppUser(User? user) {
+    if (user == null) return null;
+    return AppUser(
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+    );
+  }
+}

@@ -92,18 +92,23 @@ class FakeGalleryService implements GalleryService {
   void fail(Object error) => _pending!.completeError(error);
 }
 
-/// [PortfolioService] that returns fixed [photos], or throws [error].
+/// [PortfolioService] that returns fixed [photos] (the first `limit` of
+/// them), or throws [error].
 class FakePortfolioService implements PortfolioService {
   FakePortfolioService([this.photos = const []]);
 
   final List<Uri> photos;
   Object? error;
 
+  /// The `limit` of the last [photoUrls] call.
+  int? requestedLimit;
+
   @override
-  Future<List<Uri>> photoUrls() async {
+  Future<List<Uri>> photoUrls({int? limit}) async {
+    requestedLimit = limit;
     final error = this.error;
     if (error != null) throw error;
-    return photos;
+    return limit == null ? photos : photos.take(limit).toList();
   }
 }
 

@@ -28,7 +28,6 @@ class _PackagesState extends State<Packages> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BrookieColors.of(context);
     return ContentWidth(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -37,13 +36,14 @@ class _PackagesState extends State<Packages> {
             header: true,
             child: Text('Choose your package', style: Theme.of(context).textTheme.headlineLarge),
           ),
+          // A sentence under a headline: s3 below it, in body and ink, as on
+          // every page.
           const SizedBox(height: BrookieSpace.s3),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
             child: Text(
-              'Pick a package, then a time that suits you. Your edited photos arrive in '
-              'your account, ready to download.',
-              style: BrookieType.body.copyWith(color: colors.inkSoft),
+              'After your session, your edited photos arrive in your account, ready to download.',
+              style: Theme.of(context).textTheme.bodyLarge,
             ),
           ),
           const SizedBox(height: BrookieSpace.s6),

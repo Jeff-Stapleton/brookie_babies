@@ -286,6 +286,20 @@ void main() {
     expect(chipSurface(tester).clipBehavior, Clip.none);
   });
 
+  for (final onPhoto in [false, true]) {
+    testWidgets('a focused chip keeps its own pill, not the theme focus border (onPhoto: $onPhoto)', (tester) async {
+      await tester.pumpWidget(app(FakeAuthService(), onPhoto: onPhoto));
+
+      await key(tester, LogicalKeyboardKey.tab);
+
+      // The theme's outlined focus border would draw an ink ring on any
+      // focus, doubling the chip's keyboard-only ring, or covering the
+      // two-tone one on a photograph.
+      expect(chipSurface(tester).shape, isNot(isA<FocusRingBorder>()));
+      expect(chipSurface(tester).shape, isA<StadiumBorder>());
+    });
+  }
+
   testWidgets('signed in on paper: keyboard focus rings the avatar with a gap', (tester) async {
     await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser)));
     expect(avatarSide(tester), BorderSide.none);

@@ -82,15 +82,20 @@ lib/
     package_card.dart     One package: name, price, inclusions, "Choose …" / "Continue with …"
     session_slot.dart     One bookable time, chosen like a radio button
     status_tag.dart       StatusTag ("Paid", "Taken") and InlineMessage (a sentence-long success/error)
-    focus_ring.dart       FocusRing: the 2px-gap focus ring for custom controls, and its on-photo variant
+    focus_ring.dart       FocusRing: the 2px-gap focus ring for custom controls, and its on-photo variant;
+                          requestFocusInView: keyboard traversal scrolls focused controls clear of the edges
+    empty_state.dart      EmptyState: the shared "nothing here yet" band with its action
+    google_sign_in_button.dart  Google's sign-in button (official G from assets/google/, Google's colors)
     network_photo.dart    A photograph with a placeholder and a fade-in
     account_avatar.dart   The butter initial disc
     brookie_logo.dart     BrookieLogo: assets/logo.png at its fixed aspect, so nothing moves when it loads
   utilities/
     utils.dart            Date formatters ("Saturday, October 24", "Sat, Oct 24") and the booking window
+    keyboard_input.dart   KeyboardInput: whether the last input was a key (like :focus-visible)
     embedded_browser.dart Detects in-app browsers (Instagram, Facebook, TikTok, Pinterest, Android WebViews, ...)
 assets/logo.png           The logo, used exactly as supplied
 assets/fonts/             Jost and Newsreader TTFs (SIL OFL, licenses alongside)
+assets/google/            Google's G mark for the sign-in button, rendered from Google's official assets
 web/                      index.html (title, meta, link previews, paper loading screen), manifest, icons
                           (favicon, app icons and og-image are made from assets/logo.png)
 test/                     Widget and unit tests; mirrors lib/
@@ -202,8 +207,13 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   a 1.5px ink ring) and the signed-in avatar. One ink primary button per view.
   Photographs have square corners and are never tinted or overlaid.
 - Keyboard focus: buttons get the theme's ring (`brookieFocusSide`: a 2px gap,
-  then a 2px ring); custom controls use `FocusRing`, and controls on a
-  photograph `FocusRing.onPhoto`. Never remove a focus ring.
+  then a 2px ring; outlined buttons keep their edge under it via
+  `FocusRingBorder`); custom controls use `FocusRing`, and controls on a
+  photograph `FocusRing.onPhoto`. Controls focused without a key press (a
+  dialog's first action, the account avatar) show their ring only while
+  `KeyboardInput.lastWasKey`. Never remove a focus ring.
+- The only colors outside `BrookieColors` are Google's, inside
+  `GoogleSignInButton`, as Google's sign-in branding requires.
 - Copy follows the design system's voice: sentence case, verb-first buttons that
   say what happens, one name per action through a flow, times from
   `SessionTime` ("9:00–9:30 am", "9:00 am"), dates from `formatDayHeading` /

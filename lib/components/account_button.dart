@@ -110,6 +110,10 @@ class _SignInChip extends StatelessWidget {
             return BorderSide(color: c.lineStrong, width: 1.5);
           }),
           backgroundBuilder: _focusRingLayer(onPhoto: onPhoto),
+          // Its own pill, so the theme's outlined focus border (drawn on any
+          // focus, in ink) neither doubles this keyboard-only ring nor
+          // covers the two-tone one on a photograph.
+          shape: const WidgetStatePropertyAll(StadiumBorder()),
           // The chip's label is 15px, a size down from a full button's.
           textStyle: WidgetStatePropertyAll(Theme.of(context).textTheme.titleSmall),
           minimumSize: const WidgetStatePropertyAll(Size(0, BrookieSize.controlSm)),

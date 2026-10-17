@@ -315,10 +315,12 @@ void main() {
     expect(find.widgetWithText(MenuItemButton, 'Your sessions'), findsNothing);
   });
 
-  testWidgets('signed out, the top bar has the sign-in chip', (tester) async {
+  testWidgets('signed out, the top bar leaves out the sign-in chip: the page has its own', (tester) async {
     await pumpProfile(tester, signedIn: false);
 
-    expect(find.descendant(of: find.byType(BrookieTopBar), matching: find.text('Sign in')), findsOneWidget);
+    expect(find.descendant(of: find.byType(BrookieTopBar), matching: find.text('Sign in')), findsNothing);
+    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Sign in'), findsOneWidget);
   });
 
   for (final (size, top) in [(const Size(1440, 900), BrookieSpace.s7), (const Size(390, 844), BrookieSpace.s6)]) {

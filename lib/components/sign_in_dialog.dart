@@ -4,16 +4,19 @@ import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/auth_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/keyboard_input.dart';
+import 'package:brookie_babies/widgets/google_sign_in_button.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:flutter/foundation.dart' show clampDouble;
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// Asks the visitor to sign in with Google. Completes with the signed-in user,
 /// or null if they dismiss the dialog.
 Future<AppUser?> showSignInDialog(BuildContext context, {bool toBook = false}) {
-  _KeyboardInput.listen();
+  KeyboardInput.listen();
+  // So the G is there as the dialog fades in.
+  if (!AppServices.of(context).isEmbeddedBrowser) precacheImage(GoogleSignInButton.logo, context);
   return showDialog<AppUser>(
     context: context,
     animationStyle: MediaQuery.disableAnimationsOf(context)
@@ -105,12 +108,17 @@ class _SignInDialogState extends State<SignInDialog> {
           const _Link(),
         ],
         dismissLabel: 'Close',
-        action: FilledButton.icon(
-          autofocus: true,
-          style: _primaryStyle(context),
-          onPressed: _copyLink,
-          icon: _linkCopied ? const Icon(Icons.check) : null,
-          label: Text(_linkCopied ? 'Link copied' : 'Copy link'),
+        // Rebuilt when the family switches between keyboard and mouse, so
+        // the ring follows, like the browser's :focus-visible.
+        action: ValueListenableBuilder<bool>(
+          valueListenable: KeyboardInput.changes,
+          builder: (context, lastWasKey, child) => FilledButton.icon(
+            autofocus: true,
+            style: _primaryStyle(context),
+            onPressed: _copyLink,
+            icon: _linkCopied ? const Icon(Icons.check) : null,
+            label: Text(_linkCopied ? 'Link copied' : 'Copy link'),
+          ),
         ),
       );
     }
@@ -129,12 +137,8 @@ class _SignInDialogState extends State<SignInDialog> {
         ],
       ],
       dismissLabel: 'Cancel',
-      action: FilledButton(
-        autofocus: true,
-        style: _primaryStyle(context),
-        onPressed: _signIn,
-        child: const Text('Continue with Google'),
-      ),
+      // Google's own button, as the Dialog spec asks.
+      action: GoogleSignInButton(autofocus: true, onPressed: _signIn),
     );
   }
 }
@@ -159,8 +163,8 @@ class _BrookieDialog extends StatelessWidget {
   final String dismissLabel;
   final Widget action;
 
-  /// Below this window width "Cancel" and "Continue with Google" no longer
-  /// fit side by side.
+  /// Below this window width the actions stack: side by side, "Cancel" and
+  /// "Continue with Google" would only just fit, or not at all.
   static const _stackActionsBelow = 380.0;
 
   @override
@@ -280,14 +284,14 @@ class _Link extends StatelessWidget {
   }
 }
 
-/// The theme's primary button, ringed for focus only when the family is using
-/// the keyboard. The dialog focuses its primary action as it opens, and after
-/// a click that ring (and the hover fill that comes with it) would make the
-/// button look already pressed.
+/// The theme's primary button ("Copy link" in an in-app browser), ringed for
+/// focus only when the family is using the keyboard. The dialog focuses its
+/// primary action as it opens, and after a click that ring (and the hover
+/// fill that comes with it) would make the button look already pressed.
 ButtonStyle _primaryStyle(BuildContext context) {
   final c = BrookieColors.of(context);
   bool keyboardFocused(Set<WidgetState> states) =>
-      states.contains(WidgetState.focused) && _KeyboardInput.lastWasKey;
+      states.contains(WidgetState.focused) && KeyboardInput.lastWasKey;
   return ButtonStyle(
     backgroundColor: WidgetStateProperty.resolveWith((states) {
       if (states.contains(WidgetState.disabled)) return c.surfaceSunk;
@@ -298,25 +302,4 @@ ButtonStyle _primaryStyle(BuildContext context) {
     side: WidgetStateProperty.resolveWith(
         (states) => keyboardFocused(states) ? brookieFocusSide(c.focus) : BorderSide.none),
   );
-}
-
-/// Whether the last input was a key press rather than a pointer, like the
-/// browser's :focus-visible.
-abstract final class _KeyboardInput {
-  static bool _listening = false;
-  static bool lastWasKey = false;
-
-  static void listen() {
-    if (_listening) return;
-    _listening = true;
-    // The first dialog may have been opened with Enter, which is still down.
-    lastWasKey = HardwareKeyboard.instance.logicalKeysPressed.isNotEmpty;
-    HardwareKeyboard.instance.addHandler((event) {
-      lastWasKey = true;
-      return false; // Only watching; the key still does what it does.
-    });
-    GestureBinding.instance.pointerRouter.addGlobalRoute((event) {
-      if (event is PointerDownEvent) lastWasKey = false;
-    });
-  }
 }

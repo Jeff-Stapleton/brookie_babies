@@ -5,6 +5,7 @@ import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/keyboard_input.dart';
 import 'package:brookie_babies/widgets/account_avatar.dart';
 import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,10 @@ import 'package:flutter/services.dart';
 /// The account control at the right of a top bar: a "Sign in" chip when
 /// signed out; when signed in, a butter avatar that opens the account menu
 /// ("Your sessions", "Sign out").
+///
+/// Its focus rings show only for keyboard focus ([KeyboardInput]): the
+/// avatar takes focus when its menu opens, and the chip when the sign-in
+/// dialog closes, and after a click a ring would look like keyboard focus.
 class AccountButton extends StatelessWidget {
   const AccountButton({super.key, this.onPhoto = false, this.showSessionsLink = true});
 
@@ -20,21 +25,24 @@ class AccountButton extends StatelessWidget {
   /// than on paper.
   final bool onPhoto;
 
-  /// Whether the account menu links to "Your sessions". False on that page
-  /// itself, so the menu doesn't open a second copy of it.
+  /// Whether this control is anywhere but "Your sessions" itself. False on
+  /// that page: the account menu leaves out the link to it (it would open a
+  /// second copy), and signed out the control shows nothing, since the page
+  /// has its own "Sign in" button.
   final bool showSessionsLink;
 
   @override
   Widget build(BuildContext context) {
+    KeyboardInput.listen();
     final auth = AppServices.of(context).auth;
     return StreamBuilder<AppUser?>(
       stream: auth.authStateChanges,
       initialData: auth.currentUser,
       builder: (context, snapshot) {
         final user = snapshot.data;
-        return user == null
-            ? _SignInChip(onPhoto: onPhoto)
-            : _AccountMenu(user: user, onPhoto: onPhoto, showSessionsLink: showSessionsLink);
+        if (user != null) return _AccountMenu(user: user, onPhoto: onPhoto, showSessionsLink: showSessionsLink);
+        // On "Your sessions" the page's own "Sign in" is the one way in.
+        return showSessionsLink ? _SignInChip(onPhoto: onPhoto) : const SizedBox.shrink();
       },
     );
   }
@@ -44,18 +52,24 @@ class AccountButton extends StatelessWidget {
 /// side.
 const _tapInset = (kMinInteractiveDimension - BrookieSize.controlSm) / 2;
 
-/// The keyboard focus ring for a control on a photograph, as a button
-/// layer: [FocusRing.onPhoto] around the button's painted shape, so it
-/// shows on light and dark prints alike. The button must not clip
-/// (`clipBehavior: Clip.none`), since the ring paints outside it.
-ButtonLayerBuilder _photoFocusRing({bool circle = false}) {
-  return (context, states, child) => FocusRing.onPhoto(
-        visible: states.contains(WidgetState.focused),
-        circle: circle,
-        // Any radius past half the height draws a pill.
-        borderRadius: circle ? null : BrookieSize.controlSm,
-        child: child!,
-      );
+/// Whether [states] hold focus that came from the keyboard.
+bool _keyboardFocused(Set<WidgetState> states) => states.contains(WidgetState.focused) && KeyboardInput.lastWasKey;
+
+/// The keyboard focus ring as a button layer, painted outside the button's
+/// own edge so the 2px gap shows between them: [FocusRing.onPhoto] on a
+/// photograph (it shows on light and dark prints alike), [FocusRing] on
+/// paper (for a pill). The button must not clip (`clipBehavior:
+/// Clip.none`), since the ring paints outside it.
+ButtonLayerBuilder _focusRingLayer({required bool onPhoto, bool circle = false}) {
+  assert(onPhoto || !circle, 'On paper a round button rings itself with brookieFocusSide.');
+  return (context, states, child) {
+    final visible = _keyboardFocused(states);
+    // Any radius past half the height draws a pill.
+    const pill = BrookieSize.controlSm;
+    return onPhoto
+        ? FocusRing.onPhoto(visible: visible, circle: circle, borderRadius: circle ? null : pill, child: child!)
+        : FocusRing(visible: visible, borderRadius: pill, child: child!);
+  };
 }
 
 class _SignInChip extends StatelessWidget {
@@ -65,33 +79,44 @@ class _SignInChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = BrookieColors.of(context);
-    return OutlinedButton.icon(
-      onPressed: () => showSignInDialog(context),
-      clipBehavior: Clip.none,
-      icon: const Icon(Icons.person_outline),
-      label: const Text('Sign in'),
-      style: ButtonStyle(
-        backgroundColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.hovered)) return c.surfaceSunk;
-          // Paper with no edge reads over any part of a photograph.
-          return onPhoto ? c.paper : c.surface;
-        }),
-        // BorderSide.none rather than null, which would fall back to the
-        // theme's ring.
-        side: WidgetStateProperty.resolveWith((states) {
-          if (onPhoto) return BorderSide.none;
-          if (states.contains(WidgetState.focused)) return brookieFocusSide(c.focus);
-          if (states.contains(WidgetState.hovered)) return BorderSide(color: c.ink, width: 1.5);
-          return BorderSide(color: c.lineStrong, width: 1.5);
-        }),
-        backgroundBuilder: onPhoto ? _photoFocusRing() : null,
-        // The chip's label is 15px, a size down from a full button's.
-        textStyle: WidgetStatePropertyAll(Theme.of(context).textTheme.titleSmall),
-        minimumSize: const WidgetStatePropertyAll(Size(0, BrookieSize.controlSm)),
-        padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: BrookieSpace.s4)),
-        // The chip is drawn 40px tall but answers taps across 48.
-        tapTargetSize: MaterialTapTargetSize.padded,
+    // On a photograph the chip keeps Print's paper and ink in both themes,
+    // as the butter button on the same photograph does: Darkroom's paper
+    // would all but vanish into a dark print.
+    final c = onPhoto ? BrookieColors.light : BrookieColors.of(context);
+    // Rebuilt when the family switches between keyboard and mouse, so the
+    // ring follows, like the browser's :focus-visible.
+    return ValueListenableBuilder<bool>(
+      valueListenable: KeyboardInput.changes,
+      builder: (context, lastWasKey, child) => OutlinedButton.icon(
+        onPressed: () => showSignInDialog(context),
+        clipBehavior: Clip.none,
+        icon: const Icon(Icons.person_outline),
+        label: const Text('Sign in'),
+        style: ButtonStyle(
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.hovered)) return c.surfaceSunk;
+            // Paper with no edge reads over any part of a photograph.
+            return onPhoto ? c.paper : c.surface;
+          }),
+          foregroundColor: WidgetStatePropertyAll(c.ink),
+          iconColor: WidgetStatePropertyAll(c.ink),
+          // Focused, the chip keeps its own edge and the ring is drawn
+          // outside it, past a 2px gap, so focus looks unlike hover.
+          // BorderSide.none rather than null, which would fall back to the
+          // theme's.
+          side: WidgetStateProperty.resolveWith((states) {
+            if (onPhoto) return BorderSide.none;
+            if (states.contains(WidgetState.hovered)) return BorderSide(color: c.ink, width: 1.5);
+            return BorderSide(color: c.lineStrong, width: 1.5);
+          }),
+          backgroundBuilder: _focusRingLayer(onPhoto: onPhoto),
+          // The chip's label is 15px, a size down from a full button's.
+          textStyle: WidgetStatePropertyAll(Theme.of(context).textTheme.titleSmall),
+          minimumSize: const WidgetStatePropertyAll(Size(0, BrookieSize.controlSm)),
+          padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: BrookieSpace.s4)),
+          // The chip is drawn 40px tall but answers taps across 48.
+          tapTargetSize: MaterialTapTargetSize.padded,
+        ),
       ),
     );
   }
@@ -103,7 +128,8 @@ class _SignInChip extends StatelessWidget {
 /// arrow opens it on its first item (the up arrow, on its last); the arrow
 /// keys move between items and wrap around, Home and End jump to the first
 /// and last, and Escape closes it and returns focus to the avatar. Opened
-/// with a click, focus stays where it was.
+/// with a click or a tap, focus doesn't move into the menu, and the avatar
+/// (which MenuAnchor focuses) shows no ring.
 class _AccountMenu extends StatefulWidget {
   const _AccountMenu({required this.user, required this.onPhoto, required this.showSessionsLink});
 
@@ -145,10 +171,12 @@ class _AccountMenuState extends State<_AccountMenu> {
   void _toggle() {
     if (_controller.isOpen) {
       _controller.close();
-    } else if (_avatarFocus.hasPrimaryFocus) {
-      // From the keyboard or a screen reader: into the menu.
+    } else if (_avatarFocus.hasPrimaryFocus && KeyboardInput.lastWasKey) {
+      // Enter or Space on the focused avatar: into the menu.
       _openOn(last: false);
     } else {
+      // A click or a tap, even on an avatar that already has focus (opening
+      // the menu focuses it): focus stays out of the menu.
       _controller.open();
     }
   }
@@ -257,10 +285,12 @@ class _AccountMenuState extends State<_AccountMenu> {
           alignment: AlignmentDirectional.bottomStart,
           backgroundColor: WidgetStatePropertyAll(c.surface),
           surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-          // Edges come from hairlines; only photographs and dialogs cast shadows.
+          // No shadow (only photographs and dialogs cast one), so the edge
+          // is what sets the menu apart from the page under it: an edge that
+          // carries meaning, so line-strong.
           elevation: const WidgetStatePropertyAll(0),
           shadowColor: const WidgetStatePropertyAll(Colors.transparent),
-          side: WidgetStatePropertyAll(BorderSide(color: c.line)),
+          side: WidgetStatePropertyAll(BorderSide(color: c.lineStrong)),
           shape: WidgetStatePropertyAll(
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(BrookieRadius.md))),
           padding: const WidgetStatePropertyAll(EdgeInsets.zero),
@@ -280,26 +310,32 @@ class _AccountMenuState extends State<_AccountMenu> {
             child: MergeSemantics(
               child: Semantics(
                 expanded: controller.isOpen,
-                child: IconButton(
-                  focusNode: _avatarFocus,
-                  tooltip: 'Account',
-                  onPressed: _toggle,
-                  style: ButtonStyle(
-                    padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-                    tapTargetSize: MaterialTapTargetSize.padded,
-                    // Like the butter button on a photograph: an on-butter
-                    // edge on hover. BorderSide.none rather than null, which
-                    // would fall back to the theme's ring.
-                    side: WidgetStateProperty.resolveWith((states) {
-                      if (states.contains(WidgetState.focused)) {
-                        return widget.onPhoto ? BorderSide.none : brookieFocusSide(c.focus);
-                      }
-                      if (states.contains(WidgetState.hovered)) return BorderSide(color: c.onButter, width: 1.5);
-                      return BorderSide.none;
-                    }),
-                    backgroundBuilder: widget.onPhoto ? _photoFocusRing(circle: true) : null,
+                // Rebuilt when the family switches between keyboard and
+                // mouse, so the ring follows, like the browser's
+                // :focus-visible.
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: KeyboardInput.changes,
+                  builder: (context, lastWasKey, child) => IconButton(
+                    focusNode: _avatarFocus,
+                    tooltip: 'Account',
+                    onPressed: _toggle,
+                    style: ButtonStyle(
+                      padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+                      tapTargetSize: MaterialTapTargetSize.padded,
+                      // Like the butter button on a photograph: an on-butter
+                      // edge on hover. BorderSide.none rather than null,
+                      // which would fall back to the theme's ring.
+                      side: WidgetStateProperty.resolveWith((states) {
+                        if (_keyboardFocused(states)) {
+                          return widget.onPhoto ? BorderSide.none : brookieFocusSide(c.focus);
+                        }
+                        if (states.contains(WidgetState.hovered)) return BorderSide(color: c.onButter, width: 1.5);
+                        return BorderSide.none;
+                      }),
+                      backgroundBuilder: widget.onPhoto ? _focusRingLayer(onPhoto: true, circle: true) : null,
+                    ),
+                    icon: AccountAvatar(user: widget.user),
                   ),
-                  icon: AccountAvatar(user: widget.user),
                 ),
               ),
             ),

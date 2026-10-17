@@ -4,6 +4,7 @@ import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/widgets/focus_ring.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -12,8 +13,15 @@ import 'package:flutter_test/flutter_test.dart';
 import '../support/fakes.dart';
 
 void main() {
-  Widget app(FakeAuthService auth, {bool onPhoto = false, bool showSessionsLink = true}) => testApp(
+  Widget app(
+    FakeAuthService auth, {
+    bool onPhoto = false,
+    bool showSessionsLink = true,
+    Brightness brightness = Brightness.light,
+  }) =>
+      testApp(
         auth: auth,
+        brightness: brightness,
         home: Scaffold(
           body: Center(child: AccountButton(onPhoto: onPhoto, showSessionsLink: showSessionsLink)),
         ),
@@ -43,6 +51,34 @@ void main() {
 
   final focusRing = brookieFocusSide(BrookieColors.light.focus);
 
+  /// A real mouse: a click is a press and a release, then the pointer moves
+  /// off to the corner so nothing is left hovered.
+  Future<void> Function(Offset) mouse(WidgetTester tester) {
+    TestGesture? gesture;
+    return (Offset at) async {
+      if (gesture == null) {
+        final created = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await created.addPointer(location: Offset.zero);
+        addTearDown(created.removePointer);
+        gesture = created;
+      }
+      await gesture!.moveTo(at);
+      await gesture!.down(at);
+      await gesture!.up();
+      await gesture!.moveTo(Offset.zero);
+      await tester.pumpAndSettle();
+    };
+  }
+
+  /// Whether a focus ring (of any kind) shows.
+  bool ringShows(WidgetTester tester) =>
+      tester.widgetList<FocusRing>(find.byType(FocusRing)).any((ring) => ring.visible);
+
+  /// Whether any item in the open menu has focus.
+  bool menuItemFocused(WidgetTester tester) => tester
+      .widgetList<MenuItemButton>(find.byType(MenuItemButton))
+      .any((item) => item.focusNode?.hasFocus ?? false);
+
   testWidgets('signed out: "Sign in" opens the sign-in dialog', (tester) async {
     await tester.pumpWidget(app(FakeAuthService()));
 
@@ -70,6 +106,52 @@ void main() {
     final chip = chipSurface(tester);
     expect(chip.color, BrookieColors.light.paper);
     expect((chip.shape! as OutlinedBorder).side, BorderSide.none);
+  });
+
+  testWidgets('signed out on a photograph in Darkroom: still a light paper pill with ink', (tester) async {
+    await tester.pumpWidget(app(FakeAuthService(), onPhoto: true, brightness: Brightness.dark));
+
+    // The photograph is the same in both themes, and so is the chip on it.
+    expect(chipSurface(tester).color, BrookieColors.light.paper);
+    final label = tester.renderObject<RenderParagraph>(find.text('Sign in'));
+    expect(label.text.style!.color, BrookieColors.light.ink);
+    final icon = tester.widget<RichText>(
+        find.descendant(of: find.byIcon(Icons.person_outline), matching: find.byType(RichText)));
+    expect(icon.text.style!.color, BrookieColors.light.ink);
+
+    // Hovered, Print's sunk paper, not Darkroom's.
+    final hover = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await hover.addPointer(location: tester.getCenter(find.text('Sign in')));
+    addTearDown(hover.removePointer);
+    await tester.pumpAndSettle();
+    expect(chipSurface(tester).color, BrookieColors.light.surfaceSunk);
+  });
+
+  testWidgets('signed out on paper in Darkroom: the chip follows the theme', (tester) async {
+    await tester.pumpWidget(app(FakeAuthService(), brightness: Brightness.dark));
+
+    final chip = chipSurface(tester);
+    expect(chip.color, BrookieColors.dark.surface);
+    expect((chip.shape! as OutlinedBorder).side.color, BrookieColors.dark.lineStrong);
+    expect(tester.renderObject<RenderParagraph>(find.text('Sign in')).text.style!.color, BrookieColors.dark.ink);
+  });
+
+  testWidgets('on "Your sessions" signed out, no chip: the page has its own "Sign in"', (tester) async {
+    await tester.pumpWidget(app(FakeAuthService(), showSessionsLink: false));
+
+    expect(find.text('Sign in'), findsNothing);
+    expect(find.byType(OutlinedButton), findsNothing);
+    expect(tester.getSize(find.byType(AccountButton)), Size.zero);
+  });
+
+  testWidgets('on "Your sessions", signing in brings the avatar back', (tester) async {
+    final auth = FakeAuthService()..nextSignIn = testUser;
+    await tester.pumpWidget(app(auth, showSessionsLink: false));
+
+    await auth.signInWithGoogle();
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Account'), findsOneWidget);
   });
 
   testWidgets('signed in: shows the account menu and signs out', (tester) async {
@@ -143,12 +225,52 @@ void main() {
     expect(label.text.style!.fontWeight, FontWeight.w500);
   });
 
-  testWidgets('signed out on paper: keyboard focus draws the gap ring', (tester) async {
+  testWidgets('signed out on paper: keyboard focus keeps the edge and rings it past a gap', (tester) async {
     await tester.pumpWidget(app(FakeAuthService()));
+    expect(tester.widget<FocusRing>(find.byType(FocusRing)).visible, isFalse);
+
     await key(tester, LogicalKeyboardKey.tab);
 
-    expect((chipSurface(tester).shape! as OutlinedBorder).side, focusRing);
-    expect(find.byType(FocusRing), findsNothing);
+    final ring = tester.widget<FocusRing>(find.byType(FocusRing));
+    expect(ring.visible, isTrue);
+    expect(ring.color, isNull); // the system's focus color
+    // The chip keeps its own 1.5px edge; the ring is a separate layer.
+    final side = (chipSurface(tester).shape! as OutlinedBorder).side;
+    expect(side.color, BrookieColors.light.lineStrong);
+    expect(side.width, 1.5);
+    // The ring paints outside the chip, so the chip mustn't clip it.
+    expect(chipSurface(tester).clipBehavior, Clip.none);
+  });
+
+  testWidgets('signed out on paper: hover darkens the edge but draws no ring', (tester) async {
+    await tester.pumpWidget(app(FakeAuthService()));
+    final hover = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await hover.addPointer(location: tester.getCenter(find.text('Sign in')));
+    addTearDown(hover.removePointer);
+    await tester.pumpAndSettle();
+
+    final side = (chipSurface(tester).shape! as OutlinedBorder).side;
+    expect(side.color, BrookieColors.light.ink);
+    expect(side.width, 1.5);
+    expect(ringShows(tester), isFalse);
+  });
+
+  testWidgets('signed out: the chip shows no ring when focused by a click', (tester) async {
+    await tester.pumpWidget(app(FakeAuthService()));
+    final chip = find.byType(OutlinedButton);
+    // Focus without a key press, as when the sign-in dialog hands focus back.
+    await mouse(tester)(const Offset(5, 5));
+    Focus.of(tester.element(find.text('Sign in'))).requestFocus();
+    await tester.pumpAndSettle();
+    expect(Focus.of(tester.element(find.text('Sign in'))).hasPrimaryFocus, isTrue);
+
+    expect(ringShows(tester), isFalse);
+    expect((chipSurface(tester).shape! as OutlinedBorder).side.color, BrookieColors.light.lineStrong);
+
+    // A key press while it has focus shows the ring, as :focus-visible does.
+    await key(tester, LogicalKeyboardKey.shiftLeft);
+    expect(ringShows(tester), isTrue);
+    expect(chip, findsOneWidget);
   });
 
   testWidgets('signed out on a photograph: keyboard focus draws the two-tone ring', (tester) async {
@@ -184,18 +306,22 @@ void main() {
     expect(avatarSide(tester), BorderSide.none);
   });
 
-  testWidgets('the menu has a hairline edge and casts no shadow', (tester) async {
-    await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser)));
-    await tester.tap(find.byType(CircleAvatar));
-    await tester.pumpAndSettle();
+  for (final brightness in Brightness.values) {
+    testWidgets('the menu is edged in line-strong and casts no shadow (${brightness.name})', (tester) async {
+      await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser), brightness: brightness));
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
 
-    final panel = tester.widget<Material>(
-      find.ancestor(of: find.text('Pat Parent'), matching: find.byType(Material)).first,
-    );
-    expect(panel.elevation, 0);
-    expect(panel.color, BrookieColors.light.surface);
-    expect((panel.shape! as RoundedRectangleBorder).side.color, BrookieColors.light.line);
-  });
+      final colors = brightness == Brightness.dark ? BrookieColors.dark : BrookieColors.light;
+      final panel = tester.widget<Material>(
+        find.ancestor(of: find.text('Pat Parent'), matching: find.byType(Material)).first,
+      );
+      expect(panel.elevation, 0);
+      expect(panel.color, colors.surface);
+      // The edge is what sets the menu apart from the page under it.
+      expect((panel.shape! as RoundedRectangleBorder).side.color, colors.lineStrong);
+    });
+  }
 
   testWidgets('the menu hangs from the avatar, right edges lined up', (tester) async {
     await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser)));
@@ -208,7 +334,7 @@ void main() {
     expect(panel.top, moreOrLessEquals(avatar.bottom + BrookieSpace.s2));
   });
 
-  testWidgets('a click opens the menu without moving focus into it', (tester) async {
+  testWidgets('a tap opens the menu without moving focus into it', (tester) async {
     await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser)));
     await tester.tap(find.byType(CircleAvatar));
     await tester.pumpAndSettle();
@@ -216,6 +342,86 @@ void main() {
     expect(hasFocus(tester, find.text('Your sessions')), isFalse);
     expect(hasFocus(tester, find.text('Sign out')), isFalse);
     expect(itemSide(tester, 'Your sessions'), BorderSide.none);
+  });
+
+  for (final onPhoto in [false, true]) {
+    final where = onPhoto ? 'on a photograph' : 'on paper';
+    testWidgets('mouse $where: click, click outside, click again: no ring and no focused item', (tester) async {
+      await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser), onPhoto: onPhoto));
+      final click = mouse(tester);
+      final avatar = tester.getCenter(find.byType(CircleAvatar));
+
+      void expectNoKeyboardLook(String after) {
+        expect(menuItemFocused(tester), isFalse, reason: after);
+        expect(avatarSide(tester), BorderSide.none, reason: after);
+        expect(ringShows(tester), isFalse, reason: after);
+      }
+
+      await click(avatar);
+      expect(find.text('Sign out'), findsOneWidget);
+      expectNoKeyboardLook('the first click');
+      expect(itemSide(tester, 'Your sessions'), BorderSide.none);
+
+      await click(const Offset(5, 5));
+      expect(find.text('Sign out'), findsNothing);
+      expectNoKeyboardLook('the click outside');
+
+      // The avatar kept focus from the first click; this is still a click.
+      await click(avatar);
+      expect(find.text('Sign out'), findsOneWidget);
+      expectNoKeyboardLook('the second click');
+      expect(itemSide(tester, 'Your sessions'), BorderSide.none);
+      expect(itemSide(tester, 'Sign out'), BorderSide.none);
+
+      // A click on the avatar closes it again.
+      await click(avatar);
+      expect(find.text('Sign out'), findsNothing);
+      expectNoKeyboardLook('the click that closes it');
+    });
+  }
+
+  testWidgets('mouse, then keyboard: the arrow keys still go into a menu opened by a click', (tester) async {
+    await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser)));
+    await mouse(tester)(tester.getCenter(find.byType(CircleAvatar)));
+    expect(menuItemFocused(tester), isFalse);
+
+    await key(tester, LogicalKeyboardKey.arrowDown);
+
+    expect(hasFocus(tester, find.text('Your sessions')), isTrue);
+    expect(itemSide(tester, 'Your sessions'), focusRing);
+  });
+
+  testWidgets('mouse, then Escape: the menu closes and the avatar shows its ring', (tester) async {
+    await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser)));
+    await mouse(tester)(tester.getCenter(find.byType(CircleAvatar)));
+    expect(avatarSide(tester), BorderSide.none);
+
+    await key(tester, LogicalKeyboardKey.escape);
+
+    expect(find.text('Sign out'), findsNothing);
+    expect(hasFocus(tester, find.byType(CircleAvatar)), isTrue);
+    expect(avatarSide(tester), focusRing);
+  });
+
+  testWidgets('keyboard, then mouse: a click on the focused avatar stays out of the menu', (tester) async {
+    await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser)));
+    await key(tester, LogicalKeyboardKey.tab);
+    expect(avatarSide(tester), focusRing);
+
+    await mouse(tester)(tester.getCenter(find.byType(CircleAvatar)));
+
+    expect(find.text('Sign out'), findsOneWidget);
+    expect(menuItemFocused(tester), isFalse);
+    expect(avatarSide(tester), BorderSide.none);
+  });
+
+  testWidgets('keyboard: Space opens the menu on its first item', (tester) async {
+    await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser)));
+    await key(tester, LogicalKeyboardKey.tab);
+
+    await key(tester, LogicalKeyboardKey.space);
+
+    expect(hasFocus(tester, find.text('Your sessions')), isTrue);
   });
 
   testWidgets('keyboard: Enter opens on the first item, arrows wrap, Home and End jump, Escape returns',

@@ -6,6 +6,7 @@ import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/auth_service.dart';
 import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
+import 'package:brookie_babies/services/portfolio_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:flutter/material.dart';
 
@@ -91,6 +92,21 @@ class FakeGalleryService implements GalleryService {
   void fail(Object error) => _pending!.completeError(error);
 }
 
+/// [PortfolioService] that returns fixed [photos], or throws [error].
+class FakePortfolioService implements PortfolioService {
+  FakePortfolioService([this.photos = const []]);
+
+  final List<Uri> photos;
+  Object? error;
+
+  @override
+  Future<List<Uri>> photoUrls() async {
+    final error = this.error;
+    if (error != null) throw error;
+    return photos;
+  }
+}
+
 /// Records the URLs the app opens instead of launching them.
 class FakeUrlOpener {
   final opened = <({Uri url, String? windowName})>[];
@@ -106,6 +122,7 @@ Widget testApp({
   required AuthService auth,
   BookingService? bookings,
   GalleryService? gallery,
+  PortfolioService? portfolio,
   FakeUrlOpener? urlOpener,
   bool isEmbeddedBrowser = false,
   Brightness brightness = Brightness.light,
@@ -115,6 +132,7 @@ Widget testApp({
     auth: auth,
     bookings: bookings ?? FakeBookingService(),
     gallery: gallery ?? FakeGalleryService(),
+    portfolio: portfolio ?? FakePortfolioService(),
     openUrl: (urlOpener ?? FakeUrlOpener()).call,
     isEmbeddedBrowser: isEmbeddedBrowser,
     child: MaterialApp(theme: brookieTheme(brightness), home: home),

@@ -221,11 +221,11 @@ jobs:
           # permission on the real API calls.
           FIREBASE_SKIP_INFORMATIONAL_IAM: "true"
           DRY_RUN: ${{ vars.BACKEND_DEPLOY_LIVE != 'true' && '--dry-run' || '' }}
-          # "Re-run jobs" with "Enable debug logging" adds --debug, which shows
-          # the real cause behind "Failed to authenticate" or a 403.
-          DEBUG_FLAG: ${{ runner.debug == '1' && '--debug' || '' }}
         # --force: delete functions that were removed from the source.
-        run: firebase deploy --only functions,firestore:rules,storage --project brookie-babies --non-interactive --force ${DRY_RUN:+"$DRY_RUN"} ${DEBUG_FLAG:+"$DEBUG_FLAG"}
+        # Never add --debug here: this repository's logs are public, and debug
+        # output includes API responses such as the signed URL the function
+        # source is uploaded to. Debug locally instead (README).
+        run: firebase deploy --only functions,firestore:rules,storage --project brookie-babies --non-interactive --force ${DRY_RUN:+"$DRY_RUN"}
 
   deploy-live:
     name: Deploy live site

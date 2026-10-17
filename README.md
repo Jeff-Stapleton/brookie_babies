@@ -216,7 +216,7 @@ firebase deploy --only functions,firestore:rules,storage --project brookie-babie
 
 **If the job fails:**
 - **"Failed to generate Google Cloud federated token" in the sign-in step:** the identity pool, provider or condition doesn't match. Re-run `scripts/setup-gcp-deployer.sh`, wait 5 minutes, and re-run the job.
-- **Failures in the deploy step:** use **Re-run jobs** with **Enable debug logging** checked, which adds `--debug` to the deploy command and shows the real cause.
+- **Failures in the deploy step:** the error usually names the API call that failed. For more detail, run the same deploy locally as the owner with `firebase deploy --only functions,firestore:rules,storage --debug` (add `--dry-run` to change nothing). Don't add `--debug` in CI: this repository's logs are public, and debug output includes API responses such as the signed URL the function source is uploaded to.
 - **A 403:** the error names the missing permission. Add it to `scripts/setup-gcp-deployer.sh` and re-run the script.
 
 **Before merging something new**, prepare the project, because `github-deployer` deliberately can't. Otherwise the CI deploy fails:

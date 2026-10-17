@@ -33,10 +33,15 @@ jobs:
         with:
           persist-credentials: false
 
-      # build/ and .dart_tool/ are still committed. Delete them so stale
-      # output can't leak into the analysis or the deployed build.
-      - name: Remove committed build output
-        run: rm -rf build .dart_tool
+      # The repo is public. Fail if any tracked file contains a Stripe secret
+      # key, a webhook secret or a private key (e.g. a service account JSON).
+      # Only file names are printed, never the matches.
+      - name: Fail if a secret is in a tracked file
+        run: |
+          if git grep -lE '(sk|rk)_(live|test)_[0-9A-Za-z]{10,}|whsec_[0-9A-Za-z]{20,}|BEGIN [A-Z ]*PRIVATE KEY'; then
+            echo '::error::Secret found in the tracked files listed above'
+            exit 1
+          fi
 
       # Known gap: this action uses actions/cache by tag (not SHA) and does not
       # check the SDK download's sha256. Both come from Google/GitHub over TLS.
@@ -90,10 +95,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # Deploy only the fresh build, not the committed build/ folder.
-      - name: Remove committed build output
-        run: rm -rf build
-
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: web-build
@@ -124,10 +125,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      # Deploy only the fresh build, not the committed build/ folder.
-      - name: Remove committed build output
-        run: rm -rf build
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

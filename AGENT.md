@@ -92,8 +92,9 @@ firebase deploy --only hosting  # manual deploy: run flutter build web first (bu
 
 CI (`.github/workflows/ci.yml`) runs `flutter pub get --enforce-lockfile`,
 `flutter analyze --no-fatal-infos`, `flutter test` and
-`flutter build web --release` on Flutter 3.24.3, then fails if `build/web`
-contains a Stripe secret key. If those pass, it deploys a preview channel for
+`flutter build web --release` on Flutter 3.24.3. It fails if any tracked file
+or `build/web` contains a Stripe secret key, webhook secret or private key. If
+those pass, it deploys a preview channel for
 pull requests and the live site for pushes to `main`.
 
 Storage CORS (needed for the carousel images to load in the browser):
@@ -115,15 +116,16 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
 
 ## Known gaps / gotchas
 
-- **SECURITY: a live Stripe secret key (`sk_live_...`) is hard-coded in
-  `lib/main.dart`** for the `/checkout` route and is committed to git. Secret keys
-  must never ship in client code. It should be revoked in the Stripe dashboard,
-  removed from the source (and ideally git history), and replaced by a
-  server-created PaymentIntent `client_secret` (e.g. from a Cloud Function).
-  Never add new secrets to this repo. CI's Stripe key check fails every run
-  until this key is removed.
-- `build/` is committed to git (Flutter build output). It should be in `.gitignore`.
-  CI deletes it before building.
+- **SECURITY: this repository is public.** A live Stripe secret key used to be
+  hard-coded in `lib/main.dart` and was also committed inside `build/` and
+  `.dart_tool/` output. It has been removed from the tracked files but remains in
+  git history, so it must be rolled in the Stripe dashboard. Never add secrets,
+  service account keys or Stripe keys to this repo; server-side secrets belong in
+  Secret Manager (`firebase functions:secrets:set`). CI fails if a Stripe secret
+  key or private key appears in tracked files or in `build/web`.
+- `build/`, `.dart_tool/` and `.flutter-plugins*` are gitignored. `.dart_tool/`
+  contains the Chrome profile used by `flutter run -d chrome`, including Firebase
+  Auth tokens after a local sign-in, so never force-add it.
 - Lint infos are not fatal in CI yet; analyzer warnings and errors are.
 - Tests run on the Dart VM, so they must not import `main.dart` or
   `checkout_page.dart`, which pull in web-only libraries. `HomePage` also needs

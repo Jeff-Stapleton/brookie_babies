@@ -407,6 +407,9 @@ ThemeData brookieTheme(Brightness brightness) {
       shape: Border(bottom: BorderSide(color: c.line)),
     ),
     iconTheme: IconThemeData(color: c.ink, size: 20),
+    // The same back arrow everywhere (Flutter would show a chevron on Apple
+    // devices).
+    actionIconTheme: ActionIconThemeData(backButtonIconBuilder: (context) => const Icon(Icons.arrow_back)),
     filledButtonTheme: FilledButtonThemeData(
       style: ButtonStyle(
         backgroundColor: WidgetStateProperty.resolveWith((states) {
@@ -473,7 +476,8 @@ ThemeData brookieTheme(Brightness brightness) {
     ),
     iconButtonTheme: IconButtonThemeData(
       style: ButtonStyle(
-        foregroundColor: WidgetStatePropertyAll(c.ink),
+        foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.disabled) ? c.inkSoft : c.ink),
         backgroundColor: WidgetStateProperty.resolveWith((states) =>
             states.contains(WidgetState.hovered) ? c.surfaceSunk : Colors.transparent),
         overlayColor: const WidgetStatePropertyAll(Colors.transparent),

@@ -120,24 +120,19 @@ class _Introduction extends StatelessWidget {
         ? text.displayLarge?.copyWith(fontSize: 44, height: 48 / 44, letterSpacing: -0.015 * 44)
         : text.displayLarge;
     return ContentWidth(
-      // Full width, so the text lines up with the photographs' left edge
-      // rather than being centered as a narrower block.
-      child: SizedBox(
-        width: double.infinity,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Semantics(header: true, child: Text('Little ones, while they’re little', style: display)),
-            const SizedBox(height: BrookieSpace.s5),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: _ledeWidth),
-              child: Text(
-                'Calm, unhurried sessions for newborns, babies and the people who hold them.',
-                style: text.bodyLarge?.merge(BrookieType.lede),
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(header: true, child: Text('Little ones, while they’re little', style: display)),
+          const SizedBox(height: BrookieSpace.s5),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _ledeWidth),
+            child: Text(
+              'Calm, unhurried sessions for newborns, babies and the people who hold them.',
+              style: text.bodyLarge?.merge(BrookieType.lede),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

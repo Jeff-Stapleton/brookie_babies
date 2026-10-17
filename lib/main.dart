@@ -23,7 +23,7 @@ import 'package:web/web.dart' as web;
 
 Map<String, Widget Function(BuildContext)> routes = {
   '/schedule': (context) => const SchedulingPage(packageName: '',),
-  // "My sessions", also linkable as https://brookie-babies.web.app/#/profile.
+  // "Your sessions", also linkable as https://brookie-babies.web.app/#/profile.
   '/profile': (context) => const ProfilePage(),
 };
 
@@ -70,6 +70,8 @@ class MyApp extends StatelessWidget {
       isEmbeddedBrowser: isEmbeddedBrowser,
       child: MaterialApp(
         title: 'Brooke Stapleton Photography',
+        // Paper, for the browser's theme color and the app switcher.
+        color: BrookieColors.light.paper,
         routes: routes,
         // Print by default; Darkroom when the device asks for dark.
         theme: brookieTheme(Brightness.light),

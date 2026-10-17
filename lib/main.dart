@@ -10,7 +10,7 @@ import 'package:firebase_core/firebase_core.dart';
 
 Map<String, Widget Function(BuildContext)> routes = {
   '/schedule': (context) => const SchedulingPage(packageName: '',),
-  '/checkout': (context) => const CheckoutPage(clientSecret: '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'),
+  '/checkout': (context) => const CheckoutPage(clientSecret: ''),
 };
 
 ThemeData theme = ThemeData(

@@ -10,6 +10,7 @@ import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/widgets/account_avatar.dart';
 import 'package:brookie_babies/widgets/content_width.dart';
+import 'package:brookie_babies/widgets/empty_state.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
 import 'package:flutter/material.dart';
@@ -289,31 +290,12 @@ class _NoSessions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: BrookieColors.of(context).surfaceSunk,
-        borderRadius: BorderRadius.circular(BrookieRadius.md),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(BrookieSpace.s5),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
-              child: Text(
-                'No sessions to show yet. After you book, your session appears '
-                'here once we’ve confirmed it.',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            ),
-            const SizedBox(height: BrookieSpace.s4),
-            OutlinedButton(
-              onPressed: () => HomePage.showPackages(context),
-              child: const Text('See packages'),
-            ),
-          ],
-        ),
+    // Short enough to set on one line from about 740px wide.
+    return EmptyState(
+      message: 'No sessions yet. Your booking appears here once we’ve confirmed it.',
+      action: OutlinedButton(
+        onPressed: () => HomePage.showPackages(context),
+        child: const Text('See packages'),
       ),
     );
   }

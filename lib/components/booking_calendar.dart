@@ -4,6 +4,7 @@ import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/utils.dart';
 import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:table_calendar/table_calendar.dart';
 
 /// A month of days for choosing when to book, where the chosen day takes the
@@ -11,6 +12,8 @@ import 'package:table_calendar/table_calendar.dart';
 ///
 /// [TableCalendar] dressed in the design system: month view only, weeks start
 /// on Sunday, days outside the month left blank, days with openings dotted.
+/// By keyboard, Tab visits each open day in reading order and the arrow keys
+/// move to the nearest open day in their direction.
 class BookingCalendar extends StatefulWidget {
   const BookingCalendar({
     super.key,
@@ -58,6 +61,20 @@ class _BookingCalendarState extends State<BookingCalendar> {
 
   final _previousMonth = FocusNode(debugLabel: 'Previous month');
   final _nextMonth = FocusNode(debugLabel: 'Next month');
+
+  /// Tab reads the days a week at a time; the page scrolls a focused day
+  /// into view, but the month pages never move.
+  final _dayTraversal = ReadingOrderTraversalPolicy(requestFocusCallback: requestFocusInView);
+
+  /// The arrow keys move from day to day. On the web they would otherwise
+  /// scroll the nearest scroll view, the month pages, nudging the month
+  /// sideways while focus stays put.
+  static const _arrowKeys = <ShortcutActivator, Intent>{
+    SingleActivator(LogicalKeyboardKey.arrowLeft): DirectionalFocusIntent(TraversalDirection.left),
+    SingleActivator(LogicalKeyboardKey.arrowRight): DirectionalFocusIntent(TraversalDirection.right),
+    SingleActivator(LogicalKeyboardKey.arrowUp): DirectionalFocusIntent(TraversalDirection.up),
+    SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(TraversalDirection.down),
+  };
 
   DateTime get _first => _date(widget.firstDay);
   DateTime get _last => _date(widget.lastDay);
@@ -167,58 +184,62 @@ class _BookingCalendarState extends State<BookingCalendar> {
               const SizedBox(height: BrookieSpace.s2),
               // Its own group, so Tab reads the days a week at a time instead
               // of sorting them in with the session times beside the calendar.
-              FocusTraversalGroup(
-                child: TableCalendar<void>(
-                  firstDay: _first,
-                  lastDay: _last,
-                  focusedDay: _focusedDay,
-                  currentDay: widget.today,
-                  // Our own header: the package's chevrons have no tooltips
-                  // and no focus ring.
-                  headerVisible: false,
-                  calendarFormat: CalendarFormat.month,
-                  availableCalendarFormats: const {CalendarFormat.month: 'Month'},
-                  availableGestures: AvailableGestures.horizontalSwipe,
-                  startingDayOfWeek: StartingDayOfWeek.sunday,
-                  rowHeight: BrookieSize.day + BrookieSpace.s1,
-                  daysOfWeekHeight: weekdayHeight,
-                  pageAnimationEnabled: !still,
-                  pageAnimationDuration: kBrookieFadeDuration,
-                  formatAnimationDuration: still ? Duration.zero : kBrookieFadeDuration,
-                  formatAnimationCurve: Curves.easeOut,
-                  enabledDayPredicate: _isBookable,
-                  selectedDayPredicate: (day) => isSameDay(widget.selectedDay, day),
-                  onDaySelected: (day, focusedDay) => _select(day),
-                  onPageChanged: (focusedDay) => setState(() => _focusedDay = focusedDay),
-                  // Past and closed days get their semantics too, so a screen
-                  // reader hears them as unavailable rather than skipping them.
-                  loadEventsForDisabledDays: true,
-                  calendarStyle: CalendarStyle(
-                    outsideDaysVisible: false,
-                    cellMargin: EdgeInsets.zero,
-                    // The month pages clip at their edges. The padding sits
-                    // inside them, so the chosen day's ring and the focus ring
-                    // on the outer columns and the last week stay whole.
-                    tablePadding: EdgeInsets.fromLTRB(side, 0, side, BrookieSpace.s3),
-                  ),
-                  daysOfWeekStyle: DaysOfWeekStyle(
-                    dowTextFormatter: (day, locale) => weekdayInitial(day),
-                    weekdayStyle: weekday,
-                    weekendStyle: weekday,
-                  ),
-                  calendarBuilders: CalendarBuilders<void>(
-                    prioritizedBuilder: (context, day, focusedDay) => _DayDisc(
-                      day: day,
-                      bookable: _isBookable(day),
-                      selected: isSameDay(widget.selectedDay, day),
-                      today: isSameDay(widget.today, day),
-                      onSelected: () => _select(day),
+              Shortcuts(
+                shortcuts: _arrowKeys,
+                child: FocusTraversalGroup(
+                  policy: _dayTraversal,
+                  child: TableCalendar<void>(
+                    firstDay: _first,
+                    lastDay: _last,
+                    focusedDay: _focusedDay,
+                    currentDay: widget.today,
+                    // Our own header: the package's chevrons have no tooltips
+                    // and no focus ring.
+                    headerVisible: false,
+                    calendarFormat: CalendarFormat.month,
+                    availableCalendarFormats: const {CalendarFormat.month: 'Month'},
+                    availableGestures: AvailableGestures.horizontalSwipe,
+                    startingDayOfWeek: StartingDayOfWeek.sunday,
+                    rowHeight: BrookieSize.day + BrookieSpace.s1,
+                    daysOfWeekHeight: weekdayHeight,
+                    pageAnimationEnabled: !still,
+                    pageAnimationDuration: kBrookieFadeDuration,
+                    formatAnimationDuration: still ? Duration.zero : kBrookieFadeDuration,
+                    formatAnimationCurve: Curves.easeOut,
+                    enabledDayPredicate: _isBookable,
+                    selectedDayPredicate: (day) => isSameDay(widget.selectedDay, day),
+                    onDaySelected: (day, focusedDay) => _select(day),
+                    onPageChanged: (focusedDay) => setState(() => _focusedDay = focusedDay),
+                    // Past and closed days get their semantics too, so a screen
+                    // reader hears them as unavailable rather than skipping them.
+                    loadEventsForDisabledDays: true,
+                    calendarStyle: CalendarStyle(
+                      outsideDaysVisible: false,
+                      cellMargin: EdgeInsets.zero,
+                      // The month pages clip at their edges. The padding sits
+                      // inside them, so the chosen day's ring and the focus ring
+                      // on the outer columns and the last week stay whole.
+                      tablePadding: EdgeInsets.fromLTRB(side, 0, side, BrookieSpace.s3),
                     ),
-                    // TableCalendar wraps each day in its own label and drops
-                    // ours, so the state rides along on the marker layer.
-                    markerBuilder: (context, day, events) => _DaySemantics(
-                      bookable: _isBookable(day),
-                      selected: isSameDay(widget.selectedDay, day),
+                    daysOfWeekStyle: DaysOfWeekStyle(
+                      dowTextFormatter: (day, locale) => weekdayInitial(day),
+                      weekdayStyle: weekday,
+                      weekendStyle: weekday,
+                    ),
+                    calendarBuilders: CalendarBuilders<void>(
+                      prioritizedBuilder: (context, day, focusedDay) => _DayDisc(
+                        day: day,
+                        bookable: _isBookable(day),
+                        selected: isSameDay(widget.selectedDay, day),
+                        today: isSameDay(widget.today, day),
+                        onSelected: () => _select(day),
+                      ),
+                      // TableCalendar wraps each day in its own label and drops
+                      // ours, so the state rides along on the marker layer.
+                      markerBuilder: (context, day, events) => _DaySemantics(
+                        bookable: _isBookable(day),
+                        selected: isSameDay(widget.selectedDay, day),
+                      ),
                     ),
                   ),
                 ),

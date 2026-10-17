@@ -13,7 +13,7 @@ import 'package:brookie_babies/services/payment_links.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/utils.dart';
 import 'package:brookie_babies/widgets/content_width.dart';
-import 'package:brookie_babies/widgets/status_tag.dart';
+import 'package:brookie_babies/widgets/empty_state.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
 import 'package:table_calendar/table_calendar.dart' show isSameDay;
 
@@ -171,7 +171,8 @@ class _SchedulingPageState extends State<SchedulingPage> {
         ),
       );
     }
-    // Stacked, the times keep the width they have beside the calendar.
+    // Stacked, the times end where the calendar card does, so the column has
+    // one right edge.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -180,7 +181,7 @@ class _SchedulingPageState extends State<SchedulingPage> {
         ContentWidth(
           child: Align(
             alignment: Alignment.topLeft,
-            child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: _TimesColumn.maxWidth), child: times),
+            child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: BookingCalendar.maxWidth), child: times),
           ),
         ),
       ],
@@ -210,7 +211,8 @@ class _TimesColumn extends StatelessWidget {
   /// Whether the button fills the column (phones) or fits its label.
   final bool blockButton;
 
-  /// The column's widest, beside the calendar or under it.
+  /// The column's widest beside the calendar. Under it, the column is as
+  /// wide as the calendar ([BookingCalendar.maxWidth]).
   static const maxWidth = 520.0;
 
   @override
@@ -253,30 +255,17 @@ class _TimesColumn extends StatelessWidget {
 
 /// Shown when there is nothing to book: the page was opened without a
 /// package (the bare /schedule route), or the package can't be paid for.
-/// Offers a way back to the packages.
+/// Offers a way back to the packages, like "Your sessions" with no sessions.
 class _NoPackage extends StatelessWidget {
   const _NoPackage();
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.topLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const InlineMessage(
-              tone: StatusTone.neutral,
-              message: 'Choose a package first, then pick a time for your session.',
-            ),
-            const SizedBox(height: BrookieSpace.s4),
-            OutlinedButton(
-              onPressed: () => HomePage.showPackages(context),
-              child: const Text('See packages'),
-            ),
-          ],
-        ),
+    return EmptyState(
+      message: 'Choose a package first, then pick a time for your session.',
+      action: OutlinedButton(
+        onPressed: () => HomePage.showPackages(context),
+        child: const Text('See packages'),
       ),
     );
   }

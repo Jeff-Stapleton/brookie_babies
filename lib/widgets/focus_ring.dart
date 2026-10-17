@@ -1,5 +1,70 @@
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+
+/// Moves keyboard focus to [node] and keeps it well inside the window, so its
+/// focus ring (4px outside it) is never cut off at an edge.
+///
+/// A [TraversalRequestFocusCallback] for the app's traversal policies
+/// (MaterialApp.builder and the calendar's days): Tab and the arrow keys
+/// call it. Once focused, a control within [BrookieSpace.s6] of the top or
+/// bottom of a scroll view, or past it, scrolls to the middle of that view
+/// over [kBrookieFadeDuration] (at once with reduced motion). A control
+/// already comfortably in view doesn't move the page. Only vertical scroll
+/// views scroll: the calendar's month pages stay where they are.
+void requestFocusInView(
+  FocusNode node, {
+  ScrollPositionAlignmentPolicy? alignmentPolicy,
+  double? alignment,
+  Duration? duration,
+  Curve? curve,
+}) {
+  node.requestFocus();
+  final context = node.context;
+  final target = context?.findRenderObject();
+  if (context == null || target == null || !target.attached) return;
+  final still = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+  // Walk out through the scroll views around the control, as
+  // Scrollable.ensureVisible does: in each, reveal the box that holds it.
+  var inner = context;
+  for (var scrollable = Scrollable.maybeOf(inner); scrollable != null; scrollable = Scrollable.maybeOf(inner)) {
+    final holder = inner.findRenderObject();
+    if (holder != null && holder.attached && scrollable.position.axis == Axis.vertical) {
+      _centerUnlessRoomy(scrollable.position, holder, target, still: still);
+    }
+    inner = scrollable.context;
+  }
+}
+
+/// How close to a scroll view's edge a focused control may sit before it is
+/// scrolled to the middle: its ring, and a card's padding beyond it.
+const double _room = BrookieSpace.s6;
+
+void _centerUnlessRoomy(ScrollPosition position, RenderObject holder, RenderObject target, {required bool still}) {
+  final viewport = RenderAbstractViewport.maybeOf(holder);
+  if (viewport == null || !position.hasPixels || !position.hasContentDimensions) return;
+  final bounds = target == holder
+      ? target.paintBounds
+      : MatrixUtils.transformRect(target.getTransformTo(holder), target.paintBounds);
+  final roomy = bounds.inflate(_room);
+  // The scroll offsets that put the roomy box's top at the view's top and its
+  // bottom at the view's bottom; in between, it is all in view.
+  final top = viewport.getOffsetToReveal(holder, 0, rect: roomy, axis: Axis.vertical).offset;
+  final bottom = viewport.getOffsetToReveal(holder, 1, rect: roomy, axis: Axis.vertical).offset;
+  if (position.pixels >= bottom - 0.5 && position.pixels <= top + 0.5) return;
+
+  final middle = viewport
+      .getOffsetToReveal(holder, 0.5, rect: bounds, axis: Axis.vertical)
+      .offset
+      .clamp(position.minScrollExtent, position.maxScrollExtent);
+  if ((middle - position.pixels).abs() < 0.5) return;
+  if (still) {
+    position.jumpTo(middle);
+  } else {
+    position.animateTo(middle, duration: kBrookieFadeDuration, curve: Curves.easeOut);
+  }
+}
 
 /// The keyboard focus ring for controls the Material theme doesn't style: a
 /// 2px gap, then a solid 2px ring in [BrookieColors.focus].

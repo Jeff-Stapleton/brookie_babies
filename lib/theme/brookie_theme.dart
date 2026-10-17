@@ -445,8 +445,10 @@ ThemeData brookieTheme(Brightness brightness) {
         iconColor: WidgetStateProperty.resolveWith(
             (states) => states.contains(WidgetState.disabled) ? c.inkSoft : c.ink),
         overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        // The button keeps its own edge when focused; the ring is drawn by
+        // the shape, 2px outside that edge, so focus (edge, gap, ring) reads
+        // differently from hover (an ink edge).
         side: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.focused)) return focusRing();
           if (states.contains(WidgetState.disabled)) return BorderSide(color: c.line, width: 1.5);
           if (states.contains(WidgetState.hovered)) return BorderSide(color: c.ink, width: 1.5);
           return BorderSide(color: c.lineStrong, width: 1.5);
@@ -454,7 +456,8 @@ ThemeData brookieTheme(Brightness brightness) {
         minimumSize: const WidgetStatePropertyAll(controlSize),
         padding: const WidgetStatePropertyAll(controlPadding),
         iconSize: const WidgetStatePropertyAll(20),
-        shape: const WidgetStatePropertyAll(pill),
+        shape: WidgetStateProperty.resolveWith((states) =>
+            states.contains(WidgetState.focused) ? FocusRingBorder(shape: pill, ring: focusRing()) : pill),
         textStyle: WidgetStatePropertyAll(text.labelLarge),
         animationDuration: kBrookieStateDuration,
       ),
@@ -580,8 +583,100 @@ ThemeData brookieTheme(Brightness brightness) {
 /// covers 2–4px out. Pass [BrookieColors.onButter] on a butter fill. On a
 /// photograph use [FocusRing.onPhoto] instead (lib/widgets/focus_ring.dart).
 /// In a widget-level ButtonStyle, return [BorderSide.none] rather than null
-/// for "no ring": null falls back to the theme's ring.
+/// for "no ring": null falls back to the theme's ring. A control that keeps
+/// its own edge when focused (the outlined button) draws the ring with
+/// [FocusRingBorder] instead.
 BorderSide brookieFocusSide(Color color) => BorderSide(color: color, width: 2, strokeAlign: 3);
+
+/// A control's own outline with the keyboard focus ring around it: [shape]
+/// paints the control's edge as usual, then [ring] (a [brookieFocusSide])
+/// follows the same outline 2px outside it.
+///
+/// For controls that keep their edge when focused, such as the outlined
+/// button: replacing the edge with the ring would leave no gap to see, and
+/// focus would look like hover. The ring fades in and out with the
+/// control's other state changes.
+class FocusRingBorder extends OutlinedBorder {
+  FocusRingBorder({required this.shape, required this.ring})
+      : assert(shape is! FocusRingBorder),
+        super(side: shape.side);
+
+  /// The control's own shape and edge.
+  final OutlinedBorder shape;
+
+  /// The focus ring, drawn on [shape]'s outline at the ring's stroke align.
+  final BorderSide ring;
+
+  @override
+  EdgeInsetsGeometry get dimensions => shape.dimensions;
+
+  @override
+  Path getInnerPath(Rect rect, {TextDirection? textDirection}) =>
+      shape.getInnerPath(rect, textDirection: textDirection);
+
+  @override
+  Path getOuterPath(Rect rect, {TextDirection? textDirection}) =>
+      shape.getOuterPath(rect, textDirection: textDirection);
+
+  @override
+  bool get preferPaintInterior => shape.preferPaintInterior;
+
+  @override
+  void paintInterior(Canvas canvas, Rect rect, Paint paint, {TextDirection? textDirection}) =>
+      shape.paintInterior(canvas, rect, paint, textDirection: textDirection);
+
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
+    shape.paint(canvas, rect, textDirection: textDirection);
+    shape.copyWith(side: ring).paint(canvas, rect, textDirection: textDirection);
+  }
+
+  @override
+  FocusRingBorder copyWith({BorderSide? side}) => FocusRingBorder(shape: shape.copyWith(side: side), ring: ring);
+
+  @override
+  ShapeBorder scale(double t) => FocusRingBorder(shape: shape.scale(t) as OutlinedBorder, ring: ring.scale(t));
+
+  /// [ring] at [opacity] of its own alpha.
+  BorderSide _ringAt(double opacity) => ring.copyWith(color: ring.color.withValues(alpha: ring.color.a * opacity));
+
+  @override
+  ShapeBorder? lerpFrom(ShapeBorder? a, double t) {
+    if (a is FocusRingBorder) {
+      final lerped = ShapeBorder.lerp(a.shape, shape, t);
+      if (lerped is OutlinedBorder) return FocusRingBorder(shape: lerped, ring: BorderSide.lerp(a.ring, ring, t));
+    } else if (a is OutlinedBorder) {
+      // Gaining focus: the edge changes as usual and the ring fades in.
+      final lerped = ShapeBorder.lerp(a, shape, t);
+      if (lerped is OutlinedBorder && lerped is! FocusRingBorder) {
+        return FocusRingBorder(shape: lerped, ring: _ringAt(t));
+      }
+    }
+    return super.lerpFrom(a, t);
+  }
+
+  @override
+  ShapeBorder? lerpTo(ShapeBorder? b, double t) {
+    if (b is OutlinedBorder && b is! FocusRingBorder) {
+      // Losing focus: the ring fades out.
+      final lerped = ShapeBorder.lerp(shape, b, t);
+      if (lerped is OutlinedBorder && lerped is! FocusRingBorder) {
+        return FocusRingBorder(shape: lerped, ring: _ringAt(1 - t));
+      }
+    }
+    return super.lerpTo(b, t);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is FocusRingBorder && other.shape == shape && other.ring == ring;
+
+  @override
+  int get hashCode => Object.hash(shape, ring);
+
+  @override
+  String toString() => 'FocusRingBorder($shape, ring: $ring)';
+}
 
 /// The button style for the one action on a photograph, such as the hero's
 /// "Book a session": butter, like the logo's disc. Never on paper.

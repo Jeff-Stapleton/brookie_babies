@@ -152,18 +152,15 @@ class _PhotoDownloadState extends State<_PhotoDownload> {
   }
 
   /// While preparing, the button looks disabled (surface-sunk, ink-soft)
-  /// but keeps focus. Focus keeps the theme's ring.
+  /// but keeps focus. Focus keeps the theme's ring (the outlined one keeps
+  /// its edge inside it).
   ButtonStyle? _busyStyle(BrookieColors c) {
     if (!_preparing) return null;
     return ButtonStyle(
       backgroundColor: WidgetStatePropertyAll(widget.primary ? c.surfaceSunk : Colors.transparent),
       foregroundColor: WidgetStatePropertyAll(c.inkSoft),
       iconColor: WidgetStatePropertyAll(c.inkSoft),
-      side: widget.primary
-          ? null
-          : WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.focused)
-              ? brookieFocusSide(c.focus)
-              : BorderSide(color: c.line, width: 1.5)),
+      side: widget.primary ? null : WidgetStatePropertyAll(BorderSide(color: c.line, width: 1.5)),
       mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.progress),
     );
   }

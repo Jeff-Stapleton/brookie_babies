@@ -5,6 +5,7 @@ import 'package:brookie_babies/pages/home_page.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/widgets/empty_state.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
 import 'package:flutter/material.dart';
@@ -93,7 +94,7 @@ void main() {
     expect(find.text('Pat Parent'), findsOneWidget);
     expect(find.text('parent@example.com'), findsOneWidget);
     expect(bookings.watchedUids, [testUser.uid]);
-    expect(find.textContaining('No sessions to show yet.'), findsOneWidget);
+    expect(find.textContaining('No sessions yet.'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, 'See packages'), findsOneWidget);
   });
 
@@ -176,7 +177,7 @@ void main() {
     await pumpProfile(tester, bookings: FakeBookingService(const [], 1));
 
     expect(find.textContaining('Some of your sessions couldn’t be shown'), findsOneWidget);
-    expect(find.textContaining('No sessions to show yet.'), findsNothing);
+    expect(find.textContaining('No sessions yet.'), findsNothing);
   });
 
   testWidgets('past session: downloads the zip in the same tab', (tester) async {
@@ -355,11 +356,17 @@ void main() {
     expect(style.color, BrookieColors.light.ink);
   });
 
-  testWidgets('the empty state keeps its sentence to the reading width', (tester) async {
+  testWidgets('the empty state is the shared band, its sentence held to the reading width', (tester) async {
     await pumpProfile(tester, size: const Size(1440, 900));
 
-    expect(tester.getSize(find.textContaining('No sessions to show yet.')).width,
+    final band = find.byType(EmptyState);
+    expect(band, findsOneWidget);
+    expect(find.descendant(of: band, matching: find.widgetWithText(OutlinedButton, 'See packages')), findsOneWidget);
+    expect(tester.getSize(find.textContaining('No sessions yet.')).width,
         lessThanOrEqualTo(BrookieSize.readingWidth));
+    // The band fills the sessions column.
+    expect(tester.getTopLeft(band).dx, tester.getTopLeft(headline()).dx);
+    expect(tester.getSize(band).width, 720);
   });
 
   testWidgets('"See packages" goes back home and shows the packages', (tester) async {
@@ -460,10 +467,11 @@ void main() {
     await tester.pump();
 
     final busy = find.widgetWithText(OutlinedButton, 'Preparing your photos…');
-    final side = (tester.widget<Material>(find.descendant(of: busy, matching: find.byType(Material))).shape!
-            as OutlinedBorder)
-        .side;
-    expect(side, brookieFocusSide(BrookieColors.light.focus));
+    final shape = tester.widget<Material>(find.descendant(of: busy, matching: find.byType(Material))).shape!;
+    // Its own quiet edge, then the gap and the ring.
+    expect(shape, isA<FocusRingBorder>());
+    expect((shape as FocusRingBorder).ring, brookieFocusSide(BrookieColors.light.focus));
+    expect(shape.side, BorderSide(color: BrookieColors.light.line, width: 1.5));
     gallery.complete(GalleryDownload(url: Uri.parse('https://example.com/b1.zip'), photoCount: 3));
     await tester.pumpAndSettle();
   });

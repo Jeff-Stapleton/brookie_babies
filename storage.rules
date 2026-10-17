@@ -10,8 +10,8 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Home page carousel. Anyone may read (get and list: the app uses
-    // listAll); nobody may write from the app.
+    // Home page photos (hero and featured). Anyone may read (get and list:
+    // the app uses listAll); nobody may write from the app.
     match /_admin/gallery/{allPaths=**} {
       allow read: if true;
     }

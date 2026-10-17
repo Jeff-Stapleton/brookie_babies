@@ -1,24 +1,27 @@
 # Brookie Babies
 
-A Flutter web app for the Brookie Babies photography business. Visitors can
-browse a photo gallery, choose a session package, pick a date and time, and pay
-through Stripe. The site is hosted on Firebase.
+A Flutter web app for Brooke Stapleton Photography. Families can see Brooke's
+photographs, choose a session package, pick a date and time, pay through Stripe,
+and later download their edited photos. The site is hosted on Firebase.
 
-> Status: early MVP. Much of the copy, the session times and the package
-> details are still placeholders.
+> Status: early MVP. The session times and the package inclusions are still
+> placeholders (`lib/models/session_time.dart`, `lib/models/session_package.dart`).
 
 ## Features
 
-- **Hero carousel**: full-screen, auto-advancing gallery loaded from Firebase
-  Storage (`_admin/gallery`).
-- **Packages**: Basic ($25), Premium ($50) and Ultimate ($99) pricing cards.
-- **Scheduling**: a calendar (`table_calendar`) with a list of available sessions
-  for the selected day.
+- **Home page**: one full-bleed photograph with the logo and "Book a session",
+  then a short introduction and up to six more photographs, all from Firebase
+  Storage (`_admin/gallery`; see "Home page photos").
+- **Packages**: Basic ($25), Premium ($50) and Ultimate ($99); choosing one
+  opens booking for it.
+- **Scheduling**: a calendar (`table_calendar`) and the session times for the
+  chosen day.
 - **Sign-in**: Google sign-in through Firebase Auth. Customers sign in before
   paying.
-- **Payment**: choosing a session opens the matching Stripe Payment Link,
-  tagged with the customer's account so the payment can be matched to them.
-- **My sessions**: signed-in customers see their upcoming and past sessions and
+- **Payment**: after choosing a time, "Continue to payment" opens the package's
+  Stripe Payment Link, tagged with the customer's account so the payment can be
+  matched to them.
+- **Your sessions**: signed-in customers see their upcoming and past sessions and
   download every photo from a past session as one zip, through a private link
   that expires after an hour.
 
@@ -28,6 +31,9 @@ through Stripe. The site is hosted on Firebase.
 - Firebase: Core, Auth (Google), Firestore, Storage, Cloud Functions, Hosting
   (project `brookie-babies`)
 - Cloud Functions: TypeScript on Node 24 (`functions/`)
+- Design system theme in `lib/theme/brookie_theme.dart` (Print and Darkroom,
+  following the device's light or dark setting); Jost and Newsreader bundled in
+  `assets/fonts/`
 - Stripe: Payment Links
 - `table_calendar`, `url_launcher`
 
@@ -63,8 +69,8 @@ flutter run -d chrome
 ```
 
 The app connects to the `brookie-babies` Firebase project with the web config in
-`lib/firebase_options.dart`. The carousel only shows images once the Storage
-bucket has files under `_admin/gallery` and CORS is configured (see below).
+`lib/firebase_options.dart`. The home page only shows photographs once the
+Storage bucket has files under `_admin/gallery` and CORS is configured (see below).
 
 ### Common commands
 
@@ -93,33 +99,46 @@ bucket has files under `_admin/gallery` and CORS is configured (see below).
 ```
 lib/
   main.dart          App entry point, Firebase init, theme, routes
-  models/            Data types (signed-in user, booking)
+  theme/             The design system: colors, type, spacing, Material theme
+  models/            Data types (signed-in user, booking, packages, session times)
   services/          Auth, bookings, photo downloads, app-wide services,
                      Stripe Payment Links
-  pages/             Home, Scheduling and My sessions screens
-  components/        Page sections (carousel, packages, session list, footer,
-                     account button, sign-in dialog, booking card)
-  widgets/           Reusable widgets (cards, text styles, lists)
-  utilities/         Calendar and browser helpers
-assets/              Logo
+  pages/             Home, Book a session and Your sessions screens
+  components/        Page sections (hero, featured photos, packages, calendar,
+                     session times, footer, account button, sign-in dialog,
+                     booking card)
+  widgets/           Reusable widgets (top bar, package card, session slot,
+                     status tags, focus ring, photos)
+  utilities/         Date and browser helpers
+assets/              Logo and fonts
 web/                 Web shell (index.html, manifest, icons)
 functions/           Cloud Functions (TypeScript, Node 24): getGalleryDownloadUrl
 firestore.rules      Firestore security rules (customers read only their own bookings)
-storage.rules        Storage security rules (only the carousel folder is public)
+storage.rules        Storage security rules (only the home page photo folder is public)
 .github/workflows/   CI: analyze, test, build and deploy (ci.yml)
 ```
 
 See [AGENT.md](AGENT.md) for an architectural walkthrough, conventions and known issues.
 
+## Home page photos
+
+The home page shows the photographs in Storage → `_admin/gallery`, in file-name
+order. The **first file by name is the full-screen photo** behind the logo, so
+pick one whose subject's face is clear of the center (the logo covers the
+middle) and name it so it sorts first, for example `00-hero.jpg`. The next six
+appear below the introduction, in full rows only (three across on wider
+screens, two on phones; a leftover photo is left out). Use JPEG, PNG or WebP;
+everything in this folder is public.
+
 ## Delivering photos
 
-Customers download their photos from **My sessions** as soon as the booking's `status` is `paid` and `photosReady` is `true`. The **Download all photos** button appears on the booking's card even before the session date, so check that the booking is right before marking it ready. Photos are never public through the site: customers get a zip download link that expires after one hour.
+Customers download their photos from **Your sessions** as soon as the booking's `status` is `paid` and `photosReady` is `true`. The **Download all photos** button appears on the booking's card even before the session date, so check that the booking is right before marking it ready. Photos are never public through the site: customers get a zip download link that expires after one hour.
 
 1. **Find the booking ID.** Firebase console → Firestore Database → `bookings`. Find the customer's booking by `email` and `date`. The document ID is the booking ID.
-2. **Upload the photos.** Firebase console → Storage → open `galleries` (create it if needed) → **Create folder** named exactly the booking ID → upload the photos into it. Subfolders are fine. Hidden files such as `.DS_Store` are skipped. Never put customer photos in `_admin/gallery/`: that folder is public (it's the home page carousel).
+2. **Upload the photos.** Firebase console → Storage → open `galleries` (create it if needed) → **Create folder** named exactly the booking ID → upload the photos into it. Subfolders are fine. Hidden files such as `.DS_Store` are skipped. Never put customer photos in `_admin/gallery/`: that folder is public (it's the home page photos).
 3. **Mark them ready.** Open the booking again and set the field `photosReady` (type **boolean**) to `true`. Do this only after every upload has finished.
 
-> **Never share the Storage console's file links.** For every uploaded file, the console shows a download link with an access token. Anyone with that link can open the photo, permanently, whatever the security rules say. Customers should only get their photos through **My sessions**. If a link was shared by mistake, revoke that file's access token (Storage → the file → Access token → Revoke).
+> **Never share the Storage console's file links.** For every uploaded file, the console shows a download link with an access token. Anyone with that link can open the photo, permanently, whatever the security rules say. Customers should only get their photos through **Your sessions**. If a link was shared by mistake, revoke that file's access token (Storage → the file → Access token → Revoke).
 
 The first download builds a zip of the whole folder, which can take a few minutes for a large gallery. Later downloads reuse it. If you add, replace or delete photos afterwards, the next download rebuilds the zip automatically. (If you replace a photo while a customer's download is being built, that one download may contain the old version.)
 
@@ -177,7 +196,7 @@ the security note in [AGENT.md](AGENT.md).
 
 `functions/` holds the Cloud Functions, and `firestore.rules` and `storage.rules` hold the security rules. They were first deployed by hand on 2026-10-17. CI now deploys them on every push to `main`. Do the one-time setup below **before** the change that added this reaches `main`.
 
-These files are the source of truth: each deploy **replaces the Firestore and Storage rules set in the Firebase console**, so change rules here, not in the console. Only `_admin/gallery/` (the carousel) is publicly readable, customers can read only their own bookings, and nothing can be written from the app.
+These files are the source of truth: each deploy **replaces the Firestore and Storage rules set in the Firebase console**, so change rules here, not in the console. Only `_admin/gallery/` (the home page photos) is publicly readable, customers can read only their own bookings, and nothing can be written from the app.
 
 #### Automatic backend deploys
 

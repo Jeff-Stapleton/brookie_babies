@@ -1,6 +1,6 @@
 # TODO
 
-Open items for sign-in, bookings and photo downloads. Last updated 2026-10-17 (after PR #7).
+Open items for sign-in, bookings, photo downloads and site content. Last updated 2026-10-17 (design-system restyle).
 
 ## 1. Test photo downloads
 
@@ -29,7 +29,7 @@ left is one real download, on the live site: https://brookie-babies.web.app
       Copy the generated document ID.
 - [ ] **Upload photos:** Storage → folder `galleries` → folder named exactly
       that document ID → upload 2 or 3 photos.
-- [ ] **Download:** open the avatar menu → **My sessions**.
+- [ ] **Download:** open the avatar menu → **Your sessions**.
       The booking shows under **Past**. Click **Download all photos**: you
       should see "Preparing your photos…", then a zip downloads.
 - [ ] **Privacy check:** sign in with a second Google account; it should
@@ -88,3 +88,36 @@ Functions → getGalleryDownloadUrl → Logs.
     instead of the default compute account. This is worth doing if the setup
     script warns that the compute account has Editor.
   - Add a branch ruleset on `main` that blocks force-pushes and deletion.
+
+## 5. Site content needed from Brooke
+
+The site now follows the design system; these are facts only the studio can
+supply. Each lives in one place in the code.
+
+- [ ] **Hero photo:** today the first file in `_admin/gallery` is a portrait
+      with the face in the center, so the logo covers it. Choose a photo with
+      the face clear of the middle and rename it to sort first (README, "Home
+      page photos").
+- [ ] **What each package includes:** all three list the same inclusions
+      (`lib/models/session_package.dart`), so families would pay more for
+      nothing. Optionally add a one-sentence description per package.
+- [ ] **Session times and length:** the booking page offers 9, 10, 11 am, 1 and
+      2 pm every day, 30 minutes each (`lib/models/session_time.dart`), while
+      the packages say "15-minute session". Which days and times, how long,
+      and how much notice?
+- [ ] **Address line:** every time says "Address sent after you book". Is that
+      what happens, and who sends it?
+- [ ] **Contact and social links:** the footer has none, and one error message
+      says "Let Brooke know". An email address (and Instagram, if wanted)
+      would give families a way to reach the studio.
+- [ ] **Introduction copy:** "Little ones, while they’re little" and "Calm,
+      unhurried sessions for newborns, babies and the people who hold them."
+      are drafts from the design system.
+- [ ] **Logo for dark backgrounds:** the black brush strokes past the disc
+      nearly disappear on the dark theme (footer, loading screen, browser
+      tab). A light-ink version would fix that.
+- [ ] **Stripe Checkout branding:** in the Stripe Dashboard, set the accent
+      color to ink `#1C1B19`, the background to paper `#F6F6F3`, and the logo
+      as the icon, so the payment page matches the site.
+- [ ] **Custom domain:** link previews point at https://brookie-babies.web.app/;
+      update `web/index.html` if the site moves to its own domain.

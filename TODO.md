@@ -4,6 +4,11 @@ Open items for sign-in, bookings and photo downloads. Last updated 2026-10-17 (a
 
 ## 1. Test photo downloads
 
+- [ ] **First, give the function access to bookings and photos:**
+      `bash scripts/setup-functions-runtime.sh` from the repo root. Without
+      it, downloads fail: the function's runtime account can't read
+      Firestore or Storage yet.
+
 PR #7 is merged and the backend is deployed: the `getGalleryDownloadUrl`
 function, the Firestore and Storage rules, and the signing permission. What's
 left is one real download, on the live site: https://brookie-babies.web.app

@@ -88,6 +88,7 @@ cors.json                 CORS rule for the Storage bucket (GET from any origin)
 scripts/
   setup-gcp-deployer.sh   One-time (owner): keyless CI deploys: WIF pool/provider, github-deployer SA + roles
   setup-github-production.sh  One-time (owner): restrict the `production` environment to main
+  setup-functions-runtime.sh  One-time (owner): runtime SA access for the functions (Firestore read, bucket objects, self-signing)
 .github/deploy-tools/     Pinned Firebase CLI (package.json + package-lock.json) for the deploy-backend job
 .github/workflows/ci.yml  CI: analyze, test, build; preview on PR; on main: deploy backend, then live site
 ```
@@ -224,6 +225,8 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   custom `serviceAccount` or a new API, prepare the project (README, "Before
   merging something new"), or the `deploy-backend` job fails. Once
   `BACKEND_DEPLOY_LIVE` is `true`, that failure also holds back the live site.
+- The functions' runtime account has no broad access; `scripts/setup-functions-runtime.sh`
+  grants what they need. A new function that reads other data needs a role added there.
 - `getGalleryDownloadUrl` signs URLs through the IAM signBlob API, which needs
   Service Account Token Creator on the functions' runtime service account
   (README, "Deploying the backend").

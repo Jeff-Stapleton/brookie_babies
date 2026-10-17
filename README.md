@@ -242,8 +242,20 @@ npm ci --prefix functions
 firebase deploy --only functions,firestore:rules,storage
 ```
 
-#### Function setup (done 2026-10-17)
+#### Function runtime permissions
 
-`getGalleryDownloadUrl` signs download links with its own service account through Google's IAM API, rather than a key file. That needed the **IAM Service Account Credentials API** turned on, and `375587092017-compute@developer.gserviceaccount.com` given **Service Account Token Creator** on itself. If downloads ever fail with "We couldn't get your photos ready just now" and the function log shows a `signBlob` permission error, check those two settings.
+The functions run as `375587092017-compute@developer.gserviceaccount.com`, which in this project has no broad (Editor) access. `scripts/setup-functions-runtime.sh` (project owner, once, idempotent) gives it exactly what `getGalleryDownloadUrl` needs:
+
+- **Reading bookings:** read-only Firestore access (`roles/datastore.viewer`).
+- **Reading photos and saving the zips:** object access on the Storage bucket only (`roles/storage.objectUser`).
+- **Signing the download links:** Service Account Token Creator on itself only. The script removes any project-wide Token Creator grant, which would let the functions act as every service account in the project.
+
+Signing also needs the **IAM Service Account Credentials API**, which is turned on.
+
+If downloads fail with "We couldn't get your photos ready just now", check the function's log:
+- **A Firestore or Storage permission error:** re-run the script.
+- **A `signBlob` error:** check the Token Creator grant and the API.
+
+When a new function needs other data, add the role to this script, scoped as narrowly as possible.
 
 Optional: add a Storage lifecycle rule that deletes objects under `gallery-zips/` after 30 days to save storage. Zips are rebuilt automatically the next time someone downloads.

@@ -1,7 +1,9 @@
 import 'package:brookie_babies/models/booking.dart';
+import 'package:brookie_babies/models/session_time.dart';
 import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/utils.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:flutter/material.dart';
 
@@ -9,10 +11,15 @@ import 'package:flutter/material.dart';
 /// time and place, and for paid sessions, the photo download (or, once past,
 /// a note that the photos are being edited).
 class BookingCard extends StatelessWidget {
-  const BookingCard({super.key, required this.booking, required this.isPast});
+  const BookingCard({super.key, required this.booking, required this.isPast, this.primaryDownload = true});
 
   final Booking booking;
   final bool isPast;
+
+  /// Whether "Download all photos" is the page's primary (ink) button. The
+  /// page has one: on the newest session with photos ready. Others are
+  /// outlined.
+  final bool primaryDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -41,10 +48,11 @@ class BookingCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: BrookieSpace.s3),
-            _Detail(icon: Icons.event_outlined, text: _formatDate(booking.date, DateTime.now())),
+            _Detail(icon: Icons.event_outlined, text: formatDayShort(booking.date, now: DateTime.now())),
+            // The start time only: a booking doesn't record how long it runs.
             if (time != null) ...[
               const SizedBox(height: BrookieSpace.s2),
-              _Detail(icon: Icons.schedule_outlined, text: _formatTime(time.hour, time.minute)),
+              _Detail(icon: Icons.schedule_outlined, text: SessionTime.clockLabel(time.hour, time.minute)),
             ],
             if (location != null) ...[
               const SizedBox(height: BrookieSpace.s2),
@@ -56,7 +64,7 @@ class BookingCard extends StatelessWidget {
               const SizedBox(height: BrookieSpace.s5),
               const Divider(),
               const SizedBox(height: BrookieSpace.s5),
-              _PhotoDownload(booking: booking),
+              _PhotoDownload(booking: booking, primary: primaryDownload),
             ],
           ],
         ),
@@ -79,21 +87,6 @@ class _PaymentTag extends StatelessWidget {
       BookingStatus.refunded => const StatusTag(label: 'Refunded'),
     };
   }
-}
-
-const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/// "Sat, Oct 24", with the year added when it isn't [now]'s: "Sun, May 6, 2001".
-String _formatDate(DateTime date, DateTime now) {
-  final day = '${_weekdays[date.weekday - DateTime.monday]}, ${_months[date.month - 1]} ${date.day}';
-  return date.year == now.year ? day : '$day, ${date.year}';
-}
-
-/// "9:00 am", "2:30 pm", "12:00 pm".
-String _formatTime(int hour, int minute) {
-  final hour12 = hour % 12 == 0 ? 12 : hour % 12;
-  return '$hour12:${minute.toString().padLeft(2, '0')} ${hour < 12 ? 'am' : 'pm'}';
 }
 
 /// One line of the session's details, labelled by an icon.
@@ -121,9 +114,10 @@ class _Detail extends StatelessWidget {
 }
 
 class _PhotoDownload extends StatefulWidget {
-  const _PhotoDownload({required this.booking});
+  const _PhotoDownload({required this.booking, required this.primary});
 
   final Booking booking;
+  final bool primary;
 
   @override
   State<_PhotoDownload> createState() => _PhotoDownloadState();
@@ -133,7 +127,11 @@ class _PhotoDownloadState extends State<_PhotoDownload> {
   bool _preparing = false;
   String? _error;
 
+  // The button stays enabled while the zip is prepared: a disabled button
+  // drops keyboard focus (onto "Sign out", where a second Enter would sign
+  // the family out). Another press just waits for the same download.
   Future<void> _download() async {
+    if (_preparing) return;
     final services = AppServices.of(context);
     setState(() {
       _preparing = true;
@@ -153,31 +151,52 @@ class _PhotoDownloadState extends State<_PhotoDownload> {
     }
   }
 
+  /// While preparing, the button looks disabled (surface-sunk, ink-soft)
+  /// but keeps focus. Focus keeps the theme's ring.
+  ButtonStyle? _busyStyle(BrookieColors c) {
+    if (!_preparing) return null;
+    return ButtonStyle(
+      backgroundColor: WidgetStatePropertyAll(widget.primary ? c.surfaceSunk : Colors.transparent),
+      foregroundColor: WidgetStatePropertyAll(c.inkSoft),
+      iconColor: WidgetStatePropertyAll(c.inkSoft),
+      side: widget.primary
+          ? null
+          : WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.focused)
+              ? brookieFocusSide(c.focus)
+              : BorderSide(color: c.line, width: 1.5)),
+      mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.progress),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = BrookieColors.of(context);
     if (!widget.booking.photosReady) {
       return Text(
-        "Your photos are being edited. They'll be ready to download here soon.",
+        'Your photos are being edited. They’ll be ready to download here soon.',
         style: TextStyle(color: c.inkSoft),
       );
     }
     final error = _error;
+    final icon = _preparing
+        ? SizedBox.square(
+            dimension: 16,
+            child: CircularProgressIndicator(strokeWidth: 2, color: c.inkSoft),
+          )
+        : const Icon(Icons.download_outlined);
+    final label = Text(_preparing ? 'Preparing your photos…' : 'Download all photos');
+    final style = _busyStyle(c);
+    final button = widget.primary
+        ? FilledButton.icon(onPressed: _download, style: style, icon: icon, label: label)
+        : OutlinedButton.icon(onPressed: _download, style: style, icon: icon, label: label);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const StatusTag(label: 'Ready to download', tone: StatusTone.success),
         const SizedBox(height: BrookieSpace.s3),
-        FilledButton.icon(
-          onPressed: _preparing ? null : _download,
-          icon: _preparing
-              ? SizedBox.square(
-                  dimension: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: c.inkSoft),
-                )
-              : const Icon(Icons.download_outlined),
-          label: Text(_preparing ? 'Preparing your photos…' : 'Download all photos'),
-        ),
+        // One node and a live region, so screen readers hear "Preparing your
+        // photos…" and then the button's name again.
+        MergeSemantics(child: Semantics(liveRegion: true, child: button)),
         if (error != null) ...[
           const SizedBox(height: BrookieSpace.s3),
           InlineMessage(message: error),

@@ -1,7 +1,9 @@
 import 'package:brookie_babies/components/sign_in_dialog.dart';
 import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/services/auth_service.dart';
+import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,15 +12,16 @@ import '../support/fakes.dart';
 
 /// Opens the dialog from a button and keeps what it completes with.
 class _Opener extends StatelessWidget {
-  const _Opener({required this.onResult});
+  const _Opener({required this.onResult, this.toBook = false});
 
   final void Function(AppUser?) onResult;
+  final bool toBook;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: ElevatedButton(
-        onPressed: () async => onResult(await showSignInDialog(context)),
+        onPressed: () async => onResult(await showSignInDialog(context, toBook: toBook)),
         child: const Text('open'),
       ),
     );
@@ -30,14 +33,23 @@ void main() {
   AppUser? result;
   var completed = false;
 
-  Future<void> openDialog(WidgetTester tester, {bool isEmbeddedBrowser = false}) async {
+  Future<void> openDialog(
+    WidgetTester tester, {
+    bool isEmbeddedBrowser = false,
+    bool toBook = false,
+    Brightness brightness = Brightness.light,
+  }) async {
     await tester.pumpWidget(testApp(
       auth: auth,
       isEmbeddedBrowser: isEmbeddedBrowser,
-      home: _Opener(onResult: (user) {
-        result = user;
-        completed = true;
-      }),
+      brightness: brightness,
+      home: _Opener(
+        toBook: toBook,
+        onResult: (user) {
+          result = user;
+          completed = true;
+        },
+      ),
     ));
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
@@ -172,5 +184,123 @@ void main() {
 
     expect(completed, isTrue);
     expect(result, isNull);
+  });
+
+  testWidgets('signing in from the account control: "Sign in", about sessions and photos', (tester) async {
+    await openDialog(tester);
+
+    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('Sign in to book'), findsNothing);
+    expect(find.text('Sign in with Google to see your sessions and download your photos.'), findsOneWidget);
+  });
+
+  testWidgets('signing in to book: "Sign in to book", about linking the booking', (tester) async {
+    await openDialog(tester, toBook: true);
+
+    expect(find.text('Sign in to book'), findsOneWidget);
+    expect(
+      find.text('Sign in with Google so we can link your booking, and later your photos, to your account.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('in an in-app browser, the help ends "to sign in."', (tester) async {
+    await openDialog(tester, isEmbeddedBrowser: true);
+
+    expect(find.textContaining(RegExp(r'in the app’s menu\) to sign in\.$')), findsOneWidget);
+    expect(find.textContaining('to book your session'), findsNothing);
+  });
+
+  testWidgets('in an in-app browser while booking, the help ends "to book your session."', (tester) async {
+    await openDialog(tester, isEmbeddedBrowser: true, toBook: true);
+
+    expect(find.textContaining(RegExp(r'in the app’s menu\) to book your session\.$')), findsOneWidget);
+    expect(find.text('Open in your browser to sign in'), findsOneWidget);
+  });
+
+  for (final platform in [TargetPlatform.android, TargetPlatform.windows, TargetPlatform.iOS]) {
+    testWidgets('screen readers on ${platform.name} hear the title, not "Alert"', (tester) async {
+      debugDefaultTargetPlatformOverride = platform;
+      final semantics = tester.ensureSemantics();
+      await openDialog(tester, toBook: true);
+
+      expect(find.bySemanticsLabel('Alert'), findsNothing);
+      expect(
+        find.semantics.byPredicate(
+            (node) => node.label == 'Sign in to book' && node.getSemanticsData().flagsCollection.namesRoute),
+        findsOne,
+      );
+      semantics.dispose();
+      debugDefaultTargetPlatformOverride = null;
+    });
+  }
+
+  for (final brightness in Brightness.values) {
+    testWidgets('casts the dialog shadow (${brightness.name})', (tester) async {
+      await openDialog(tester, brightness: brightness);
+
+      final colors = brightness == Brightness.dark ? BrookieColors.dark : BrookieColors.light;
+      final panel = find.descendant(
+        of: find.byType(Dialog),
+        matching: find.byWidgetPredicate(
+            (w) => w is DecoratedBox && w.decoration is BoxDecoration && (w.decoration as BoxDecoration).boxShadow != null),
+      );
+      final decoration = tester.widget<DecoratedBox>(panel).decoration as BoxDecoration;
+      expect(decoration.boxShadow, colors.shadowDialog);
+      expect(decoration.color, colors.surface);
+      expect(decoration.borderRadius, BorderRadius.circular(BrookieRadius.md));
+      // Material's own elevation shadow is off.
+      final material = tester.widget<Material>(find.descendant(of: find.byType(Dialog), matching: find.byType(Material)).first);
+      expect(material.elevation, 0);
+      expect(tester.getSize(panel).width, lessThanOrEqualTo(440));
+    });
+  }
+
+  for (final width in [320.0, 360.0]) {
+    testWidgets('with large text on a ${width.toInt()}px phone, a sign-in error scrolls into view', (tester) async {
+      tester.view.physicalSize = Size(width, 640);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      auth.nextSignInError = const SignInException(
+          'Your browser blocked the sign-in window. Allow pop-ups for this site, or open this page in Safari '
+          'or Chrome, and try again.');
+      await openDialog(tester);
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.text('Continue with Google'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      final message = tester.getRect(find.byType(InlineMessage));
+      final viewport = tester.getRect(find.descendant(of: find.byType(Dialog), matching: find.byType(Scrollable)));
+      // The whole message if it fits; otherwise it starts at the top.
+      if (message.height <= viewport.height) {
+        expect(message.bottom, lessThanOrEqualTo(viewport.bottom + 0.5));
+        expect(message.top, greaterThanOrEqualTo(viewport.top - 0.5));
+      } else {
+        expect(message.top, moreOrLessEquals(viewport.top, epsilon: 0.5));
+      }
+    });
+  }
+
+  testWidgets('with a little larger text, a short error scrolls just far enough to show it', (tester) async {
+    tester.view.physicalSize = const Size(360, 520);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.view.reset);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    auth.nextSignInError = const SignInException('Pop-ups are blocked.');
+    await openDialog(tester);
+
+    await tester.tap(find.text('Continue with Google'));
+    await tester.pumpAndSettle();
+
+    final message = tester.getRect(find.byType(InlineMessage));
+    final viewport = tester.getRect(find.descendant(of: find.byType(Dialog), matching: find.byType(Scrollable)));
+    expect(message.height, lessThan(viewport.height));
+    expect(message.bottom, lessThanOrEqualTo(viewport.bottom + 0.5));
+    expect(message.top, greaterThanOrEqualTo(viewport.top - 0.5));
   });
 }

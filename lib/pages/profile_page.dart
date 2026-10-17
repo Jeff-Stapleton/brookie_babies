@@ -4,50 +4,55 @@ import 'package:brookie_babies/components/booking_card.dart';
 import 'package:brookie_babies/components/sign_in_dialog.dart';
 import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/models/booking.dart';
+import 'package:brookie_babies/pages/home_page.dart';
 import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/widgets/account_avatar.dart';
 import 'package:brookie_babies/widgets/content_width.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
+import 'package:brookie_babies/widgets/top_bar.dart';
 import 'package:flutter/material.dart';
 
 /// A list of sessions reads best as one column, narrower than the page.
-const _pageWidth = 720.0;
+const _listWidth = 720.0;
 
 /// "Your sessions": the signed-in family's account, their upcoming and past
 /// sessions, and photo downloads.
+///
+/// Framed like Booking, so the page title sits in the same place on both:
+/// the page's content column, s7 below the top bar from 900px wide (s6 on
+/// smaller screens), with this page's own column left-aligned in it.
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
   @override
   Widget build(BuildContext context) {
     final auth = AppServices.of(context).auth;
-    final canPop = ModalRoute.of(context)?.canPop ?? false;
+    final wide = MediaQuery.sizeOf(context).width >= BrookieBreakpoint.wide;
     return Scaffold(
-      appBar: AppBar(
-        // The design system's arrow on every platform, not the iOS chevron
-        // Flutter picks for Macs and iPhones.
-        leading: canPop
-            ? IconButton(
-                icon: const Icon(Icons.arrow_back),
-                tooltip: MaterialLocalizations.of(context).backButtonTooltip,
-                onPressed: () => Navigator.of(context).maybePop(),
-              )
-            : null,
-        title: const Text('Your sessions'),
-      ),
+      // Already on "Your sessions", so the account menu doesn't link to it.
+      appBar: const BrookieTopBar(title: 'Your sessions', showSessionsLink: false),
       body: StreamBuilder<AppUser?>(
         stream: auth.authStateChanges,
         initialData: auth.currentUser,
         builder: (context, snapshot) {
           final user = snapshot.data;
-          final gap = BrookieLayout.sectionGap(context);
           return SingleChildScrollView(
-            padding: EdgeInsets.only(top: gap, bottom: gap),
             child: ContentWidth(
-              maxWidth: _pageWidth,
-              child: user == null ? const _SignedOut() : _Sessions(user: user),
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: wide ? BrookieSpace.s7 : BrookieSpace.s6,
+                  bottom: BrookieLayout.sectionGap(context),
+                ),
+                child: Align(
+                  alignment: AlignmentDirectional.topStart,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: _listWidth),
+                    child: user == null ? const _SignedOut() : _Sessions(user: user),
+                  ),
+                ),
+              ),
             ),
           );
         },
@@ -77,7 +82,7 @@ class _SignedOut extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _Headline(),
-        const SizedBox(height: BrookieSpace.s4),
+        const SizedBox(height: BrookieSpace.s3),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
           child: Text(
@@ -136,7 +141,7 @@ class _SessionsState extends State<_Sessions> {
             if (snapshot.hasError) {
               log('Loading bookings failed: ${snapshot.error}');
               return const InlineMessage(
-                  message: "We couldn't load your sessions. Refresh the page to try again.");
+                  message: 'We couldn’t load your sessions. Refresh the page to try again.');
             }
             final data = snapshot.data;
             if (data == null) {
@@ -211,31 +216,46 @@ class _BookingSections extends StatelessWidget {
     final past = bookings.where((b) => b.isPast(now)).toList()
       ..sort((a, b) => b.compareTo(a));
     final sectionGap = BrookieLayout.sectionGap(context);
+    // One primary button per view: the newest session with photos ready gets
+    // the ink "Download all photos"; any others get the outlined one.
+    final ready = bookings.where((b) => b.status == BookingStatus.paid && b.photosReady);
+    final primaryDownload = ready.isEmpty ? null : ready.reduce((a, b) => b.compareTo(a) > 0 ? b : a).id;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (unreadable > 0) ...[
+          // There is no contact address on the site yet, so name the person
+          // the family booked with rather than a channel that doesn't exist.
           const InlineMessage(
-              message: "Some of your sessions couldn't be shown. Contact us and "
-                  "we'll sort it out."),
+              message: 'Some of your sessions couldn’t be shown. Let Brooke know '
+                  'and we’ll sort it out.'),
           const SizedBox(height: BrookieSpace.s6),
         ],
         if (bookings.isEmpty && unreadable == 0) const _NoSessions(),
         if (upcoming.isNotEmpty)
-          _Section(title: 'Upcoming', bookings: upcoming, isPast: false),
+          _Section(title: 'Upcoming', bookings: upcoming, isPast: false, primaryDownload: primaryDownload),
         if (upcoming.isNotEmpty && past.isNotEmpty) SizedBox(height: sectionGap),
-        if (past.isNotEmpty) _Section(title: 'Past', bookings: past, isPast: true),
+        if (past.isNotEmpty)
+          _Section(title: 'Past', bookings: past, isPast: true, primaryDownload: primaryDownload),
       ],
     );
   }
 }
 
 class _Section extends StatelessWidget {
-  const _Section({required this.title, required this.bookings, required this.isPast});
+  const _Section({
+    required this.title,
+    required this.bookings,
+    required this.isPast,
+    required this.primaryDownload,
+  });
 
   final String title;
   final List<Booking> bookings;
   final bool isPast;
+
+  /// The id of the booking whose download is the page's primary button.
+  final String? primaryDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -251,7 +271,12 @@ class _Section extends StatelessWidget {
           if (i > 0) const SizedBox(height: BrookieSpace.s4),
           // Keyed so a card's download state stays with its booking when the
           // list changes.
-          BookingCard(key: ValueKey(booking.id), booking: booking, isPast: isPast),
+          BookingCard(
+            key: ValueKey(booking.id),
+            booking: booking,
+            isPast: isPast,
+            primaryDownload: booking.id == primaryDownload,
+          ),
         ],
       ],
     );
@@ -274,14 +299,17 @@ class _NoSessions extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'No sessions to show yet. After you book, your session appears '
-              'here once we’ve confirmed it.',
-              style: Theme.of(context).textTheme.bodyLarge,
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
+              child: Text(
+                'No sessions to show yet. After you book, your session appears '
+                'here once we’ve confirmed it.',
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
             ),
             const SizedBox(height: BrookieSpace.s4),
             OutlinedButton(
-              onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+              onPressed: () => HomePage.showPackages(context),
               child: const Text('See packages'),
             ),
           ],

@@ -883,7 +883,7 @@ void main() {
     });
 
     testWidgets('says why when it isn’t deleted, and stays', (tester) async {
-      final admin = _service()..errors['deleteSession'] = adminError(AdminErrorKind.denied);
+      final admin = _service(photos: const [])..errors['deleteSession'] = adminError(AdminErrorKind.denied);
       await _pumpSession(tester, admin: admin);
 
       await tapInView(tester, find.text('Delete session'));
@@ -894,6 +894,30 @@ void main() {
       expect(find.widgetWithText(InlineMessage, kAdminDeniedMessage), findsOneWidget);
       expect(find.byType(AdminSessionPage), findsOneWidget);
       expect(find.text('Delete session'), findsOneWidget);
+    });
+
+    testWidgets('failing part way: lists the photos again, so the page shows only what’s left', (tester) async {
+      final admin = _PartDeletingAdminService(
+        sessions: [testSession('s1', photosReady: true)],
+        sessionPhotos: {'s1': _photos},
+      );
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.text('Delete session'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete session'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(InlineMessage,
+            '$kAdminOfflineMessage Some of its photos may already be deleted: the list shows what’s left.'),
+        findsOneWidget,
+      );
+      expect(_listed(tester), ['edits/IMG_3.jpg']);
+      expect(find.text('1 photo'), findsOneWidget);
+      await tapInView(tester, find.text('Make photos available'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('1 photo. '), findsOneWidget);
     });
   });
 
@@ -1017,5 +1041,20 @@ class _LatePicker extends FakePhotoPicker {
   Future<List<PickedPhoto>> call({required String accept}) {
     accepts.add(accept);
     return answer.future;
+  }
+}
+
+/// Deletes a session's photos as AdminService does (hidden first, then the
+/// photos) but goes offline after the first two, before the document.
+class _PartDeletingAdminService extends FakeAdminService {
+  _PartDeletingAdminService({super.sessions, super.sessionPhotos});
+
+  @override
+  Future<void> deleteSession(String id) async {
+    calls.add('deleteSession($id)');
+    await setPhotosReady(id, false);
+    final names = sessionPhotos[id]!..sort();
+    names.removeRange(0, 2);
+    throw adminError(AdminErrorKind.offline);
   }
 }

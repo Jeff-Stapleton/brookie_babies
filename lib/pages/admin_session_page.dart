@@ -553,12 +553,21 @@ class _SessionBodyState extends State<_SessionBody> {
       }
     } catch (e) {
       if (!mounted) return;
+      final why = _messageFor(e, 'The session wasn’t deleted. Try again.');
+      final hadPhotos = photos != null && photos.isNotEmpty;
       setState(() {
         _deletingSession = false;
-        _sessionError = _messageFor(e, 'The session wasn’t deleted. Try again.');
+        _sessionError =
+            hadPhotos ? '$why Some of its photos may already be deleted: the list shows what’s left.' : why;
       });
-      // It may have gone part way: the document is deleted last.
-      if (_lookup is SessionMissing) widget.onTitle(null);
+      // It may have gone part way: the document is deleted last, after the
+      // photos, so the list is checked again.
+      if (_lookup is SessionMissing) {
+        widget.onTitle(null);
+      } else if (!_listing) {
+        setState(() => _photos = null);
+        _listPhotos();
+      }
     }
   }
 

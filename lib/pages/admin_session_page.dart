@@ -506,6 +506,8 @@ class _SessionBodyState extends State<_SessionBody> {
         return;
       }
       if (!mounted) return;
+      // Hidden now: a "Hide photos" that failed earlier no longer applies.
+      setState(() => _readyError = null);
     }
     // A few at a time, like the uploads; the first failure stops the rest.
     // The zip isn't deleted with each: it went when the photos were hidden

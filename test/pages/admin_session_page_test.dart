@@ -896,6 +896,24 @@ void main() {
       expect(find.text('Not ready'), findsOneWidget);
     });
 
+    testWidgets('"Delete all photos" hiding them takes away an earlier "Hide photos" failure', (tester) async {
+      final admin = _service(ready: true);
+      await _pumpSession(tester, admin: admin);
+      admin.errors['setPhotosReady'] = adminError(AdminErrorKind.offline);
+      await tapInView(tester, find.text('Hide photos'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(InlineMessage, kAdminOfflineMessage), findsOneWidget);
+      admin.errors.clear();
+
+      await tapInView(tester, find.text('Delete all photos'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete all photos'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Not ready'), findsOneWidget);
+      expect(find.byType(InlineMessage), findsNothing);
+    });
+
     testWidgets('"Delete all photos" deletes nothing if the photos can’t be hidden first', (tester) async {
       final admin = _service(ready: true)..errors['setPhotosReady'] = adminError(AdminErrorKind.offline);
       await _pumpSession(tester, admin: admin);

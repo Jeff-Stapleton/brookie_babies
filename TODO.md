@@ -1,8 +1,60 @@
 # TODO
 
-Open items for sign-in, bookings, photo downloads and site content. Last updated 2026-10-17 (design-system restyle).
+Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-19 (admin portal).
 
-## 1. Test photo downloads
+## 1. Ship the admin portal
+
+The admin portal (README, "Admin portal") needs new security rules and a new
+version of the download function. Do these in order.
+
+- [ ] **Deploy the backend before merging.** If
+      `gh variable get BACKEND_DEPLOY_LIVE` prints `true`, merging deploys it
+      before the site, so skip this. Otherwise, from the portal's branch, up to
+      date:
+      ```bash
+      npm ci --prefix functions
+      firebase deploy --only functions,firestore:rules,storage
+      ```
+      The site that's live now keeps working with them. Without them, the new
+      site's admin pages can't load or save anything, and families can't see
+      sessions shared with them (README, "Deploy order").
+- [ ] **Make Brooke (and you) admins.** Each of you signs in to the site with
+      Google once. Then, from the repo root, signed in to gcloud as the
+      project owner (`gcloud auth login`; the script also needs
+      `brew install jq`), run it once per Google email:
+      ```bash
+      bash scripts/grant-admin.sh <email>
+      ```
+      Refresh the site: the account menu now has **Admin**. `--revoke` takes
+      it away (a sign-in already open keeps access for up to an hour).
+- [ ] **Test it** in Chrome, then in Safari, on the live site once merged.
+      (To test before merging, deploy the backend by hand as above, then
+      `flutter run -d chrome`: it uses the real project.)
+  - [ ] Open https://brookie-babies.web.app/#/admin, or the account menu →
+        **Admin**.
+  - [ ] **Add a session** for a second Google account of yours: a name, its
+        Gmail address and today's date.
+  - [ ] **Upload photos**: pick 3 or 4 photos. Pick the same ones again:
+        they're listed as skipped. Start a bigger upload and press **Cancel
+        uploads** part way. While photos are uploading, closing the tab or
+        going back asks first.
+  - [ ] **Make photos available**, then **Copy message** and read it.
+  - [ ] In another browser or a private window, sign in as the second account
+        and open the link from the message: the session is under **Your
+        sessions**, and **Download all photos** downloads a zip of the photos.
+  - [ ] Back in the session, **Edit details** and change the email (it asks
+        first): the second account no longer sees the session.
+  - [ ] **Delete session**: Admin says it's deleted, and Firebase console →
+        Storage → `galleries` no longer has its folder.
+  - [ ] **Edit home page photos**: upload 2 or 3 JPEGs, and an iPhone HEIC if
+        the picker lets you choose one (it should be refused: "Export it as
+        JPEG"). Tick **On the home page** for a new photo, move it to the top
+        with **Move up**, **Save home page**, then check the home page's
+        full-screen photo and the ones below it.
+  - [ ] Delete a library photo that isn't on the home page. Make a change
+        without saving and go back: it asks first.
+
+## 2. Test photo downloads
 
 - [ ] **First, give the function access to bookings and photos:**
       `bash scripts/setup-functions-runtime.sh` from the repo root. Without
@@ -28,7 +80,8 @@ left is one real download, on the live site: https://brookie-babies.web.app
 
       Copy the generated document ID.
 - [ ] **Upload photos:** Storage → folder `galleries` → folder named exactly
-      that document ID → upload 2 or 3 photos.
+      that document ID → upload 2 or 3 photos. (Once you're an admin, you can
+      instead open the booking in **Admin** and **Upload photos** there.)
 - [ ] **Download:** open the avatar menu → **Your sessions**.
       The booking shows under **Past**. Click **Download all photos**: you
       should see "Preparing your photos…", then a zip downloads.
@@ -40,7 +93,7 @@ If the download fails, note the message shown on the page. The function's
 logs explain why: run `firebase functions:log`, or open Firebase console →
 Functions → getGalleryDownloadUrl → Logs.
 
-## 2. Security follow-ups (skip any you've already done)
+## 3. Security follow-ups (skip any you've already done)
 
 - [ ] **Roll the old Stripe live secret key** in the Stripe Dashboard
       (Developers → API keys). It's still in this public repo's git history.
@@ -51,7 +104,7 @@ Functions → getGalleryDownloadUrl → Logs.
       `firebase-adminsdk-…` → Keys → delete it. Then delete the `.json` file
       from Downloads. Nothing in the app uses it.
 
-## 3. Settings now that sign-in is live
+## 4. Settings now that sign-in is live
 
 - [ ] **Stripe:** for each of the three Payment Links, set **After payment**
       to redirect to `https://brookie-babies.web.app`. Checkout now opens in
@@ -61,7 +114,7 @@ Functions → getGalleryDownloadUrl → Logs.
       the public-facing project name and support email. Both appear on
       Google's sign-in screen.
 
-## 4. Next development
+## 5. Next development
 
 - [ ] **Server-side Stripe checkout**, so bookings, with their date and
       time, are recorded automatically and Payment Links are no longer
@@ -88,16 +141,34 @@ Functions → getGalleryDownloadUrl → Logs.
     instead of the default compute account. This is worth doing if the setup
     script warns that the compute account has Editor.
   - Add a branch ruleset on `main` that blocks force-pushes and deletion.
+- [ ] **Admin portal follow-ups** (not built yet):
+  - Email families when their photos are ready. Today you copy the message
+    from the session's page and send it yourself.
+  - Thumbnails and resizing: the library grid downloads every photo at full
+    size, and session photos are listed by name only.
+  - Drag and drop from Finder onto the upload buttons.
+  - Deep links to a session's admin page (for example `/#/admin/<id>`), so it
+    can be bookmarked or reloaded.
+  - Security rules tests in the Firebase emulator, run in CI. Today rules are
+    only compiled and checked by hand with the read-only Rules API.
+  - Stop anyone listing `_admin/gallery` once `site/home` is saved, so photos
+    that aren't on the home page can't be found that way.
+  - Sign-in without Google for ad hoc guests (for example an email link), for
+    families without a Google account.
+  - Several emails per ad hoc session, such as both parents.
+  - Editing paid bookings in the portal (date, time, name). Today that's the
+    Firestore console; the rules only let the portal change `photosReady`.
 
-## 5. Site content needed from Brooke
+## 6. Site content needed from Brooke
 
 The site now follows the design system; these are facts only the studio can
 supply. Each lives in one place in the code.
 
 - [ ] **Hero photo:** today the first file in `_admin/gallery` is a portrait
-      with the face in the center, so the logo covers it. Choose a photo with
-      the face clear of the middle and rename it to sort first (README, "Home
-      page photos").
+      with the face in the center, so the logo covers it. Once the admin
+      portal is live, choose a photo with the face clear of the middle and
+      move it to the top in **Admin → Edit home page photos** (README, "Home
+      page photos"); there's no need to rename files any more.
 - [ ] **What each package includes:** all three list the same inclusions
       (`lib/models/session_package.dart`), so families would pay more for
       nothing. Optionally add a one-sentence description per package.

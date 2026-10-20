@@ -229,6 +229,18 @@ void main() {
       expect(admin.library, ['b.jpg']);
       expect((await admin.listSessionPhotos('s1')).map((p) => p.name), ['z.jpg']);
     });
+
+    test('deletePhoto logs a delete that leaves the zip', () async {
+      final admin = FakeAdminService(sessionPhotos: {
+        's1': ['a.jpg', 'b.jpg'],
+      });
+
+      await admin.deletePhoto(const StoredPhoto(name: 'a.jpg', fullPath: 'galleries/s1/a.jpg'));
+      await admin.deletePhoto(const StoredPhoto(name: 'b.jpg', fullPath: 'galleries/s1/b.jpg'), deleteZip: false);
+
+      expect(admin.calls, ['deletePhoto(galleries/s1/a.jpg)', 'deletePhoto(galleries/s1/b.jpg, deleteZip: false)']);
+      expect(admin.sessionPhotos['s1'], isEmpty);
+    });
   });
 
   test('FakePhotoPicker hands back what the test chose, and records what was asked for', () async {

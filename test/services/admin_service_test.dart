@@ -1044,6 +1044,15 @@ void main() {
       expect(storage.objects.keys, ['gallery-zips/s10.zip']);
     });
 
+    test('deleteZip: false leaves the zip, for photos hidden with it deleted already', () async {
+      storage.objects.addAll({photo.fullPath: 'image/jpeg', 'gallery-zips/s1.zip': 'application/zip'});
+
+      await admin.deletePhoto(photo, deleteZip: false);
+
+      expect(log, ['delete galleries/s1/edits/a.jpg']);
+      expect(storage.objects.keys, ['gallery-zips/s1.zip']);
+    });
+
     test('a home page library photo has no zip to delete', () async {
       storage.objects['_admin/gallery/a.jpg'] = 'image/jpeg';
 

@@ -122,8 +122,10 @@ abstract class AdminService {
 
   /// Deletes one photo. One that's already gone counts as deleted, and a
   /// failure means it wasn't. A session photo's cached zip goes too, so
-  /// links to it stop working.
-  Future<void> deletePhoto(StoredPhoto photo);
+  /// links to it stop working, unless [deleteZip] is false: for photos
+  /// hidden first, whose zip went then (a hidden session can't build
+  /// another).
+  Future<void> deletePhoto(StoredPhoto photo, {bool deleteZip = true});
 
   /// Every file directly in the public `_admin/gallery` folder, with a
   /// [StoredPhoto.url] for the ones the site can show
@@ -304,9 +306,10 @@ class FirebaseAdminService implements AdminService {
       );
 
   @override
-  Future<void> deletePhoto(StoredPhoto photo) async {
+  Future<void> deletePhoto(StoredPhoto photo, {bool deleteZip = true}) async {
     _signedInUid();
     await _attempt('delete ${photo.fullPath}', _Doing.writing, () => _deleteIfThere(storage.ref(photo.fullPath)));
+    if (!deleteZip) return;
     // 'galleries/<id>/<name>': after the photo, so no download in between
     // rebuilds the zip with it.
     final path = photo.fullPath.split('/');

@@ -508,13 +508,15 @@ class _SessionBodyState extends State<_SessionBody> {
       if (!mounted) return;
     }
     // A few at a time, like the uploads; the first failure stops the rest.
+    // The zip isn't deleted with each: it went when the photos were hidden
+    // (just now, or before), and a hidden session can't build another.
     var next = 0;
     Object? failure;
     Future<void> deleteSome() async {
       while (mounted && failure == null && next < photos.length) {
         final photo = photos[next++];
         try {
-          await _admin.deletePhoto(photo);
+          await _admin.deletePhoto(photo, deleteZip: false);
         } catch (e) {
           failure ??= e;
           return;

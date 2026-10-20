@@ -522,9 +522,11 @@ class FakeAdminService implements AdminService {
       _upload('uploadSessionPhoto', 'galleries/$sessionId/$name', photo, name,
           sessionPhotos.putIfAbsent(sessionId, () => []));
 
+  /// One that leaves the zip is logged with ', deleteZip: false' after its
+  /// path.
   @override
-  Future<void> deletePhoto(StoredPhoto photo) async {
-    await _write('deletePhoto', 'deletePhoto(${photo.fullPath})');
+  Future<void> deletePhoto(StoredPhoto photo, {bool deleteZip = true}) async {
+    await _write('deletePhoto', 'deletePhoto(${photo.fullPath}${deleteZip ? '' : ', deleteZip: false'})');
     if (photo.fullPath.startsWith('${StoragePortfolioService.folder}/')) {
       library.remove(photo.name);
     } else {

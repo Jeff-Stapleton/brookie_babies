@@ -89,9 +89,14 @@ Future<void> _settleUploads(WidgetTester tester) async {
 typedef _Firebase = ({FakeFirestore db, FakeStorage storage, List<String> log});
 
 /// The page on the real FirebaseAdminService, over in-memory Firestore and
-/// Storage: the Harper family's ad hoc session 's1' with [photos] and a
-/// cached zip.
-Future<_Firebase> _pumpOnFirebase(WidgetTester tester, {bool ready = false, List<String> photos = _photos}) async {
+/// Storage: the Harper family's ad hoc session 's1' with [photos] and,
+/// unless [zip] is false, a cached zip.
+Future<_Firebase> _pumpOnFirebase(
+  WidgetTester tester, {
+  bool ready = false,
+  List<String> photos = _photos,
+  bool zip = true,
+}) async {
   final log = <String>[];
   final firebase = (db: FakeFirestore(log: log), storage: FakeStorage(log: log), log: log);
   firebase.db.docs['bookings/s1'] = {
@@ -103,7 +108,7 @@ Future<_Firebase> _pumpOnFirebase(WidgetTester tester, {bool ready = false, List
   };
   firebase.storage.objects.addAll({
     for (final name in photos) 'galleries/s1/$name': 'image/jpeg',
-    'gallery-zips/s1.zip': 'application/zip',
+    if (zip) 'gallery-zips/s1.zip': 'application/zip',
   });
   tester.view.physicalSize = const Size(1440, 900);
   tester.view.devicePixelRatio = 1;
@@ -884,6 +889,9 @@ void main() {
       final hidden = admin.calls.indexOf('setPhotosReady(s1, false)');
       expect(hidden, isNonNegative);
       expect(admin.calls.indexWhere((call) => call.startsWith('deletePhoto')), greaterThan(hidden));
+      // Hiding them deleted the zip, and a hidden session can't build one.
+      expect(admin.calls.where((call) => call.startsWith('deletePhoto')),
+          everyElement(endsWith(', deleteZip: false)')));
       expect(admin.sessionPhotos['s1'], isEmpty);
       expect(find.text('Not ready'), findsOneWidget);
     });
@@ -982,6 +990,49 @@ void main() {
       expect(find.widgetWithText(EmptyState, 'No photos yet. Upload them above.'), findsOneWidget);
       expect(find.text('Not ready'), findsOneWidget);
       expect(find.byType(InlineMessage), findsNothing);
+    });
+  });
+
+  group('the cached zip', () {
+    /// How many times the page asked Storage to delete the zip.
+    int zipDeletes(_Firebase firebase) => firebase.log.where((call) => call == 'delete gallery-zips/s1.zip').length;
+
+    testWidgets('"Delete all photos" deletes it once, as it hides them, not once a photo', (tester) async {
+      final firebase = await _pumpOnFirebase(tester, ready: true);
+
+      await tapInView(tester, find.text('Delete all photos'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete all photos'));
+      await tester.pumpAndSettle();
+
+      expect(firebase.storage.objects, isEmpty);
+      expect(zipDeletes(firebase), 1);
+      final zipDeleted = firebase.log.indexOf('delete gallery-zips/s1.zip');
+      expect(zipDeleted, lessThan(firebase.log.indexOf('delete galleries/s1/IMG_1.jpg')));
+    });
+
+    testWidgets('"Delete all photos" of hidden photos leaves it alone: it went as they were hidden', (tester) async {
+      final firebase = await _pumpOnFirebase(tester, zip: false);
+
+      await tapInView(tester, find.text('Delete all photos'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete all photos'));
+      await tester.pumpAndSettle();
+
+      expect(firebase.storage.objects, isEmpty);
+      expect(zipDeletes(firebase), 0);
+    });
+
+    testWidgets('deleting one photo deletes it, so links to the photo stop working', (tester) async {
+      final firebase = await _pumpOnFirebase(tester);
+
+      await tapInView(tester, find.byTooltip('Delete IMG_2.jpg'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete photo'));
+      await tester.pumpAndSettle();
+
+      expect(zipDeletes(firebase), 1);
+      expect(firebase.storage.objects, isNot(contains('gallery-zips/s1.zip')));
     });
   });
 

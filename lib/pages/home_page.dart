@@ -25,6 +25,13 @@ class HomePage extends StatefulWidget {
 
   static final _packagesRequests = ValueNotifier<int>(0);
 
+  /// Fetches the home page photos again, and gives ones that couldn't be
+  /// loaded another try: the admin's home page photos page calls it after a
+  /// change, so the home page under it shows the change without a refresh.
+  static void reloadPhotos() => _photosRequests.value++;
+
+  static final _photosRequests = ValueNotifier<int>(0);
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -33,26 +40,35 @@ class _HomePageState extends State<HomePage> {
   final _scrollController = ScrollController();
   final _packagesKey = GlobalKey();
 
-  /// The portfolio photographs, sorted by name; null while loading.
+  /// The portfolio photographs, in the order they're shown; null while
+  /// loading.
   List<Uri>? _photos;
 
   /// Photographs that couldn't be loaded. They are left out: the hero moves
   /// on to the next one, and the featured grid closes up.
   final _failedPhotos = <Uri>{};
 
+  /// Counts photo loads, so an older one that answers late can't replace a
+  /// newer one.
+  int _photoLoads = 0;
+
   @override
   void initState() {
     super.initState();
     _loadPhotos();
     HomePage._packagesRequests.addListener(_onPackagesRequested);
+    HomePage._photosRequests.addListener(_onPhotosRequested);
   }
 
   @override
   void dispose() {
     HomePage._packagesRequests.removeListener(_onPackagesRequested);
+    HomePage._photosRequests.removeListener(_onPhotosRequested);
     _scrollController.dispose();
     super.dispose();
   }
+
+  void _onPhotosRequested() => _loadPhotos();
 
   void _onPackagesRequested() {
     // After the pop has rebuilt this page.
@@ -62,16 +78,24 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadPhotos() async {
+    final load = ++_photoLoads;
     final portfolio = AppServices.of(context).portfolio;
     List<Uri> photos;
     try {
       photos = await portfolio.photoUrls(limit: 1 + FeaturedPhotos.maxCount);
     } catch (e) {
-      // The page still works without photographs, so carry on without them.
       log('Could not list the portfolio photos: $e');
+      // A reload that fails keeps the photos already shown.
+      if (_photos != null) return;
+      // The page still works without photographs, so carry on without them.
       photos = const [];
     }
-    if (mounted) setState(() => _photos = photos);
+    if (!mounted || load != _photoLoads) return;
+    setState(() {
+      _photos = photos;
+      // A fresh list: photos that failed before get another try.
+      _failedPhotos.clear();
+    });
   }
 
   void _leaveOut(Uri photo) {

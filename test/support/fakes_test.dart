@@ -58,17 +58,33 @@ void main() {
       expect(session.uid, isNull);
     });
 
-    test('createSession with an id already saved finds it, and never makes a second', () async {
+    test('createSession with an id already saved finds it, never makes a second, and brings it up to date',
+        () async {
       final admin = FakeAdminService();
       final id = admin.newSessionId();
-      final other = SessionDetails(name: 'Other', email: 'o@example.com', date: DateTime(2027));
+      final other = SessionDetails(name: 'Other', email: ' O@Example.com', date: DateTime(2027));
 
       expect(await admin.createSession(harper, id: id), id);
       expect(await admin.createSession(other, id: id), id);
 
       expect(admin.sessions.keys, [id]);
-      expect(admin.sessions[id]!.name, 'The Harper family');
+      expect(admin.sessions[id]!.name, 'Other');
+      expect(admin.sessions[id]!.email, 'o@example.com');
+      expect(admin.sessions[id]!.packageName, isNull);
       expect(admin.createSessionIds, [id, id]);
+    });
+
+    test('createSession refuses what the real one couldn’t have saved there', () async {
+      final admin = FakeAdminService(sessions: [
+        testSession('p1', status: BookingStatus.paid),
+        testSession('session-1'),
+      ]);
+
+      await expectLater(admin.createSession(harper, id: 'p1'), throwsA(isA<AdminException>()));
+      // Without an id it's no retry, so a session already there is refused.
+      await expectLater(admin.createSession(harper), throwsA(isA<AdminException>()));
+      expect(admin.sessions['p1']!.status, BookingStatus.paid);
+      expect(admin.sessions['session-1']!.name, 'The Harper family');
     });
 
     test('one session: found, unreadable, or missing once deleted', () async {
@@ -228,6 +244,18 @@ void main() {
       await admin.deletePhoto(const StoredPhoto(name: 'edits/a.jpg', fullPath: 'galleries/s1/edits/a.jpg'));
       expect(admin.library, ['b.jpg']);
       expect((await admin.listSessionPhotos('s1')).map((p) => p.name), ['z.jpg']);
+    });
+
+    test('deletePhoto logs a delete that leaves the zip', () async {
+      final admin = FakeAdminService(sessionPhotos: {
+        's1': ['a.jpg', 'b.jpg'],
+      });
+
+      await admin.deletePhoto(const StoredPhoto(name: 'a.jpg', fullPath: 'galleries/s1/a.jpg'));
+      await admin.deletePhoto(const StoredPhoto(name: 'b.jpg', fullPath: 'galleries/s1/b.jpg'), deleteZip: false);
+
+      expect(admin.calls, ['deletePhoto(galleries/s1/a.jpg)', 'deletePhoto(galleries/s1/b.jpg, deleteZip: false)']);
+      expect(admin.sessionPhotos['s1'], isEmpty);
     });
   });
 

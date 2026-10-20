@@ -463,9 +463,12 @@ class FakeAdminService implements AdminService {
     final sessionId = id ?? newSessionId();
     createSessionIds.add(sessionId);
     await _write('createSession', 'createSession(${details.name.trim()})');
-    // Already saved by an earlier try: the real one finds it, and never
-    // makes a second session or changes the first.
-    sessions.putIfAbsent(sessionId, () => _adHoc(sessionId, details, photosReady: false));
+    // Already saved by an earlier try: the real one finds it, never makes a
+    // second session, and changes it to these details, the ones sent last.
+    // Anything else there is refused, as the rules refuse it.
+    final saved = sessions[sessionId];
+    if (saved != null && (id == null || !saved.isAdHoc)) throw adminError(AdminErrorKind.denied);
+    sessions[sessionId] = _adHoc(sessionId, details, photosReady: saved?.photosReady ?? false);
     notifyChanged();
     return sessionId;
   }
@@ -522,9 +525,11 @@ class FakeAdminService implements AdminService {
       _upload('uploadSessionPhoto', 'galleries/$sessionId/$name', photo, name,
           sessionPhotos.putIfAbsent(sessionId, () => []));
 
+  /// One that leaves the zip is logged with ', deleteZip: false' after its
+  /// path.
   @override
-  Future<void> deletePhoto(StoredPhoto photo) async {
-    await _write('deletePhoto', 'deletePhoto(${photo.fullPath})');
+  Future<void> deletePhoto(StoredPhoto photo, {bool deleteZip = true}) async {
+    await _write('deletePhoto', 'deletePhoto(${photo.fullPath}${deleteZip ? '' : ', deleteZip: false'})');
     if (photo.fullPath.startsWith('${StoragePortfolioService.folder}/')) {
       library.remove(photo.name);
     } else {

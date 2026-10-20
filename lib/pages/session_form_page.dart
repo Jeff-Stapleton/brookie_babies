@@ -174,12 +174,23 @@ class _SessionFormState extends State<_SessionForm> {
   bool _hasChanges = false;
   bool _saved = false;
 
+  /// Where the form goes once saved, while it waits to be on top
+  /// ([_whenOnTop]).
+  VoidCallback? _afterSave;
+
   @override
   void initState() {
     super.initState();
     for (final text in [_name, _email, _location]) {
       text.addListener(_checkChanges);
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Back on top, perhaps; Navigator can't be used while building.
+    if (_afterSave != null) WidgetsBinding.instance.addPostFrameCallback((_) => _goIfOnTop());
   }
 
   void _checkChanges() {
@@ -196,17 +207,27 @@ class _SessionFormState extends State<_SessionForm> {
     setState(() => _hasChanges = changed);
   }
 
-  /// Back (the top bar's, the browser's, Cancel) with changes to lose.
+  /// Back (the top bar's, the browser's, Cancel) with changes to lose, or
+  /// while they save.
   Future<void> _confirmLeave() async {
+    // Leaving doesn't stop a save: it finishes, and the page below shows
+    // it. Only a failure would go unseen.
+    final saving = _saving;
     final leave = await showBrookieConfirm(
       context,
-      title: 'Leave without saving?',
-      message: widget.session == null
-          ? 'The session you started adding will be lost.'
-          : 'The changes you made to this session will be lost.',
-      confirmLabel: 'Leave without saving',
-      cancelLabel: 'Keep editing',
-      destructive: true,
+      title: saving ? 'Leave while saving?' : 'Leave without saving?',
+      message: switch ((adding: widget.session == null, saving: saving)) {
+        (adding: true, saving: true) => 'The session is still being added. If you leave now, it’ll still be added, '
+            'but you won’t see it if adding it fails.',
+        (adding: false, saving: true) => 'Your changes are still saving. If you leave now, they’ll still be saved, '
+            'but you won’t see it if saving fails.',
+        (adding: true, saving: false) => 'The session you started adding will be lost.',
+        (adding: false, saving: false) => 'The changes you made to this session will be lost.',
+      },
+      confirmLabel: saving ? 'Leave' : 'Leave without saving',
+      cancelLabel: saving ? 'Stay' : 'Keep editing',
+      // Leaving while saving loses nothing.
+      destructive: !saving,
     );
     if (!leave || !mounted) return;
     // Navigator.pop leaves whatever PopScope says.
@@ -306,21 +327,23 @@ class _SessionFormState extends State<_SessionForm> {
         if (!mounted) return;
         _markSaved();
         // Straight on to its photos; back from there is Admin, not this form.
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(builder: (context) => AdminSessionPage(sessionId: id)),
-        );
+        _whenOnTop(() => Navigator.of(context).pushReplacement(
+              MaterialPageRoute<void>(builder: (context) => AdminSessionPage(sessionId: id)),
+            ));
       } else {
         await admin.updateSession(session, details);
         if (!mounted) return;
         _markSaved();
         // Back to the session, past PopScope: nothing's left to lose. (With
         // nothing below, it stays, saved.)
-        final navigator = Navigator.of(context);
-        if (navigator.canPop()) {
-          navigator.pop();
-        } else {
-          setState(() => _saving = false);
-        }
+        _whenOnTop(() {
+          final navigator = Navigator.of(context);
+          if (navigator.canPop()) {
+            navigator.pop();
+          } else {
+            setState(() => _saving = false);
+          }
+        });
       }
     } catch (e) {
       if (e is! AdminException) log('Saving session ${session?.id ?? '(new)'} failed: $e');
@@ -335,6 +358,25 @@ class _SessionFormState extends State<_SessionForm> {
   void _markSaved() {
     _saved = true;
     _checkChanges();
+  }
+
+  /// Runs [go] (on to the session, or back to it) now if the form's route
+  /// is on top, or else once it's back on top: pushReplacement and pop act
+  /// on whatever is. Left while it saved, the form never is again, so it
+  /// never replaces or pops the page the admin went to (stopping that
+  /// page's uploads). Under a dialog (asking whether to leave, say), it
+  /// goes once the dialog closes, if the admin stays.
+  void _whenOnTop(VoidCallback go) {
+    _afterSave = go;
+    _goIfOnTop();
+  }
+
+  void _goIfOnTop() {
+    final go = _afterSave;
+    // ModalRoute.of also has didChangeDependencies run when that changes.
+    if (go == null || !mounted || ModalRoute.of(context)?.isCurrent != true) return;
+    _afterSave = null;
+    go();
   }
 
   @override

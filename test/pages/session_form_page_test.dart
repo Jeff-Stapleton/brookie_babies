@@ -3,6 +3,7 @@
 
 import 'package:brookie_babies/components/booking_calendar.dart';
 import 'package:brookie_babies/models/booking.dart';
+import 'package:brookie_babies/models/session_details.dart';
 import 'package:brookie_babies/pages/admin_session_page.dart';
 import 'package:brookie_babies/pages/session_form_page.dart';
 import 'package:brookie_babies/services/admin_service.dart';
@@ -324,6 +325,27 @@ void main() {
       expect(tester.widget<AdminSessionPage>(find.byType(AdminSessionPage)).sessionId, 'session-1');
     });
 
+    testWidgets('trying again after no answer, with the email fixed, saves the fixed email', (tester) async {
+      final admin = _SavedButNoAnswer();
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
+
+      await _fillIn(tester);
+      await tester.enterText(_field('Email'), 'novka@example.com');
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(InlineMessage, kAdminTimedOutMessage), findsOneWidget);
+      expect(admin.sessions['session-1']!.email, 'novka@example.com');
+
+      await tester.enterText(_field('Email'), 'novak@example.com');
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(admin.createSessionIds, ['session-1', 'session-1']);
+      expect(admin.sessions.keys, ['session-1']);
+      expect(admin.sessions['session-1']!.email, 'novak@example.com');
+      expect(tester.widget<AdminSessionPage>(find.byType(AdminSessionPage)).sessionId, 'session-1');
+    });
+
     testWidgets('Cancel, untouched, goes straight back', (tester) async {
       final admin = FakeAdminService();
       await _pumpOver(tester, admin, SessionFormPage(now: now));
@@ -444,6 +466,156 @@ void main() {
 
       expect(find.byType(AdminSessionPage), findsOneWidget);
       expect(LeaveWarning.active.value, isFalse);
+    });
+  });
+
+  group('leaving while it saves', () {
+    /// Starts saving with [label], then asks to leave with [leave].
+    Future<void> saveThenAsk(WidgetTester tester, String label, {Finder? leave}) async {
+      await tapInView(tester, find.text(label));
+      await tester.pump();
+      await tester.tap(leave ?? find.text('Cancel'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    testWidgets('adding: says the session will still be added, and it is', (tester) async {
+      final admin = FakeAdminService()..writeDelay = const Duration(seconds: 5);
+      await _pumpOver(tester, admin, SessionFormPage(now: now));
+      await _fillIn(tester);
+
+      await saveThenAsk(tester, 'Add session');
+      expect(find.text('Leave while saving?'), findsOneWidget);
+      expect(
+        find.text('The session is still being added. If you leave now, it’ll still be added, but you won’t see it '
+            'if adding it fails.'),
+        findsOneWidget,
+      );
+      await tester.tap(_inDialog('Leave'));
+      await tester.pumpAndSettle();
+      expect(find.text('Below'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+
+      expect(admin.sessions.keys, ['session-1']);
+      expect(find.text('Below'), findsOneWidget);
+      expect(find.byType(AdminSessionPage), findsNothing);
+    });
+
+    testWidgets('editing: says the changes will still be saved, and they are', (tester) async {
+      final session = testSession('s1', location: 'Liberty Park');
+      final admin = FakeAdminService(sessions: [session])..writeDelay = const Duration(seconds: 5);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: session));
+      await tester.enterText(_field('Location (optional)'), 'The studio');
+
+      await saveThenAsk(tester, 'Save changes', leave: find.byTooltip('Back'));
+      expect(find.text('Leave while saving?'), findsOneWidget);
+      expect(
+        find.text('Your changes are still saving. If you leave now, they’ll still be saved, but you won’t see it if '
+            'saving fails.'),
+        findsOneWidget,
+      );
+      await tester.tap(_inDialog('Leave'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+
+      expect(admin.sessions['s1']!.location, 'The studio');
+      expect(find.text('Below'), findsOneWidget);
+    });
+
+    testWidgets('adding: a save that answers as the form goes replaces nothing', (tester) async {
+      final admin = FakeAdminService()..writeDelay = const Duration(seconds: 1);
+      final navigator = await _pumpOver(tester, admin, SessionFormPage(now: now));
+      await _fillIn(tester);
+
+      await saveThenAsk(tester, 'Add session');
+      await tester.tap(_inDialog('Leave'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      // The save answers while the form is still on its way out.
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(admin.sessions.keys, ['session-1']);
+      expect(find.byType(AdminSessionPage), findsNothing);
+      expect(find.text('Below'), findsOneWidget);
+      expect(navigator.canPop(), isFalse);
+    });
+
+    testWidgets('editing: a save that answers as the form goes leaves the session page and its uploads',
+        (tester) async {
+      final admin = FakeAdminService(sessions: [testSession('s1')], sessionPhotos: {
+        's1': ['a.jpg'],
+      });
+      final picker = FakePhotoPicker()..next = [testPhoto('b.jpg')];
+      await pumpAdminPage(tester, const Scaffold(body: Text('Below')),
+          admin: admin, picker: picker, size: const Size(1440, 1200));
+      tester
+          .state<NavigatorState>(find.byType(Navigator))
+          .push(MaterialPageRoute<void>(builder: (context) => const AdminSessionPage(sessionId: 's1')));
+      await tester.pumpAndSettle();
+      await tapInView(tester, find.text('Upload photos'));
+      await tester.pump();
+      await tester.pump();
+      expect(admin.pendingUploads, hasLength(1));
+
+      await tapInView(tester, find.text('Edit details'));
+      await tester.pumpAndSettle();
+      admin.writeDelay = const Duration(seconds: 1);
+      await tester.enterText(_field('Location (optional)'), 'The studio');
+      await saveThenAsk(tester, 'Save changes');
+      await tester.tap(_inDialog('Leave'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      // The save answers while the form is still on its way out.
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(admin.sessions['s1']!.location, 'The studio');
+      expect(find.byType(AdminSessionPage), findsOneWidget);
+      expect(admin.uploads.single.cancelled, isFalse);
+      expect(admin.pendingUploads, hasLength(1));
+    });
+
+    testWidgets('staying: a save that answered meanwhile goes on to the session', (tester) async {
+      final admin = FakeAdminService()..writeDelay = const Duration(seconds: 1);
+      await _pumpOver(tester, admin, SessionFormPage(now: now));
+      await _fillIn(tester);
+
+      await saveThenAsk(tester, 'Add session');
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      // Not while it asks: the dialog is on top.
+      expect(find.text('Leave while saving?'), findsOneWidget);
+      expect(find.byType(AdminSessionPage), findsNothing);
+      await tester.tap(_inDialog('Stay'));
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<AdminSessionPage>(find.byType(AdminSessionPage)).sessionId, 'session-1');
+      expect(find.byType(SessionFormPage), findsNothing);
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      expect(find.text('Below'), findsOneWidget);
+    });
+
+    testWidgets('staying while it saves: once saved, back to the session', (tester) async {
+      final session = testSession('s1');
+      final admin = FakeAdminService(sessions: [session])..writeDelay = const Duration(seconds: 1);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: session));
+      await tester.enterText(_field('Name'), 'The Harpers');
+
+      await saveThenAsk(tester, 'Save changes');
+      await tester.tap(_inDialog('Stay'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(BrookieDialog), findsNothing);
+      expect(find.text('Saving changes…'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(admin.sessions['s1']!.name, 'The Harpers');
+      expect(find.text('Below'), findsOneWidget);
     });
   });
 
@@ -864,5 +1036,19 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+  }
+}
+
+/// A FakeAdminService whose first createSession is saved but answers too
+/// late, as FirebaseAdminService reports a write after its time limit.
+class _SavedButNoAnswer extends FakeAdminService {
+  var _answered = false;
+
+  @override
+  Future<String> createSession(SessionDetails details, {String? id}) async {
+    final saved = await super.createSession(details, id: id);
+    if (_answered) return saved;
+    _answered = true;
+    throw adminError(AdminErrorKind.offline, kAdminTimedOutMessage);
   }
 }

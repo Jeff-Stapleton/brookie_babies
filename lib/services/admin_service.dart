@@ -88,15 +88,22 @@ abstract class AdminService {
   /// Adds an ad hoc session as [id] (from [newSessionId]; a new one if
   /// null) and returns its id. Trying again with the same id never makes a
   /// second session: a try that got no answer may still have been saved, and
-  /// a retry then finds it and returns its id.
+  /// a retry then finds it, changes it to [details] as [updateSession] does
+  /// (they may have been edited since), and returns its id.
   Future<String> createSession(SessionDetails details, {String? id});
 
   /// Changes an ad hoc session's details. A new email also deletes the
   /// cached zip, so links the old one was given stop working.
+  ///
+  /// Deleting a cached zip is best effort, here and below: it follows a
+  /// change that's saved, so it never fails the call. If it fails, the
+  /// links stop working when they expire, within the hour.
   Future<void> updateSession(Booking session, SessionDetails details);
 
   /// Lets the family download the photos, or stops them. Stopping them also
-  /// deletes the cached zip, so links already given out stop working.
+  /// deletes the cached zip, so links already given out stop working. A
+  /// failure means the change wasn't saved (or, with no answer, may not
+  /// be).
   Future<void> setPhotosReady(String id, bool ready);
 
   /// Deletes an ad hoc session: hides its photos, deletes them (in
@@ -114,9 +121,12 @@ abstract class AdminService {
   /// fails with [AdminErrorKind.alreadyExists].
   PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name);
 
-  /// Deletes one photo. One that's already gone counts as deleted. A
-  /// session photo's cached zip goes too, so links to it stop working.
-  Future<void> deletePhoto(StoredPhoto photo);
+  /// Deletes one photo. One that's already gone counts as deleted, and a
+  /// failure means it wasn't. A session photo's cached zip goes too, so
+  /// links to it stop working, unless [deleteZip] is false: for photos
+  /// hidden first, whose zip went then (a hidden session can't build
+  /// another).
+  Future<void> deletePhoto(StoredPhoto photo, {bool deleteZip = true});
 
   /// Every file directly in the public `_admin/gallery` folder, with a
   /// [StoredPhoto.url] for the ones the site can show
@@ -192,7 +202,12 @@ class FirebaseAdminService implements AdminService {
     } on AdminException catch (e) {
       // A retry after a try that got no answer but was saved: the rules
       // take set() on a document that's there as an update, and refuse it.
-      if (id == null || e.kind != AdminErrorKind.denied || await _isThere(doc) != true) rethrow;
+      if (id == null || e.kind != AdminErrorKind.denied) rethrow;
+      final saved = await _savedAdHoc(doc);
+      if (saved == null) rethrow;
+      // The admin may have changed the details since (fixed the email, the
+      // key to the photos, say): the session gets what they sent last.
+      await _change(saved, details);
     }
     return doc.id;
   }
@@ -207,6 +222,12 @@ class FirebaseAdminService implements AdminService {
     }
     _check(sessionDetailsProblem(details, before: session));
     _signedInUid();
+    await _change(session, details);
+  }
+
+  /// Saves what [details] change in the ad hoc [session], with updatedAt;
+  /// nothing if nothing changes. A new email also deletes the cached zip.
+  Future<void> _change(Booking session, SessionDetails details) async {
     final changes = sessionChanges(session, details);
     if (changes.isEmpty) return;
     await _write(
@@ -255,6 +276,8 @@ class FirebaseAdminService implements AdminService {
     await _attempt('delete the photos of session $id', _Doing.writing, () async {
       // Everything, hidden files included: the folder goes with the session.
       await _forEachLimited(await _listAllUnder(storage.ref(folder)), _deleteIfThere);
+      // Not best effort, as _deleteZip is: once the document is gone,
+      // nothing would delete it.
       await _deleteIfThere(storage.ref(_zipPath(id)));
     });
     try {
@@ -295,12 +318,12 @@ class FirebaseAdminService implements AdminService {
       );
 
   @override
-  Future<void> deletePhoto(StoredPhoto photo) async {
+  Future<void> deletePhoto(StoredPhoto photo, {bool deleteZip = true}) async {
     _signedInUid();
     await _attempt('delete ${photo.fullPath}', _Doing.writing, () => _deleteIfThere(storage.ref(photo.fullPath)));
+    if (!deleteZip) return;
     // 'galleries/<id>/<name>': after the photo, so no download in between
-    // rebuilds the zip with it. A retry finds the photo gone and tries the
-    // zip again.
+    // rebuilds the zip with it.
     final path = photo.fullPath.split('/');
     if (path.length > 2 && path.first == _galleries) await _deleteZip(path[1]);
   }
@@ -399,8 +422,31 @@ class FirebaseAdminService implements AdminService {
   /// Deletes session [id]'s cached zip, so the links already handed out for
   /// it stop working; one that isn't there counts as deleted. Admins may
   /// delete it but not look it up, so it goes by name.
-  Future<void> _deleteZip(String id) =>
-      _attempt('delete the zip of session $id', _Doing.writing, () => _deleteIfThere(storage.ref(_zipPath(id))));
+  ///
+  /// Best effort, after a change that's already saved: a failure is logged,
+  /// not thrown, since the change it follows did happen. The links then
+  /// stop working when they expire, within the hour (SIGNED_URL_TTL_MS in
+  /// functions/src/gallery.ts).
+  Future<void> _deleteZip(String id) async {
+    try {
+      await _deleteIfThere(storage.ref(_zipPath(id)));
+    } catch (e) {
+      log('Admin: could not delete the zip of session $id, so its links work until they expire: $e');
+    }
+  }
+
+  /// The ad hoc session saved as [doc]; null if there's none, if what's
+  /// there isn't one or can't be read as one, or if reading it fails.
+  static Future<Booking?> _savedAdHoc(DocumentReference<Map<String, dynamic>> doc) async {
+    try {
+      final data = (await doc.get()).data();
+      final session = data == null ? null : Booking.fromMap(doc.id, data);
+      return session != null && session.isAdHoc ? session : null;
+    } catch (e) {
+      log('Admin: could not read ${doc.path}: $e');
+      return null;
+    }
+  }
 
   /// Whether [doc] is there; null if that can't be read either.
   static Future<bool?> _isThere(DocumentReference<Map<String, dynamic>> doc) async {

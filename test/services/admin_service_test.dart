@@ -412,6 +412,66 @@ void main() {
       expect(db.docs.keys, ['bookings/a1']);
     });
 
+    test('a retry with details changed since the try that was saved brings the session up to date', () async {
+      final hold = db.holdWrites = Completer();
+      await expectLater(
+        admin.createSession(_details(email: 'harpr@example.com'), id: 'a1'),
+        throwsA(_adminError(AdminErrorKind.offline, message: kAdminTimedOutMessage)),
+      );
+      hold.complete();
+      db.holdWrites = null;
+      await pumpEventQueue();
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+
+      // The admin fixes the email, the key to the photos, and tries again.
+      expect(await admin.createSession(_details(email: 'Harper@Example.com ', location: 'The studio'), id: 'a1'), 'a1');
+
+      expect(log, [
+        'set bookings/a1',
+        'set bookings/a1',
+        'get bookings/a1',
+        'update bookings/a1',
+        'delete gallery-zips/a1.zip',
+      ]);
+      expect(db.writes.last.data, {
+        'email': 'harper@example.com',
+        'location': 'The studio',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      expect(db.docs['bookings/a1']!['email'], 'harper@example.com');
+      expect(db.docs['bookings/a1']!['createdBy'], 'admin-uid');
+    });
+
+    test('a refused retry that finds what it can’t have saved is still refused', () async {
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+      for (final there in [
+        {'status': 'adhoc', 'name': 'The Harper family', 'date': 'soon'},
+        {'status': 'paid', 'packageName': 'Premium', 'date': '2026-11-14', 'uid': 'u1'},
+      ]) {
+        db.docs['bookings/a1'] = there;
+        log.clear();
+
+        await expectLater(
+          admin.createSession(_details(), id: 'a1'),
+          throwsA(_adminError(AdminErrorKind.denied, message: kAdminDeniedMessage)),
+          reason: '$there',
+        );
+        expect(log, ['set bookings/a1', 'get bookings/a1']);
+      }
+    });
+
+    test('a retry whose change then fails says so, as an edit does', () async {
+      addAdHoc('a1');
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+      db.errors['update bookings/a1'] = _firestoreError('unavailable');
+
+      await expectLater(
+        admin.createSession(_details(name: 'The Harpers'), id: 'a1'),
+        throwsA(_adminError(AdminErrorKind.offline, message: kAdminOfflineMessage)),
+      );
+      expect(db.docs['bookings/a1']!['name'], 'The Harper family');
+    });
+
     test('a refused retry with no session there is still refused', () async {
       db.errors['set bookings/a1'] = _firestoreError('permission-denied');
 
@@ -478,6 +538,19 @@ void main() {
 
       expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
       expect(storage.objects, isEmpty);
+    });
+
+    test('a zip that won’t delete doesn’t fail the change: the old email’s links expire instead', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      storage.errors['delete gallery-zips/s1.zip'] = _storageError('unauthorized');
+      final session = testSession('s1', date: DateTime(2026, 11, 14), photosReady: true);
+
+      await admin.updateSession(session, _details(email: 'grandma@example.com'));
+
+      expect(db.docs['bookings/s1']!['email'], 'grandma@example.com');
+      expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects, hasLength(1));
     });
 
     test('other changes, or the same email in capitals, leave the zip', () async {
@@ -552,17 +625,16 @@ void main() {
       expect(db.docs['bookings/s1']!['photosReady'], isFalse);
     });
 
-    test('a zip that won’t delete is an AdminException, the photos still hidden; trying again finishes', () async {
+    test('a zip that won’t delete doesn’t fail hiding them: links already given out expire instead', () async {
       addAdHoc('s1', photosReady: true);
       storage.objects['gallery-zips/s1.zip'] = 'application/zip';
       storage.errors['delete gallery-zips/s1.zip'] = _storageError('retry-limit-exceeded');
 
-      await expectLater(admin.setPhotosReady('s1', false), throwsA(_adminError(AdminErrorKind.offline)));
-      expect(db.docs['bookings/s1']!['photosReady'], isFalse);
-
-      storage.errors.clear();
       await admin.setPhotosReady('s1', false);
-      expect(storage.objects, isEmpty);
+
+      expect(db.docs['bookings/s1']!['photosReady'], isFalse);
+      expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects, hasLength(1));
     });
 
     test('a session that isn’t there is refused, as the rules refuse it', () async {
@@ -1032,6 +1104,15 @@ void main() {
       expect(storage.objects.keys, ['gallery-zips/s10.zip']);
     });
 
+    test('deleteZip: false leaves the zip, for photos hidden with it deleted already', () async {
+      storage.objects.addAll({photo.fullPath: 'image/jpeg', 'gallery-zips/s1.zip': 'application/zip'});
+
+      await admin.deletePhoto(photo, deleteZip: false);
+
+      expect(log, ['delete galleries/s1/edits/a.jpg']);
+      expect(storage.objects.keys, ['gallery-zips/s1.zip']);
+    });
+
     test('a home page library photo has no zip to delete', () async {
       storage.objects['_admin/gallery/a.jpg'] = 'image/jpeg';
 
@@ -1054,6 +1135,16 @@ void main() {
 
       await expectLater(admin.deletePhoto(photo), throwsA(isA<AdminException>()));
       expect(log, isNot(contains('delete gallery-zips/s1.zip')));
+    });
+
+    test('a zip that won’t delete doesn’t fail it: the photo is deleted, and links to it expire instead', () async {
+      storage.objects.addAll({photo.fullPath: 'image/jpeg', 'gallery-zips/s1.zip': 'application/zip'});
+      storage.errors['delete gallery-zips/s1.zip'] = _storageError('unknown');
+
+      await admin.deletePhoto(photo);
+
+      expect(log, ['delete galleries/s1/edits/a.jpg', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects.keys, ['gallery-zips/s1.zip']);
     });
 
     test('fails as an AdminException', () async {
@@ -1181,6 +1272,15 @@ void main() {
       expect(db.docs['bookings/s1']!['photosReady'], isFalse);
       expect(log, isNot(contains('delete gallery-zips/s1.zip')));
       expect(log, isNot(contains('delete bookings/s1')));
+    });
+
+    test('a zip that won’t delete stops it before the document: once that’s gone, nothing deletes the zip', () async {
+      addAdHoc('s1');
+      storage.errors['delete gallery-zips/s1.zip'] = _storageError('retry-limit-exceeded');
+
+      await expectLater(admin.deleteSession('s1'), throwsA(_adminError(AdminErrorKind.offline)));
+      expect(log, isNot(contains('delete bookings/s1')));
+      expect(storage.objects, contains('gallery-zips/s1.zip'));
     });
 
     test('deletes a few files at a time', () async {

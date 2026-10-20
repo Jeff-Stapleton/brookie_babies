@@ -496,6 +496,8 @@ class _SessionBodyState extends State<_SessionBody> {
       try {
         await _admin.setPhotosReady(widget.sessionId, false);
       } catch (e) {
+        // Only hiding them fails it: the zip's deletion after is best
+        // effort.
         if (!mounted) return;
         setState(() {
           _deletingAll = null;
@@ -504,15 +506,19 @@ class _SessionBodyState extends State<_SessionBody> {
         return;
       }
       if (!mounted) return;
+      // Hidden now: a "Hide photos" that failed earlier no longer applies.
+      setState(() => _readyError = null);
     }
     // A few at a time, like the uploads; the first failure stops the rest.
+    // The zip isn't deleted with each: it went when the photos were hidden
+    // (just now, or before), and a hidden session can't build another.
     var next = 0;
     Object? failure;
     Future<void> deleteSome() async {
       while (mounted && failure == null && next < photos.length) {
         final photo = photos[next++];
         try {
-          await _admin.deletePhoto(photo);
+          await _admin.deletePhoto(photo, deleteZip: false);
         } catch (e) {
           failure ??= e;
           return;

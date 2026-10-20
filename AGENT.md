@@ -349,9 +349,11 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   (`PhotoRules`, `SessionRules`) and `newSessionData()` / `sessionChanges()` in
   `lib/services/admin_service.dart` send exactly what `firestore.rules` and
   `storage.rules` accept, so a rule rejection only ever means an access
-  problem. Change them together with the rules (each points at the other), and
-  keep `PhotoRules.homeMaxPhotos` = 1 + `FeaturedPhotos.maxCount` (a test
-  checks it).
+  problem. Change them together with the rules (each points at the other;
+  `test/services/rules_mirror_test.dart` reads both rules files and fails when
+  the keys, limits, types, packages or email pattern disagree), and keep
+  `PhotoRules.homeMaxPhotos` = 1 + `FeaturedPhotos.maxCount` (a test checks
+  it).
 - One primary button per view and the photograph rules (square corners, never
   tinted, overlaid or badged: say a photo's state beside it) apply to the
   admin pages too. Their tests check each view at 320, 390 and 1440px in both

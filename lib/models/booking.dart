@@ -63,9 +63,9 @@ class Booking {
   bool get canDeliverPhotos => status == BookingStatus.paid || status == BookingStatus.adhoc;
 
   /// Reads a `bookings` document. Returns null if [problemWith] finds a
-  /// problem; optional fields that are malformed are left out. Bookings are
-  /// typed in by hand, so surrounding spaces and the case of `status` are
-  /// forgiven.
+  /// problem; optional fields that are malformed are left out. Paid bookings
+  /// are typed in by hand, so surrounding spaces and the case of `status`
+  /// are forgiven.
   static Booking? fromMap(String id, Map<String, dynamic> data) {
     if (problemWith(data) != null) return null;
     String? optional(String field) {
@@ -107,12 +107,12 @@ class Booking {
       data[field] is String ? (data[field] as String).trim() : '';
 
   static BookingStatus? _status(Map<String, dynamic> data) {
-    final value = _text(data, 'status');
     // Ad hoc sessions are only written by the app, and the rules and the
-    // download function match `adhoc` exactly, so only that spelling counts:
-    // a hand-typed "Adhoc" would look shared here but be shared nowhere.
-    if (value == BookingStatus.adhoc.name) return BookingStatus.adhoc;
-    final status = BookingStatus.values.asNameMap()[value.toLowerCase()];
+    // download function match `adhoc` exactly, so only that exact value
+    // counts: a hand-typed "Adhoc " would look shared here but be shared
+    // nowhere.
+    if (data['status'] == BookingStatus.adhoc.name) return BookingStatus.adhoc;
+    final status = BookingStatus.values.asNameMap()[_text(data, 'status').toLowerCase()];
     return status == BookingStatus.adhoc ? null : status;
   }
 

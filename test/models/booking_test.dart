@@ -130,11 +130,9 @@ void main() {
     });
 
     test('only as "adhoc": the rules and the download function match it exactly', () {
-      for (final status in ['Adhoc', 'ADHOC', 'ad hoc']) {
+      for (final status in ['Adhoc', 'ADHOC', 'ad hoc', ' adhoc', 'adhoc ']) {
         expect(Booking.fromMap('a1', {...adHoc, 'status': status}), isNull, reason: status);
       }
-      // Surrounding spaces are forgiven, as for every status.
-      expect(Booking.fromMap('a1', {...adHoc, 'status': ' adhoc '}), isNotNull);
     });
   });
 

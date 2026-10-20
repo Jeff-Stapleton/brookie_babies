@@ -369,6 +369,39 @@ void main() {
       });
     }
 
+    for (final ready in [false, true]) {
+      testWidgets('an ID the download refuses (${ready ? 'available' : 'not available'}): says to recreate it, '
+          'and offers only to hide the photos', (tester) async {
+        const id = 'smith family';
+        final admin = FakeAdminService(
+          sessions: [testSession(id, status: BookingStatus.paid, uid: 'uid-smith', photosReady: ready)],
+          sessionPhotos: {id: _photos},
+        );
+        await _pumpSession(tester, admin: admin, id: id, size: const Size(320, 800));
+
+        expect(
+          find.widgetWithText(InlineMessage,
+              'Families can’t download this session’s photos: its document ID, “smith family”, may only use '
+              'letters, numbers, - and _. Recreate it in the Firestore console with an Auto-ID.'),
+          findsOneWidget,
+        );
+        expect(find.text('Make photos available'), findsNothing);
+        expect(find.byType(StatusTag), findsOneWidget); // Only the booking's status.
+        expect(find.text('Hide photos'), ready ? findsOneWidget : findsNothing);
+        expect(tester.takeException(), isNull);
+        expect(filledButtons(), lessThanOrEqualTo(1));
+      });
+    }
+
+    testWidgets('IDs with letters, numbers, - and _ are fine', (tester) async {
+      const id = 'Harper_2026-b';
+      final admin = FakeAdminService(sessions: [testSession(id)], sessionPhotos: {id: _photos});
+      await _pumpSession(tester, admin: admin, id: id);
+
+      expect(find.textContaining('document ID'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Make photos available'), findsOneWidget);
+    });
+
     testWidgets('available on a booking that can’t be delivered: the tag says why, not "Ready to download"',
         (tester) async {
       final admin = FakeAdminService(

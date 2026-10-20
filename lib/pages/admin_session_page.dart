@@ -108,6 +108,12 @@ String _messageFor(Object error, String fallback) {
   return fallback;
 }
 
+/// The session ids families can download photos from: getGalleryDownloadUrl
+/// refuses any other (BOOKING_ID_PATTERN in functions/src/gallery.ts; change
+/// them together). The app's own are Auto-IDs; one typed into the console
+/// may not be.
+final _downloadableId = RegExp(r'^[A-Za-z0-9_-]{1,128}$');
+
 /// Where AdminService stores a session's photo (storage.rules:
 /// `galleries/{bookingId}/`), for one the page uploaded itself.
 StoredPhoto _storedPhoto(String sessionId, String name) =>
@@ -622,7 +628,9 @@ class _SessionBodyState extends State<_SessionBody> {
   Widget _readiness(BuildContext context, Booking booking) {
     final c = BrookieColors.of(context);
     final ready = _shownReady(booking);
-    final reason = ready ? null : _notReadyReason();
+    // Nothing to offer: the download would always be refused.
+    final badId = !_downloadableId.hasMatch(booking.id);
+    final reason = ready || badId ? null : _notReadyReason();
     // Failed uploads are the only thing holding it back, and the admin may
     // choose to go ahead without them.
     final failuresInTheWay = reason != null &&
@@ -643,18 +651,25 @@ class _SessionBodyState extends State<_SessionBody> {
       children: [
         const AdminHeading('Downloads'),
         const SizedBox(height: BrookieSpace.s3),
-        PhotosReadyTag(ready: ready, status: booking.status),
-        const SizedBox(height: BrookieSpace.s2),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
-          child: Text(switch ((ready, _photos?.isEmpty ?? false)) {
-            // Their download would fail: there's nothing in it.
-            (true, true) => 'There are no photos to download. Upload them, or hide the photos until you do.',
-            (true, false) => 'The family can download every photo below as one zip.',
-            (false, _) => 'The family can’t download the photos until you make them available.',
-          }),
-        ),
-        const SizedBox(height: BrookieSpace.s4),
+        if (badId)
+          InlineMessage(
+            message: 'Families can’t download this session’s photos: its document ID, “${booking.id}”, may '
+                'only use letters, numbers, - and _. Recreate it in the Firestore console with an Auto-ID.',
+          )
+        else ...[
+          PhotosReadyTag(ready: ready, status: booking.status),
+          const SizedBox(height: BrookieSpace.s2),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
+            child: Text(switch ((ready, _photos?.isEmpty ?? false)) {
+              // Their download would fail: there's nothing in it.
+              (true, true) => 'There are no photos to download. Upload them, or hide the photos until you do.',
+              (true, false) => 'The family can download every photo below as one zip.',
+              (false, _) => 'The family can’t download the photos until you make them available.',
+            }),
+          ),
+        ],
+        if (ready || !badId) const SizedBox(height: BrookieSpace.s4),
         if (ready)
           // Never disabled: hiding them is always possible.
           BusyButton(
@@ -664,7 +679,7 @@ class _SessionBodyState extends State<_SessionBody> {
             focusNode: _readyFocus,
             onPressed: () => _setReady(false),
           )
-        else
+        else if (!badId)
           BusyButton(
             label: 'Make photos available',
             busyLabel: 'Making photos available…',

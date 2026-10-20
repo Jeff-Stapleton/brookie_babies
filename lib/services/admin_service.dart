@@ -88,7 +88,8 @@ abstract class AdminService {
   /// Adds an ad hoc session as [id] (from [newSessionId]; a new one if
   /// null) and returns its id. Trying again with the same id never makes a
   /// second session: a try that got no answer may still have been saved, and
-  /// a retry then finds it and returns its id.
+  /// a retry then finds it, changes it to [details] as [updateSession] does
+  /// (they may have been edited since), and returns its id.
   Future<String> createSession(SessionDetails details, {String? id});
 
   /// Changes an ad hoc session's details. A new email also deletes the
@@ -201,7 +202,12 @@ class FirebaseAdminService implements AdminService {
     } on AdminException catch (e) {
       // A retry after a try that got no answer but was saved: the rules
       // take set() on a document that's there as an update, and refuse it.
-      if (id == null || e.kind != AdminErrorKind.denied || await _isThere(doc) != true) rethrow;
+      if (id == null || e.kind != AdminErrorKind.denied) rethrow;
+      final saved = await _savedAdHoc(doc);
+      if (saved == null) rethrow;
+      // The admin may have changed the details since (fixed the email, the
+      // key to the photos, say): the session gets what they sent last.
+      await _change(saved, details);
     }
     return doc.id;
   }
@@ -216,6 +222,12 @@ class FirebaseAdminService implements AdminService {
     }
     _check(sessionDetailsProblem(details, before: session));
     _signedInUid();
+    await _change(session, details);
+  }
+
+  /// Saves what [details] change in the ad hoc [session], with updatedAt;
+  /// nothing if nothing changes. A new email also deletes the cached zip.
+  Future<void> _change(Booking session, SessionDetails details) async {
     final changes = sessionChanges(session, details);
     if (changes.isEmpty) return;
     await _write(
@@ -420,6 +432,19 @@ class FirebaseAdminService implements AdminService {
       await _deleteIfThere(storage.ref(_zipPath(id)));
     } catch (e) {
       log('Admin: could not delete the zip of session $id, so its links work until they expire: $e');
+    }
+  }
+
+  /// The ad hoc session saved as [doc]; null if there's none, if what's
+  /// there isn't one or can't be read as one, or if reading it fails.
+  static Future<Booking?> _savedAdHoc(DocumentReference<Map<String, dynamic>> doc) async {
+    try {
+      final data = (await doc.get()).data();
+      final session = data == null ? null : Booking.fromMap(doc.id, data);
+      return session != null && session.isAdHoc ? session : null;
+    } catch (e) {
+      log('Admin: could not read ${doc.path}: $e');
+      return null;
     }
   }
 

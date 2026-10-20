@@ -3,6 +3,7 @@
 
 import 'package:brookie_babies/components/booking_calendar.dart';
 import 'package:brookie_babies/models/booking.dart';
+import 'package:brookie_babies/models/session_details.dart';
 import 'package:brookie_babies/pages/admin_session_page.dart';
 import 'package:brookie_babies/pages/session_form_page.dart';
 import 'package:brookie_babies/services/admin_service.dart';
@@ -321,6 +322,27 @@ void main() {
 
       expect(admin.createSessionIds, ['session-1', 'session-1']);
       expect(admin.sessions.keys, ['session-1']);
+      expect(tester.widget<AdminSessionPage>(find.byType(AdminSessionPage)).sessionId, 'session-1');
+    });
+
+    testWidgets('trying again after no answer, with the email fixed, saves the fixed email', (tester) async {
+      final admin = _SavedButNoAnswer();
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
+
+      await _fillIn(tester);
+      await tester.enterText(_field('Email'), 'novka@example.com');
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(InlineMessage, kAdminTimedOutMessage), findsOneWidget);
+      expect(admin.sessions['session-1']!.email, 'novka@example.com');
+
+      await tester.enterText(_field('Email'), 'novak@example.com');
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(admin.createSessionIds, ['session-1', 'session-1']);
+      expect(admin.sessions.keys, ['session-1']);
+      expect(admin.sessions['session-1']!.email, 'novak@example.com');
       expect(tester.widget<AdminSessionPage>(find.byType(AdminSessionPage)).sessionId, 'session-1');
     });
 
@@ -1014,5 +1036,19 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+  }
+}
+
+/// A FakeAdminService whose first createSession is saved but answers too
+/// late, as FirebaseAdminService reports a write after its time limit.
+class _SavedButNoAnswer extends FakeAdminService {
+  var _answered = false;
+
+  @override
+  Future<String> createSession(SessionDetails details, {String? id}) async {
+    final saved = await super.createSession(details, id: id);
+    if (_answered) return saved;
+    _answered = true;
+    throw adminError(AdminErrorKind.offline, kAdminTimedOutMessage);
   }
 }

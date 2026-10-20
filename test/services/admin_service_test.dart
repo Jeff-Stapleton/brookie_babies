@@ -412,6 +412,66 @@ void main() {
       expect(db.docs.keys, ['bookings/a1']);
     });
 
+    test('a retry with details changed since the try that was saved brings the session up to date', () async {
+      final hold = db.holdWrites = Completer();
+      await expectLater(
+        admin.createSession(_details(email: 'harpr@example.com'), id: 'a1'),
+        throwsA(_adminError(AdminErrorKind.offline, message: kAdminTimedOutMessage)),
+      );
+      hold.complete();
+      db.holdWrites = null;
+      await pumpEventQueue();
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+
+      // The admin fixes the email, the key to the photos, and tries again.
+      expect(await admin.createSession(_details(email: 'Harper@Example.com ', location: 'The studio'), id: 'a1'), 'a1');
+
+      expect(log, [
+        'set bookings/a1',
+        'set bookings/a1',
+        'get bookings/a1',
+        'update bookings/a1',
+        'delete gallery-zips/a1.zip',
+      ]);
+      expect(db.writes.last.data, {
+        'email': 'harper@example.com',
+        'location': 'The studio',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      expect(db.docs['bookings/a1']!['email'], 'harper@example.com');
+      expect(db.docs['bookings/a1']!['createdBy'], 'admin-uid');
+    });
+
+    test('a refused retry that finds what it can’t have saved is still refused', () async {
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+      for (final there in [
+        {'status': 'adhoc', 'name': 'The Harper family', 'date': 'soon'},
+        {'status': 'paid', 'packageName': 'Premium', 'date': '2026-11-14', 'uid': 'u1'},
+      ]) {
+        db.docs['bookings/a1'] = there;
+        log.clear();
+
+        await expectLater(
+          admin.createSession(_details(), id: 'a1'),
+          throwsA(_adminError(AdminErrorKind.denied, message: kAdminDeniedMessage)),
+          reason: '$there',
+        );
+        expect(log, ['set bookings/a1', 'get bookings/a1']);
+      }
+    });
+
+    test('a retry whose change then fails says so, as an edit does', () async {
+      addAdHoc('a1');
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+      db.errors['update bookings/a1'] = _firestoreError('unavailable');
+
+      await expectLater(
+        admin.createSession(_details(name: 'The Harpers'), id: 'a1'),
+        throwsA(_adminError(AdminErrorKind.offline, message: kAdminOfflineMessage)),
+      );
+      expect(db.docs['bookings/a1']!['name'], 'The Harper family');
+    });
+
     test('a refused retry with no session there is still refused', () async {
       db.errors['set bookings/a1'] = _firestoreError('permission-denied');
 

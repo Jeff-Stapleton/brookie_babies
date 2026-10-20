@@ -812,6 +812,8 @@ class _SessionBodyState extends State<_SessionBody> {
                 BusyButton(
                   label: 'Delete all photos',
                   busyLabel: 'Deleting ${deletingAll?.done ?? 0} of ${deletingAll?.total ?? 0}…',
+                  // Heard once, not at every photo.
+                  busySemanticsLabel: 'Deleting ${_photoCount(deletingAll?.total ?? 0)}…',
                   busy: deletingAll != null,
                   kind: BusyButtonKind.text,
                   icon: Icons.delete_outline,

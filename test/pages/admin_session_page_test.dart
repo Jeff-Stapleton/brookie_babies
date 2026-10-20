@@ -773,6 +773,28 @@ void main() {
       expect(find.text('Upload photos first.'), findsOneWidget);
     });
 
+    testWidgets('"Delete all photos": screen readers hear it start once, not every count', (tester) async {
+      final semantics = tester.ensureSemantics();
+      final names = [for (var i = 1; i <= 5; i++) 'IMG_$i.jpg'];
+      final admin = _service(photos: names)..writeDelay = const Duration(milliseconds: 100);
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.text('Delete all photos'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete all photos'));
+      await tester.pump();
+      for (final done in [0, 3]) {
+        expect(find.text('Deleting $done of 5…'), findsOneWidget);
+        final button = find.ancestor(of: find.text('Deleting $done of 5…'), matching: find.byType(TextButton));
+        expect(tester.getSemantics(button),
+            isSemantics(label: 'Deleting 5 photos…', isLiveRegion: true, isButton: true));
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      semantics.dispose();
+    });
+
     testWidgets('"Delete all photos" stops at a failure, and says how far it got', (tester) async {
       final names = [for (var i = 1; i <= 5; i++) 'IMG_$i.jpg'];
       final admin = _service(photos: names);

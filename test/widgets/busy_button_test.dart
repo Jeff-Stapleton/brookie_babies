@@ -68,4 +68,34 @@ void main() {
     );
     semantics.dispose();
   });
+
+  testWidgets('a busy label that counts is heard as the steady busySemanticsLabel, so it’s announced once',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    Future<void> pumpAt(int done) => tester.pumpWidget(MaterialApp(
+          theme: brookieTheme(Brightness.light),
+          home: Scaffold(
+            body: Center(
+              child: BusyButton(
+                label: 'Delete all photos',
+                busyLabel: 'Deleting $done of 3…',
+                busySemanticsLabel: 'Deleting 3 photos…',
+                busy: true,
+                kind: BusyButtonKind.text,
+                onPressed: () {},
+              ),
+            ),
+          ),
+        ));
+
+    for (final done in [0, 2]) {
+      await pumpAt(done);
+      expect(find.text('Deleting $done of 3…'), findsOneWidget);
+      expect(
+        tester.getSemantics(find.byType(TextButton)),
+        isSemantics(label: 'Deleting 3 photos…', isButton: true, isLiveRegion: true),
+      );
+    }
+    semantics.dispose();
+  });
 }

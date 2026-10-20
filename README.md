@@ -207,19 +207,22 @@ files" and can be deleted.
 Until the first save (no `site/home` yet), or if `site/home` can't be read
 within 3 seconds, the site falls back to the first seven JPEG, PNG or WebP
 files in `_admin/gallery` by file name, skipping hidden files such as
-`.DS_Store`. The portal starts from those, so saving keeps them.
+`.DS_Store`; if the chosen photos arrive later, it switches to them. The
+portal starts from those, so saving keeps them. Until that first save, a new
+upload that sorts first by name changes the live home page at once (the page
+says so by **Upload photos**).
 
 > **Everything in `_admin/gallery` is public.** Anyone can list the folder and download every file in it, whether it's on the home page or not. Don't upload clients' photos there without their permission, and never put a family's session photos there.
 
 ## Delivering photos
 
-Families download their photos from **Your sessions** once the session's `photosReady` is `true` and its `status` is `paid` or `adhoc`. The **Download all photos** button appears on the session's card even before the session date, so check that the session is right before making its photos available. Photos are never public through the site: families get a zip download link that expires after one hour.
+Families download their photos from **Your sessions** once the session's `photosReady` is `true` and its `status` is `paid` or `adhoc`. The **Download all photos** button appears on the session's card even before the session date, so check that the session is right before making its photos available. Photos are never public through the site: families get a zip download link that expires after one hour. Hiding the photos, deleting one, or changing who an ad hoc session is shared with also deletes the cached zip, so links already handed out stop working at once.
 
 ### In the admin portal
 
 1. **Open the session** from **Admin**. A paid booking appears there once it's in Firestore (for now you add those by hand; see "Adding a paid booking by hand"). For family and friends, **Add a session** first (see "Ad hoc sessions").
 2. **Upload photos** and pick the edited photos: any image type, each under 100 MB. They upload three at a time; keep the page open until they finish (leaving or closing the tab asks first, and stops them). A photo whose name is already in the session is skipped, never overwritten, so after a problem you can pick the whole folder again. To replace a photo, delete it first. **Retry failed** tries failed ones again.
-3. **Make photos available.** It becomes the page's main button once there are photos and nothing is still uploading or failed, and it asks first, saying how many photos and who can download them. **Hide photos** stops downloads again.
+3. **Make photos available.** It becomes the page's main button once there are photos and nothing is still uploading or failed, and it asks first, saying how many photos and who can download them. **Hide photos** stops downloads again. **Delete all photos** on a session whose photos are available hides them first, so a family never downloads a half-deleted gallery.
 4. **Tell the family.** Under **Share with the family**, **Copy message** copies a note with the link to Your sessions and the Google account to sign in with, ready to paste into an email or a text. The site doesn't email families itself.
 
 The first download builds a zip of the whole folder, which can take a few minutes for a large gallery. Later downloads reuse it. If you add, replace or delete photos afterwards, the next download rebuilds the zip automatically; families who already downloaded need to download again to get the changes. (If you replace a photo while a family's download is being built, that one download may contain the old version.)
@@ -228,7 +231,7 @@ The first download builds a zip of the whole folder, which can take a few minute
 
 An ad hoc session is for family, friends and anyone not booked on the site: no payment, and no `uid`. It's a `bookings` document with `status` `adhoc`, shared by email: whoever signs in to the site with Google as that email, verified by Google, sees it under **Your sessions** (with no payment tag) and can download its photos once they're available.
 
-**Admin → Add a session**: a name (who it's for, such as "The Harper family"), the email they use to sign in to Google, a date, and optionally a package, time and location. **Add session** opens its page, ready for photos. **Edit details** changes them; changing the email of a session whose photos are available asks first, because it hands the photos to the new address. **Delete session** deletes the session and its photos for good. Only ad hoc sessions can be edited or deleted in the portal.
+**Admin → Add a session**: a name (who it's for, such as "The Harper family"), the email they use to sign in to Google (exactly as their Google account shows it: Google sign-in accepts `janedoe@gmail.com` for `jane.doe@gmail.com`, but the site matches the account's own address, dots included; the form refuses addresses no Google sign-in could match, such as ones with angle brackets, `mailto:`, spaces or a Gmail `+tag`), a date, and optionally a package, time and location. **Add session** opens its page, ready for photos. **Edit details** changes them; changing the email of a session whose photos are available asks first, because it hands the photos to the new address. **Delete session** deletes the session and its photos for good. Only ad hoc sessions can be edited or deleted in the portal. A family signed in with a different Google account sees, under Your sessions, which account they're signed in as, so they can switch.
 
 **Add ad hoc sessions in the portal, not in the Firebase console.** The portal writes exactly what the rules and the download function check. A session typed in the console with `status` other than exactly `adhoc`, or an email with a capital letter or a space, is shared with nobody.
 
@@ -251,7 +254,7 @@ The portal saves these fields:
 
 ### Adding a paid booking by hand
 
-Nothing on the site records paid bookings yet. For a payment made through a Stripe Payment Link: Firestore Database → `bookings` → **Add document** → **Auto-ID**, with these fields:
+Nothing on the site records paid bookings yet. For a payment made through a Stripe Payment Link: Firestore Database → `bookings` → **Add document** → **Auto-ID** (keep the Auto-ID: downloads need a document ID of letters, numbers, `-` and `_` only, and the session page warns about any other), with these fields:
 
 | Field | Type | Value |
 |---|---|---|

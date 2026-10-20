@@ -349,7 +349,9 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   `signOutWithWarning(context)`. Tests that touch it
   `tearDown(LeaveWarning.reset)`.
 - Admin pages: `BrookieTopBar(showAdminLink: false)` and the body inside
-  `AdminGate`. The gate only decides what the page shows; the rules decide
+  `AdminGate`. Pages with work that leaving would lose (the session page, the
+  session form, home page photos) also pass `showSessionsLink: false`: the
+  account menu's links replace the page without asking its `PopScope`. The gate only decides what the page shows; the rules decide
   what an admin can do.
 - The client checks mirror the rules: `lib/services/photo_rules.dart`
   (`PhotoRules`, `SessionRules`) and `newSessionData()` / `sessionChanges()` in
@@ -430,8 +432,16 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   TODO list.
 - `StoragePortfolioService` waits at most 3 s
   (`homePhotoNamesTimeLimit`) for `site/home`, then shows the folder by name, so
-  a slow or failing read never holds up the hero. An empty `photos` list means
+  a slow or failing read never holds up the hero; the listing starts at the
+  same time, and a late answer that differs calls `onLateChoice` (HomePage
+  reloads its photos). An empty `photos` list means
   no photos, not the fallback.
+- Hiding photos, deleting a photo, and changing an ad hoc session's email
+  delete the cached `gallery-zips/<id>.zip` (admins may only delete it), so
+  signed links already handed out stop working; the next download rebuilds it.
+- Download IDs: `getGalleryDownloadUrl` only accepts booking IDs matching
+  `^[A-Za-z0-9_-]{1,128}$` (`BOOKING_ID_PATTERN`); the session page mirrors it
+  and warns instead of offering "Make photos available".
 - Uploads never overwrite: `storage.rules` has no `update`. `UploadQueue`
   skips names already in the destination or the queue; an upload refused with
   `unauthorized` whose object turns out to exist (`getMetadata`) is reported

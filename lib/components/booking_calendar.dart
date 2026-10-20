@@ -11,9 +11,10 @@ import 'package:table_calendar/table_calendar.dart';
 /// shape of the logo's disc.
 ///
 /// [TableCalendar] dressed in the design system: month view only, weeks start
-/// on Sunday, days outside the month left blank, days with openings dotted.
-/// By keyboard, Tab visits each open day in reading order and the arrow keys
-/// move to the nearest open day in their direction.
+/// on Sunday, days outside the month left blank, days with openings dotted
+/// (unless [showOpenings] is off). By keyboard, Tab visits each open day in
+/// reading order and the arrow keys move to the nearest open day in their
+/// direction.
 class BookingCalendar extends StatefulWidget {
   const BookingCalendar({
     super.key,
@@ -24,6 +25,7 @@ class BookingCalendar extends StatefulWidget {
     required this.onDaySelected,
     this.isOpen,
     this.edgeToEdge = false,
+    this.showOpenings = true,
   });
 
   /// The bookable range. Days outside it can't be chosen.
@@ -44,6 +46,11 @@ class BookingCalendar extends StatefulWidget {
   /// hairlines above and below instead of a card. For windows too narrow to
   /// fit a card of [minCardWidth] inside the page gutter.
   final bool edgeToEdge;
+
+  /// Whether days with openings are dotted, with the "Openings that day"
+  /// legend under the month. Off where any day in range can be chosen and
+  /// openings mean nothing, such as an admin dating a session.
+  final bool showOpenings;
 
   /// The card's widest; the days stay [BrookieSize.day] apart or more.
   static const maxWidth = 400.0;
@@ -232,6 +239,7 @@ class _BookingCalendarState extends State<BookingCalendar> {
                         bookable: _isBookable(day),
                         selected: isSameDay(widget.selectedDay, day),
                         today: isSameDay(widget.today, day),
+                        showOpenings: widget.showOpenings,
                         onSelected: () => _select(day),
                       ),
                       // TableCalendar wraps each day in its own label and drops
@@ -244,10 +252,15 @@ class _BookingCalendarState extends State<BookingCalendar> {
                   ),
                 ),
               ),
-              Padding(
-                padding: EdgeInsets.fromLTRB(chrome, 0, chrome, BrookieSpace.s4),
-                child: const _Legend(),
-              ),
+              if (widget.showOpenings)
+                Padding(
+                  padding: EdgeInsets.fromLTRB(chrome, 0, chrome, BrookieSpace.s4),
+                  child: const _Legend(),
+                )
+              else
+                // The last week's s3 below it, and s1 more: what the month
+                // header has above.
+                const SizedBox(height: BrookieSpace.s1),
             ],
           );
         }),
@@ -341,14 +354,15 @@ class _Legend extends StatelessWidget {
 }
 
 /// One day: a 44px disc. Ink numerals with a dot beneath for days with
-/// openings, ink-soft for the rest, a fine ring for today, and butter with an
-/// ink ring when chosen.
+/// openings (when [showOpenings]), ink-soft for the rest, a fine ring for
+/// today, and butter with an ink ring when chosen.
 class _DayDisc extends StatefulWidget {
   const _DayDisc({
     required this.day,
     required this.bookable,
     required this.selected,
     required this.today,
+    required this.showOpenings,
     required this.onSelected,
   });
 
@@ -356,6 +370,7 @@ class _DayDisc extends StatefulWidget {
   final bool bookable;
   final bool selected;
   final bool today;
+  final bool showOpenings;
   final VoidCallback onSelected;
 
   @override
@@ -450,7 +465,7 @@ class _DayDiscState extends State<_DayDisc> {
                     ),
                   ),
                 ),
-                if (bookable) Positioned(bottom: _dotInset, child: _OpeningsDot(color: numeral)),
+                if (bookable && widget.showOpenings) Positioned(bottom: _dotInset, child: _OpeningsDot(color: numeral)),
               ],
             ),
           ),

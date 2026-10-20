@@ -51,6 +51,7 @@ void main() {
         await body(tester);
       } finally {
         server.stop();
+        server.broken.clear();
       }
     });
   }
@@ -512,6 +513,62 @@ void main() {
     });
   });
 
+  group('photos that can’t be shown', () {
+    Uri link(String name) => Uri.parse('https://storage.example.com/$name');
+    Finder cantShow(Finder within) =>
+        find.descendant(of: within, matching: find.text(HomePhotoLibrary.cantShowLabel));
+
+    photoTest('a library photo that won’t load says so, and can’t be put on the home page', (tester) async {
+      server.broken.add(link('IMG_08.jpg'));
+      await pumpPage(tester);
+      await reveal(tester, check('IMG_08.jpg'));
+
+      expect(cantShow(tile('IMG_08.jpg')), findsOneWidget);
+      expect(find.text(HomePhotoLibrary.cantShowLabel), findsOneWidget);
+      expect(isEnabled(tester, check('IMG_08.jpg')), isFalse);
+      expect(isEnabled(tester, check('IMG_09.jpg')), isTrue);
+      expect(tester.takeException(), isNull);
+    });
+
+    photoTest('one on the home page says so in its row too, and can still come off', (tester) async {
+      server.broken.add(link('IMG_01.jpg'));
+      await pumpPage(tester);
+
+      expect(cantShow(row('IMG_01.jpg')), findsOneWidget);
+      expect(cantShow(row('IMG_03.jpg')), findsNothing);
+      await reveal(tester, check('IMG_01.jpg'));
+      expect(cantShow(tile('IMG_01.jpg')), findsOneWidget);
+      expect(isEnabled(tester, check('IMG_01.jpg')), isTrue);
+
+      await tapAndSettle(tester, check('IMG_01.jpg'));
+
+      expect(chosen(tester), ['IMG_03.jpg', 'IMG_05.jpg']);
+      // Off, it can't go back on.
+      expect(isEnabled(tester, check('IMG_01.jpg')), isFalse);
+    });
+
+    photoTest('a photo listed without a link says so until a listing gives it one', (tester) async {
+      admin.unlinked.add('IMG_08.jpg');
+      picker.next = [testPhoto('IMG_99.jpg')];
+      await pumpPage(tester);
+      await reveal(tester, check('IMG_08.jpg'));
+      expect(cantShow(tile('IMG_08.jpg')), findsOneWidget);
+      expect(isEnabled(tester, check('IMG_08.jpg')), isFalse);
+
+      // The upload batch's listing has its link now.
+      admin.unlinked.clear();
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+      admin.uploads.single.complete();
+      await tester.pumpAndSettle();
+
+      await reveal(tester, check('IMG_08.jpg'));
+      expect(find.text(HomePhotoLibrary.cantShowLabel), findsNothing);
+      expect(isEnabled(tester, check('IMG_08.jpg')), isTrue);
+      final photo = find.descendant(of: tile('IMG_08.jpg'), matching: find.byType(NetworkPhoto));
+      expect(tester.widget<NetworkPhoto>(photo).url, link('IMG_08.jpg'));
+    });
+  });
+
   group('keyboard', () {
     photoTest('focus stays on the button that moved a row, in its new place', (tester) async {
       await pumpPage(tester);
@@ -914,6 +971,9 @@ void main() {
 
       expect(tile('IMG_99.jpg'), findsOneWidget);
       expect(find.descendant(of: tile('IMG_99.jpg'), matching: find.byType(NetworkPhoto)), findsNothing);
+      // Just uploaded, not broken: it can still go on the home page.
+      expect(find.text(HomePhotoLibrary.cantShowLabel), findsNothing);
+      expect(isEnabled(tester, check('IMG_99.jpg')), isTrue);
       expect(tester.takeException(), isNull);
     });
   });

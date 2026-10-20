@@ -16,7 +16,14 @@ import 'package:flutter/semantics.dart';
 /// that takes its place. No dragging: the buttons work the same for
 /// everyone. Shows nothing for no photos.
 class HomePhotoOrder extends StatefulWidget {
-  const HomePhotoOrder({super.key, required this.photos, required this.onChanged, this.focusWhenEmptied});
+  const HomePhotoOrder({
+    super.key,
+    required this.photos,
+    required this.onChanged,
+    this.focusWhenEmptied,
+    this.cantShow = const {},
+    this.onPhotoFailed,
+  });
 
   /// The home page photos, in order: the first is the hero.
   final List<StoredPhoto> photos;
@@ -27,6 +34,12 @@ class HomePhotoOrder extends StatefulWidget {
   /// Takes focus when the last photo is removed with the keyboard focused
   /// on its row.
   final FocusNode? focusWhenEmptied;
+
+  /// Names that can't be shown (HomePhotoLibrary.cantShow): each says so.
+  final Set<String> cantShow;
+
+  /// Called with a photo's name when it can't be loaded.
+  final ValueChanged<String>? onPhotoFailed;
 
   /// Where the first photo goes, and what to mind when choosing it.
   static const heroLabel = 'Full-screen photo, behind the logo: keep faces clear of the middle';
@@ -152,6 +165,8 @@ class _HomePhotoOrderState extends State<HomePhotoOrder> {
             onMoveUp: i > 0 ? () => _move(i, -1) : null,
             onMoveDown: i < photos.length - 1 ? () => _move(i, 1) : null,
             onRemove: () => _remove(i),
+            cantShow: widget.cantShow.contains(photo.name),
+            onPhotoFailed: () => widget.onPhotoFailed?.call(photo.name),
           ),
         ],
       ],
@@ -168,6 +183,8 @@ class _OrderRow extends StatelessWidget {
     required this.onMoveUp,
     required this.onMoveDown,
     required this.onRemove,
+    required this.cantShow,
+    required this.onPhotoFailed,
   });
 
   final StoredPhoto photo;
@@ -179,6 +196,8 @@ class _OrderRow extends StatelessWidget {
   final VoidCallback? onMoveUp;
   final VoidCallback? onMoveDown;
   final VoidCallback onRemove;
+  final bool cantShow;
+  final VoidCallback onPhotoFailed;
 
   static const _thumbnailWidth = 48.0;
 
@@ -202,7 +221,7 @@ class _OrderRow extends StatelessWidget {
             width: textScaler.scale(BrookieSpace.s5),
             child: Text('$position', style: BrookieType.label.copyWith(color: c.inkSoft)),
           ),
-          HomeLibraryPhoto(photo: photo, width: _thumbnailWidth),
+          HomeLibraryPhoto(photo: photo, width: _thumbnailWidth, onFailed: onPhotoFailed),
           const SizedBox(width: BrookieSpace.s4),
           Expanded(
             child: Column(
@@ -214,6 +233,8 @@ class _OrderRow extends StatelessWidget {
                   position == 1 ? HomePhotoOrder.heroLabel : HomePhotoOrder.featuredLabel,
                   style: BrookieType.small.copyWith(color: c.inkSoft),
                 ),
+                if (cantShow)
+                  Text(HomePhotoLibrary.cantShowLabel, style: BrookieType.small.copyWith(color: c.inkSoft)),
               ],
             ),
           ),

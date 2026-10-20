@@ -84,6 +84,12 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   String? _deleteError;
   final _deleting = <String>{};
 
+  /// Library photos the site can't show: listed without a link to them, or
+  /// they wouldn't load. Each says so, and can only come off the home page.
+  /// A photo just uploaded waits for its link instead, from the next
+  /// listing.
+  Set<String> _cantShow = {};
+
   bool _wasUploading = false;
 
   bool get _changed => !listEquals(_saved, _chosen);
@@ -141,6 +147,10 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
       if (!mounted) return;
       _set(() {
         _library = [...library]..sort((a, b) => a.name.compareTo(b.name));
+        _cantShow = {
+          for (final file in library)
+            if (file.url == null && StoragePortfolioService.isPhoto(file.name)) file.name,
+        };
         _neverChosen = chosen == null;
         if (chosen == null) {
           _saved = _firstPhotos();
@@ -190,6 +200,11 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
     final first = _firstPhotos();
     if (!_changed && !_saving) _chosen = first;
     _saved = first;
+  }
+
+  void _onPhotoFailed(String name) {
+    if (!mounted || _cantShow.contains(name)) return;
+    _set(() => _cantShow.add(name));
   }
 
   void _toggle(String name) {
@@ -305,6 +320,8 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
         ...library,
         StoredPhoto(name: item.name, fullPath: '${StoragePortfolioService.folder}/${item.name}'),
       ]..sort((a, b) => a.name.compareTo(b.name));
+      // A new file: one deleted under this name couldn't be shown.
+      _cantShow.remove(item.name);
       _followFirstPhotos();
       // Chosen, deleted, and back again: the site shows it again.
       if (_missing.contains(item.name)) {
@@ -335,7 +352,8 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
 
   /// Lists the library once the uploads are done, for the links to show
   /// the new photos by: once per batch, not once per photo. Only the links
-  /// are taken from it; the page's own list stays as it is.
+  /// are taken from it, for photos without one or that can't be shown; the
+  /// page's own list stays as it is.
   Future<void> _fetchLinks() async {
     bool unlinked(StoredPhoto file) => file.url == null && StoragePortfolioService.isPhoto(file.name);
     if (!(_library?.any(unlinked) ?? false)) return;
@@ -346,8 +364,8 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
       _set(() {
         _library = [
           for (final file in _library!)
-            if (unlinked(file) && listed[file.name] != null)
-              StoredPhoto(name: file.name, fullPath: file.fullPath, url: listed[file.name])
+            if ((unlinked(file) || _cantShow.contains(file.name)) && listed.containsKey(file.name))
+              _relisted(file, listed[file.name])
             else
               file,
         ];
@@ -357,6 +375,18 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
       // wait for the page to be opened again.
       log('Could not fetch links for the new home page photos: $e');
     }
+  }
+
+  /// [file], unlinked or not shown, as a listing gives it again with [url].
+  /// A new link is tried again; none, or the same one that wouldn't load,
+  /// still can't be shown.
+  StoredPhoto _relisted(StoredPhoto file, Uri? url) {
+    if (url == null || url == file.url) {
+      _cantShow.add(file.name);
+      return file;
+    }
+    _cantShow.remove(file.name);
+    return StoredPhoto(name: file.name, fullPath: file.fullPath, url: url);
   }
 
   Future<void> _confirmLeave() async {
@@ -444,8 +474,10 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
             canAdd: _chosen.length < PhotoRules.homeMaxPhotos,
             locked: {..._chosen, ..._saved},
             deleting: _deleting,
+            cantShow: _cantShow,
             onToggle: _toggle,
             onDelete: _delete,
+            onPhotoFailed: _onPhotoFailed,
           ),
         ),
         SliverPadding(
@@ -519,6 +551,8 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
               ],
               onChanged: _choose,
               focusWhenEmptied: _saveFocus,
+              cantShow: _cantShow,
+              onPhotoFailed: _onPhotoFailed,
             ),
           ),
         const SizedBox(height: BrookieSpace.s3),

@@ -14,12 +14,16 @@ const _decodeStep = 128;
 /// decoded at about that size (not the camera's). Until it has a link (a
 /// photo just uploaded), its placeholder.
 ///
-/// A print: nothing is ever laid over it, so its state is said beside it.
+/// A print: nothing is ever laid over it, so its state is said beside it
+/// (HomePhotoLibrary.cantShowLabel, after [onFailed]).
 class HomeLibraryPhoto extends StatelessWidget {
-  const HomeLibraryPhoto({super.key, required this.photo, required this.width});
+  const HomeLibraryPhoto({super.key, required this.photo, required this.width, this.onFailed});
 
   final StoredPhoto photo;
   final double width;
+
+  /// Called if the photo can't be loaded: its placeholder stays.
+  final VoidCallback? onFailed;
 
   @override
   Widget build(BuildContext context) {
@@ -36,6 +40,7 @@ class HomeLibraryPhoto extends StatelessWidget {
               key: ValueKey(url),
               url: url,
               decodeSize: Size(decodeWidth, decodeWidth / _aspectRatio),
+              onFailed: onFailed,
             ),
     );
   }
@@ -84,8 +89,10 @@ class HomePhotoLibrary extends StatefulWidget {
     required this.canAdd,
     required this.locked,
     required this.deleting,
+    required this.cantShow,
     required this.onToggle,
     required this.onDelete,
+    required this.onPhotoFailed,
   });
 
   /// The photos the site can show (StoragePortfolioService.isPhoto), in
@@ -106,10 +113,20 @@ class HomePhotoLibrary extends StatefulWidget {
   /// Names being deleted.
   final Set<String> deleting;
 
+  /// Names that can't be shown: no link to them, or they wouldn't load.
+  /// Each says so, and can't be put on the home page (only taken off).
+  final Set<String> cantShow;
+
   /// Puts the photo named on the home page, or takes it off.
   final ValueChanged<String> onToggle;
 
   final ValueChanged<StoredPhoto> onDelete;
+
+  /// Called with a photo's name when it can't be loaded.
+  final ValueChanged<String> onPhotoFailed;
+
+  /// Said beside a photo that can't be shown, here or in the order list.
+  static const cantShowLabel = 'Can’t be shown. Reload the page, or delete it and upload it again.';
 
   /// The narrowest a tile gets at normal text size: wide enough for "On the
   /// home page" on one line, and two columns on most phones.
@@ -173,7 +190,7 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
           (name) => [_focusFor(name).delete, _focusFor(name).toggle],
           (name, node) => node == _focusFor(name).delete
               ? !widget.locked.contains(name)
-              : widget.chosen.contains(name) || widget.canAdd,
+              : widget.chosen.contains(name) || (widget.canAdd && !widget.cantShow.contains(name)),
         );
       }
       // Its tile's buttons hold them until this frame is built.
@@ -227,6 +244,7 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
     final name = photo.name;
     final selected = widget.chosen.contains(name);
     final deleting = widget.deleting.contains(name);
+    final cantShow = widget.cantShow.contains(name);
     final String? lockedReason;
     if (!widget.locked.contains(name)) {
       lockedReason = null;
@@ -244,10 +262,12 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
         width: width,
         focus: _focusFor(name),
         selected: selected,
-        onToggle: !deleting && (selected || widget.canAdd) ? () => widget.onToggle(name) : null,
+        onToggle: !deleting && (selected || (widget.canAdd && !cantShow)) ? () => widget.onToggle(name) : null,
         lockedReason: lockedReason,
         deleting: deleting,
         onDelete: () => widget.onDelete(photo),
+        cantShow: cantShow,
+        onPhotoFailed: () => widget.onPhotoFailed(name),
       ),
     );
   }
@@ -264,6 +284,8 @@ class _LibraryTile extends StatelessWidget {
     required this.lockedReason,
     required this.deleting,
     required this.onDelete,
+    required this.cantShow,
+    required this.onPhotoFailed,
   });
 
   final StoredPhoto photo;
@@ -271,8 +293,8 @@ class _LibraryTile extends StatelessWidget {
   final _TileFocus focus;
   final bool selected;
 
-  /// Null while the home page is full and this photo isn't on it, or while
-  /// it's being deleted.
+  /// Null while the home page is full and this photo isn't on it, while
+  /// it's being deleted, or while it can't be shown and isn't on it.
   final VoidCallback? onToggle;
 
   /// Why it can't be deleted, if it can't.
@@ -280,6 +302,8 @@ class _LibraryTile extends StatelessWidget {
 
   final bool deleting;
   final VoidCallback onDelete;
+  final bool cantShow;
+  final VoidCallback onPhotoFailed;
 
   @override
   Widget build(BuildContext context) {
@@ -290,7 +314,7 @@ class _LibraryTile extends StatelessWidget {
         // Laid on paper as a print, like the home page's.
         DecoratedBox(
           decoration: BoxDecoration(boxShadow: c.shadowPrint),
-          child: HomeLibraryPhoto(photo: photo, width: width),
+          child: HomeLibraryPhoto(photo: photo, width: width, onFailed: onPhotoFailed),
         ),
         const SizedBox(height: BrookieSpace.s1),
         Row(
@@ -312,6 +336,10 @@ class _LibraryTile extends StatelessWidget {
             ),
           ],
         ),
+        if (cantShow) ...[
+          Text(HomePhotoLibrary.cantShowLabel, style: BrookieType.small.copyWith(color: c.inkSoft)),
+          const SizedBox(height: BrookieSpace.s2),
+        ],
         _OnHomePageCheck(name: photo.name, focusNode: focus.toggle, selected: selected, onToggle: onToggle),
       ],
     );

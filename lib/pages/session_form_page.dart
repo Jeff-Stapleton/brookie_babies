@@ -1,4 +1,5 @@
 import 'dart:developer';
+import 'dart:math' as math;
 
 import 'package:brookie_babies/components/admin_frame.dart';
 import 'package:brookie_babies/components/admin_gate.dart';
@@ -11,13 +12,16 @@ import 'package:brookie_babies/services/admin_service.dart';
 import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/photo_rules.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/leave_warning.dart';
 import 'package:brookie_babies/utilities/utils.dart';
 import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/busy_button.dart';
+import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 
 typedef _Time = ({int hour, int minute});
 
@@ -27,17 +31,27 @@ typedef _Time = ({int hour, int minute});
 /// Every field is checked against what firestore.rules accept
 /// ([SessionRules]) before anything is saved.
 class SessionFormPage extends StatelessWidget {
-  const SessionFormPage({super.key, this.session});
+  const SessionFormPage({super.key, this.session, this.now});
 
   /// The ad hoc session to edit; null to add one.
   final Booking? session;
+
+  /// The current time, which decides the calendar's today and range and how
+  /// the chosen day reads. Defaults to the clock; tests pin it.
+  final DateTime? now;
 
   @override
   Widget build(BuildContext context) {
     final adding = session == null;
     return Scaffold(
-      appBar: BrookieTopBar(title: adding ? 'Add a session' : 'Edit session', showAdminLink: false),
-      body: AdminGate(child: _SessionForm(session: session)),
+      // No way off the page from the account menu but signing out, which
+      // asks first while there are changes to lose.
+      appBar: BrookieTopBar(
+        title: adding ? 'Add a session' : 'Edit session',
+        showAdminLink: false,
+        showSessionsLink: false,
+      ),
+      body: AdminGate(child: _SessionForm(session: session, now: now)),
     );
   }
 }
@@ -55,6 +69,8 @@ String? _nameProblem(String? name) {
 String? _emailProblem(String? email) {
   final normalized = SessionRules.normalizeEmail(email ?? '');
   if (normalized.isEmpty) return 'Enter the email they use to sign in to Google.';
+  final googleProblem = SessionRules.googleEmailProblem(normalized);
+  if (googleProblem != null) return googleProblem;
   if (!SessionRules.emailPattern.hasMatch(normalized)) {
     return 'That isn’t a whole email address. Check it, like name@gmail.com.';
   }
@@ -97,9 +113,10 @@ InputDecoration _decoration(
 TextStyle? _inputStyle(BuildContext context) => Theme.of(context).textTheme.bodyMedium;
 
 class _SessionForm extends StatefulWidget {
-  const _SessionForm({required this.session});
+  const _SessionForm({required this.session, required this.now});
 
   final Booking? session;
+  final DateTime? now;
 
   @override
   State<_SessionForm> createState() => _SessionFormState();
@@ -115,10 +132,15 @@ class _SessionFormState extends State<_SessionForm> {
   final _dateFocus = FocusNode(debugLabel: 'Date');
   final _locationFocus = FocusNode(debugLabel: 'Location');
 
-  // Sessions are only ever saved with one of these, but a name the form
-  // doesn't offer would trip the dropdown, so it starts on "No package".
-  late String? _package =
-      SessionRules.packageNames.contains(widget.session?.packageName) ? widget.session!.packageName : null;
+  late final String? _startPackage = widget.session?.packageName;
+  late String? _package = _startPackage;
+
+  /// The packages offered: the three, and the session's own if it's another
+  /// (typed in the console), so saving other changes keeps it.
+  late final List<String> _packages = [
+    ...SessionRules.packageNames,
+    if (_startPackage case final own? when !SessionRules.packageNames.contains(own)) own,
+  ];
   late DateTime? _date = widget.session?.date;
   late _Time? _time = widget.session?.time;
 
@@ -137,13 +159,63 @@ class _SessionFormState extends State<_SessionForm> {
     return times;
   }();
 
+  /// The new session's id, made on the first try to add it and used for
+  /// every retry: a try that got no answer may still have been saved, and
+  /// the same id never makes a second session.
+  String? _newId;
+
   /// Once the admin has tried to save, each field is checked as it changes.
   bool _triedToSave = false;
   bool _saving = false;
   String? _error;
 
+  /// Whether leaving would lose what's typed or chosen: on while any field
+  /// differs from how the form started, until it's saved.
+  bool _hasChanges = false;
+  bool _saved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final text in [_name, _email, _location]) {
+      text.addListener(_checkChanges);
+    }
+  }
+
+  void _checkChanges() {
+    final session = widget.session;
+    final changed = !_saved &&
+        (_name.text != (session?.name ?? '') ||
+            _email.text != (session?.email ?? '') ||
+            _location.text != (session?.location ?? '') ||
+            _package != _startPackage ||
+            _date != session?.date ||
+            _time != session?.time);
+    if (changed == _hasChanges) return;
+    LeaveWarning.set(this, changed);
+    setState(() => _hasChanges = changed);
+  }
+
+  /// Back (the top bar's, the browser's, Cancel) with changes to lose.
+  Future<void> _confirmLeave() async {
+    final leave = await showBrookieConfirm(
+      context,
+      title: 'Leave without saving?',
+      message: widget.session == null
+          ? 'The session you started adding will be lost.'
+          : 'The changes you made to this session will be lost.',
+      confirmLabel: 'Leave without saving',
+      cancelLabel: 'Keep editing',
+      destructive: true,
+    );
+    if (!leave || !mounted) return;
+    // Navigator.pop leaves whatever PopScope says.
+    Navigator.of(context).pop();
+  }
+
   @override
   void dispose() {
+    LeaveWarning.set(this, false);
     _name.dispose();
     _email.dispose();
     _location.dispose();
@@ -154,14 +226,19 @@ class _SessionFormState extends State<_SessionForm> {
     super.dispose();
   }
 
+  /// Read as it's needed: the form may stay open past midnight.
+  DateTime get _now => widget.now ?? DateTime.now();
+
   Future<void> _chooseDate(FormFieldState<DateTime> field) async {
+    final now = _now;
     final chosen = await showBrookieDialog<DateTime>(
       context,
-      builder: (context) => _DateDialog(initial: _date, now: DateTime.now()),
+      builder: (context) => _DateDialog(initial: _date, now: now),
     );
     if (chosen == null || !mounted) return;
     setState(() => _date = chosen);
     field.didChange(chosen);
+    _checkChanges();
   }
 
   /// Takes keyboard focus to the first field that needs fixing.
@@ -178,7 +255,9 @@ class _SessionFormState extends State<_SessionForm> {
     } else {
       first = null;
     }
-    first?.requestFocus();
+    // Scrolled to as well: the date field doesn't scroll itself into view
+    // when focused, as text fields do.
+    if (first != null) requestFocusInView(first);
   }
 
   // The button stays enabled while saving (BusyButton), so keyboard focus
@@ -223,8 +302,9 @@ class _SessionFormState extends State<_SessionForm> {
     try {
       // Once saved, the form stays busy while it fades out.
       if (session == null) {
-        final id = await admin.createSession(details);
+        final id = await admin.createSession(details, id: _newId ??= admin.newSessionId());
         if (!mounted) return;
+        _markSaved();
         // Straight on to its photos; back from there is Admin, not this form.
         Navigator.of(context).pushReplacement(
           MaterialPageRoute<void>(builder: (context) => AdminSessionPage(sessionId: id)),
@@ -232,9 +312,15 @@ class _SessionFormState extends State<_SessionForm> {
       } else {
         await admin.updateSession(session, details);
         if (!mounted) return;
-        // Back to the session. (With nothing below, it stays, saved.)
-        final left = await Navigator.of(context).maybePop();
-        if (!left && mounted) setState(() => _saving = false);
+        _markSaved();
+        // Back to the session, past PopScope: nothing's left to lose. (With
+        // nothing below, it stays, saved.)
+        final navigator = Navigator.of(context);
+        if (navigator.canPop()) {
+          navigator.pop();
+        } else {
+          setState(() => _saving = false);
+        }
       }
     } catch (e) {
       if (e is! AdminException) log('Saving session ${session?.id ?? '(new)'} failed: $e');
@@ -246,12 +332,17 @@ class _SessionFormState extends State<_SessionForm> {
     }
   }
 
+  void _markSaved() {
+    _saved = true;
+    _checkChanges();
+  }
+
   @override
   Widget build(BuildContext context) {
     final adding = widget.session == null;
     final error = _error;
     const gap = SizedBox(height: BrookieSpace.s5);
-    return AdminFrame(
+    final form = AdminFrame(
       maxWidth: BrookieSize.readingWidth,
       child: Form(
         key: _form,
@@ -284,27 +375,32 @@ class _SessionFormState extends State<_SessionForm> {
               controller: _email,
               focusNode: _emailFocus,
               style: _inputStyle(context),
-              decoration: _decoration(context, label: 'Email', helper: 'The email they use to sign in to Google.'),
+              decoration: _decoration(
+                context,
+                label: 'Email',
+                // The guest is matched by exact address. Google signs in a
+                // Gmail address typed without its dots, but tells the app
+                // the account's own, dots and all.
+                helper: 'The email they use to sign in to Google. For Gmail, copy it exactly as it appears in '
+                    'their Google account, dots included.',
+              ),
               keyboardType: TextInputType.emailAddress,
               autocorrect: false,
               textInputAction: TextInputAction.next,
               validator: _emailProblem,
             ),
             gap,
-            DropdownButtonFormField<String?>(
-              initialValue: _package,
-              isExpanded: true,
-              style: _inputStyle(context),
-              decoration: _decoration(context, label: 'Package'),
-              dropdownColor: BrookieColors.of(context).surface,
-              // Material's grey otherwise; ink-soft like the date field's icon.
-              iconEnabledColor: BrookieColors.of(context).inkSoft,
-              borderRadius: BorderRadius.circular(BrookieRadius.sm),
-              items: [
-                const DropdownMenuItem(value: null, child: Text('No package')),
-                for (final name in SessionRules.packageNames) DropdownMenuItem(value: name, child: Text(name)),
+            _Choice<String?>(
+              label: 'Package',
+              value: _package,
+              options: [
+                (value: null, label: 'No package'),
+                for (final name in _packages) (value: name, label: name),
               ],
-              onChanged: (value) => setState(() => _package = value),
+              onChanged: (value) {
+                setState(() => _package = value);
+                _checkChanges();
+              },
             ),
             gap,
             FormField<DateTime>(
@@ -312,28 +408,26 @@ class _SessionFormState extends State<_SessionForm> {
               validator: _dateProblem,
               builder: (field) => _DateField(
                 value: field.value,
+                now: _now,
                 errorText: field.errorText,
                 focusNode: _dateFocus,
                 onPressed: () => _chooseDate(field),
               ),
             ),
             gap,
-            DropdownButtonFormField<_Time?>(
-              initialValue: _time,
-              isExpanded: true,
-              style: _inputStyle(context),
-              decoration: _decoration(context, label: 'Time'),
-              dropdownColor: BrookieColors.of(context).surface,
-              iconEnabledColor: BrookieColors.of(context).inkSoft,
-              borderRadius: BorderRadius.circular(BrookieRadius.sm),
+            _Choice<_Time?>(
+              label: 'Time',
+              value: _time,
               // Five dozen times: a scrolling menu, not one taller than the window.
               menuMaxHeight: 360,
-              items: [
-                const DropdownMenuItem(value: null, child: Text('No time')),
-                for (final time in _times)
-                  DropdownMenuItem(value: time, child: Text(SessionTime.clockLabel(time.hour, time.minute))),
+              options: [
+                (value: null, label: 'No time'),
+                for (final time in _times) (value: time, label: SessionTime.clockLabel(time.hour, time.minute)),
               ],
-              onChanged: (value) => setState(() => _time = value),
+              onChanged: (value) {
+                setState(() => _time = value);
+                _checkChanges();
+              },
             ),
             gap,
             TextFormField(
@@ -373,15 +467,258 @@ class _SessionFormState extends State<_SessionForm> {
         ),
       ),
     );
+    return PopScope(
+      canPop: !_hasChanges,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _confirmLeave();
+      },
+      child: form,
+    );
+  }
+}
+
+/// One of a [_Choice]'s options: what's saved, and what the admin reads.
+typedef _Option<T> = ({T value, String label});
+
+/// A field that opens a menu of [options] to choose one from (Package,
+/// Time), shown like the form's other fields.
+///
+/// The menu is drawn like the account menu: no shadow (only photographs and
+/// dialogs cast one), a line-strong edge, a ring on the option with keyboard
+/// focus, and no animation. It works like a select on the web: Enter, Space
+/// or an arrow key opens it on the chosen option; the arrow keys move
+/// between options and wrap around, Home and End jump to the first and
+/// last, and Enter chooses. Choosing, or Escape, closes it with focus back
+/// on the field. Opened with a click or a tap, focus stays on the field.
+class _Choice<T> extends StatefulWidget {
+  const _Choice({
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    this.menuMaxHeight = double.infinity,
+  });
+
+  final String label;
+  final T value;
+  final List<_Option<T>> options;
+  final ValueChanged<T> onChanged;
+
+  /// How tall the menu grows before it scrolls.
+  final double menuMaxHeight;
+
+  @override
+  State<_Choice<T>> createState() => _ChoiceState<T>();
+}
+
+class _ChoiceState<T> extends State<_Choice<T>> {
+  final _controller = MenuController();
+  late final _fieldFocus = FocusNode(debugLabel: widget.label);
+  late List<FocusNode> _optionFocus = _focusNodes();
+  bool _hovered = false;
+
+  List<FocusNode> _focusNodes() => [for (final option in widget.options) FocusNode(debugLabel: option.label)];
+
+  @override
+  void didUpdateWidget(_Choice<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.options.length != widget.options.length) {
+      _disposeOptionFocus();
+      _optionFocus = _focusNodes();
+    }
+  }
+
+  @override
+  void dispose() {
+    _fieldFocus.dispose();
+    _disposeOptionFocus();
+    super.dispose();
+  }
+
+  void _disposeOptionFocus() {
+    for (final node in _optionFocus) {
+      node.dispose();
+    }
+  }
+
+  /// The chosen option's place in the menu (the first, if it isn't there).
+  int get _chosen => math.max(0, widget.options.indexWhere((option) => option.value == widget.value));
+
+  /// Opens the menu (if it isn't open) scrolled to the chosen option, and
+  /// moves keyboard focus onto it if [focusChosen].
+  void _open({required bool focusChosen}) {
+    if (!_controller.isOpen) _controller.open();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_controller.isOpen) return;
+      final node = _optionFocus[_chosen];
+      if (focusChosen) node.requestFocus();
+      final option = node.context;
+      if (option != null) Scrollable.ensureVisible(option, alignment: 0.5);
+    });
+  }
+
+  /// A click or a tap: opens the menu, or closes it if it's open.
+  void _toggle() {
+    _fieldFocus.requestFocus();
+    if (_controller.isOpen) {
+      _controller.close();
+    } else {
+      _open(focusChosen: false);
+    }
+  }
+
+  /// Moves focus [by] options, wrapping around at either end.
+  void _move(int by) {
+    final count = _optionFocus.length;
+    final current = _optionFocus.indexWhere((node) => node.hasPrimaryFocus);
+    final next = current < 0 ? (by > 0 ? 0 : count - 1) : (current + by) % count;
+    requestFocusInView(_optionFocus[next]);
+  }
+
+  void _choose(T value) {
+    _fieldFocus.requestFocus();
+    if (value != widget.value) widget.onChanged(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = BrookieColors.of(context);
+    final itemStyle = ButtonStyle(
+      backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.hovered) ? c.surfaceSunk : Colors.transparent),
+      foregroundColor: WidgetStatePropertyAll(c.ink),
+      iconColor: WidgetStatePropertyAll(c.ink),
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+      // A real ring, like every other control, rather than a faint band.
+      side: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.focused) ? brookieFocusSide(c.focus) : BorderSide.none),
+      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(BrookieRadius.sm))),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: BrookieSpace.s3)),
+      minimumSize: const WidgetStatePropertyAll(Size(0, kMinInteractiveDimension)),
+      textStyle: WidgetStatePropertyAll(_inputStyle(context)),
+      animationDuration: kBrookieStateDuration,
+    );
+    final open = CallbackAction<Intent>(onInvoke: (_) {
+      _open(focusChosen: true);
+      return null;
+    });
+
+    return LayoutBuilder(
+      builder: (context, constraints) => MenuAnchor(
+        controller: _controller,
+        childFocusNode: _fieldFocus,
+        // A click outside only closes the menu.
+        consumeOutsideTap: true,
+        crossAxisUnconstrained: false,
+        alignmentOffset: const Offset(0, BrookieSpace.s1),
+        style: MenuStyle(
+          alignment: AlignmentDirectional.bottomStart,
+          backgroundColor: WidgetStatePropertyAll(c.surface),
+          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+          // No shadow, so the edge is what sets the menu apart from the
+          // fields under it: an edge that carries meaning, so line-strong.
+          elevation: const WidgetStatePropertyAll(0),
+          shadowColor: const WidgetStatePropertyAll(Colors.transparent),
+          side: WidgetStatePropertyAll(BorderSide(color: c.lineStrong)),
+          shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(BrookieRadius.md))),
+          padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+          visualDensity: VisualDensity.standard,
+          // As wide as the field.
+          minimumSize: WidgetStatePropertyAll(Size(constraints.maxWidth, 0)),
+          maximumSize: WidgetStatePropertyAll(Size(constraints.maxWidth, widget.menuMaxHeight)),
+        ),
+        menuChildren: [
+          CallbackShortcuts(
+            bindings: {
+              const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
+              const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
+              const SingleActivator(LogicalKeyboardKey.home): () => requestFocusInView(_optionFocus.first),
+              const SingleActivator(LogicalKeyboardKey.end): () => requestFocusInView(_optionFocus.last),
+            },
+            // The options sit in from the menu's edge so their focus ring
+            // (2px out, past a 2px gap) isn't clipped.
+            child: Padding(
+              padding: const EdgeInsets.all(BrookieSpace.s2),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final (i, option) in widget.options.indexed)
+                    MergeSemantics(
+                      child: Semantics(
+                        selected: option.value == widget.value,
+                        child: MenuItemButton(
+                          focusNode: _optionFocus[i],
+                          // Hovering highlights a row; only the keyboard moves the ring.
+                          requestFocusOnHover: false,
+                          style: itemStyle,
+                          trailingIcon: option.value == widget.value ? const Icon(Icons.check, size: 20) : null,
+                          onPressed: () => _choose(option.value),
+                          child: Text(option.label),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+        builder: (context, controller, child) => CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.arrowDown): () => _open(focusChosen: true),
+            const SingleActivator(LogicalKeyboardKey.arrowUp): () => _open(focusChosen: true),
+          },
+          child: MergeSemantics(
+            child: Semantics(
+              button: true,
+              expanded: controller.isOpen,
+              child: FocusableActionDetector(
+                focusNode: _fieldFocus,
+                mouseCursor: SystemMouseCursors.click,
+                onShowHoverHighlight: (value) => setState(() => _hovered = value),
+                // The field's ink edge shows focus, as the text fields' does.
+                onFocusChange: (focused) => setState(() {}),
+                // On the web, Enter only activates buttons (ButtonActivateIntent).
+                actions: {ActivateIntent: open, ButtonActivateIntent: open},
+                child: GestureDetector(
+                  onTap: _toggle,
+                  behavior: HitTestBehavior.opaque,
+                  child: InputDecorator(
+                    decoration: _decoration(
+                      context,
+                      label: widget.label,
+                      suffixIcon: Icon(Icons.arrow_drop_down, color: c.inkSoft),
+                    ),
+                    baseStyle: _inputStyle(context),
+                    isFocused: _fieldFocus.hasFocus,
+                    isHovering: _hovered,
+                    child: Text(widget.options[_chosen].label, style: _inputStyle(context)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
 /// The session's day, shown like the form's other fields; pressing it (or
 /// Enter or Space) opens the calendar.
 class _DateField extends StatefulWidget {
-  const _DateField({required this.value, required this.errorText, required this.focusNode, required this.onPressed});
+  const _DateField({
+    required this.value,
+    required this.now,
+    required this.errorText,
+    required this.focusNode,
+    required this.onPressed,
+  });
 
   final DateTime? value;
+
+  /// For how [value] reads (the year shows only when it isn't this one's).
+  final DateTime now;
   final String? errorText;
   final FocusNode focusNode;
   final VoidCallback onPressed;
@@ -432,7 +769,7 @@ class _DateFieldState extends State<_DateField> {
               isFocused: widget.focusNode.hasFocus,
               isHovering: _hovered,
               isEmpty: value == null,
-              child: Text(value == null ? '' : formatDayShort(value, now: DateTime.now()), style: _inputStyle(context)),
+              child: Text(value == null ? '' : formatDayShort(value, now: widget.now), style: _inputStyle(context)),
             ),
           ),
         ),
@@ -467,8 +804,19 @@ class _DateDialogState extends State<_DateDialog> {
     // A session dated outside the range keeps its day choosable.
     if (initial != null && initial.isBefore(first)) first = initial;
     if (initial != null && initial.isAfter(last)) last = initial;
+
+    // Where the calendar's card won't fit inside the dialog's padding (at
+    // most s5 a side), it spans the dialog as a band instead, and the
+    // dialog comes as close to the window's edges as full-size days need.
+    final window = MediaQuery.sizeOf(context).width;
+    final themeInset = DialogTheme.of(context).insetPadding ?? const EdgeInsets.all(BrookieSpace.s4);
+    final band = window - themeInset.horizontal - 2 * BrookieSpace.s5 < BookingCalendar.minCardWidth;
+    final side = ((window - BookingCalendar.minBandWidth) / 2).clamp(0.0, themeInset.left);
+
     return BrookieDialog(
       title: 'Choose a date',
+      contentEdgeToEdge: band,
+      insetPadding: band ? themeInset.copyWith(left: side, right: side) : null,
       content: [
         // As wide as the dialog allows, up to the calendar's widest.
         _UnmeasuredWidth(
@@ -478,6 +826,7 @@ class _DateDialogState extends State<_DateDialog> {
             lastDay: last,
             today: now,
             selectedDay: _selected,
+            edgeToEdge: band,
             showOpenings: false,
             // The calendar hands back UTC midnights.
             onDaySelected: (day) => setState(() => _selected = DateTime(day.year, day.month, day.day)),

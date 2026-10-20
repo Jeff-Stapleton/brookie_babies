@@ -7,9 +7,11 @@ import 'package:brookie_babies/pages/admin_session_page.dart';
 import 'package:brookie_babies/pages/session_form_page.dart';
 import 'package:brookie_babies/services/admin_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/leave_warning.dart';
 import 'package:brookie_babies/utilities/utils.dart';
 import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
+import 'package:brookie_babies/widgets/top_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,7 +28,23 @@ Finder _dateField() => find.ancestor(of: find.text('Date'), matching: find.byTyp
 /// [label] inside the open dialog.
 Finder _inDialog(String label) => find.descendant(of: find.byType(BrookieDialog), matching: find.text(label));
 
-/// Opens the dropdown showing [current] and chooses [label] in it.
+/// The open menu's options.
+Finder _options() => find.byType(MenuItemButton);
+
+/// The option labelled [label] in the open menu.
+Finder _option(String label) => find.widgetWithText(MenuItemButton, label);
+
+/// The open menu itself: the Material closest around its options.
+Finder _menuPanel() => find.ancestor(of: _options().first, matching: find.byType(Material)).first;
+
+/// Whether the option labelled [label] has keyboard focus.
+bool _optionHasFocus(WidgetTester tester, String label) =>
+    Focus.of(tester.element(find.descendant(of: _option(label), matching: find.text(label)))).hasPrimaryFocus;
+
+/// Whether the field labelled [label] has keyboard focus.
+bool _fieldHasFocus(WidgetTester tester, String label) => Focus.of(tester.element(find.text(label))).hasPrimaryFocus;
+
+/// Opens the menu of the field showing [current] and chooses [label] in it.
 Future<void> _choose(WidgetTester tester, String current, String label) async {
   await tapInView(tester, find.text(current));
   await tester.pumpAndSettle();
@@ -61,16 +79,24 @@ Future<NavigatorState> _pumpOver(WidgetTester tester, FakeAdminService admin, Se
 }
 
 void main() {
-  final now = DateTime.now();
+  // Pinned, so a run that crosses midnight or a month reads the same day
+  // everywhere. Late in the day, as the clock might be.
+  final now = DateTime(2031, 2, 10, 23, 59);
+
+  tearDown(LeaveWarning.reset);
 
   group('adding', () {
     testWidgets('the fields, what each is for, and the one primary button', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       expect(find.text('Add a session'), findsNWidgets(2));
       expect(find.text('For family, friends and anyone not booked on the site. No payment needed.'), findsOneWidget);
       expect(find.text('Who it’s for, such as “The Harper family”.'), findsOneWidget);
-      expect(find.text('The email they use to sign in to Google.'), findsOneWidget);
+      expect(
+        find.text('The email they use to sign in to Google. For Gmail, copy it exactly as it appears in '
+            'their Google account, dots included.'),
+        findsOneWidget,
+      );
       expect(find.text('No package'), findsOneWidget);
       expect(find.text('Date'), findsOneWidget);
       expect(find.text('No time'), findsOneWidget);
@@ -81,7 +107,7 @@ void main() {
     });
 
     testWidgets('typed text is set in Jost, like the site’s other controls', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage());
+      await pumpAdminPage(tester, SessionFormPage(now: now));
 
       final style =
           tester.widget<EditableText>(find.descendant(of: _field('Name'), matching: find.byType(EditableText))).style;
@@ -90,7 +116,7 @@ void main() {
     });
 
     testWidgets('packages: none, or one of the three', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       await tapInView(tester, find.text('No package'));
       await tester.pumpAndSettle();
@@ -100,11 +126,11 @@ void main() {
     });
 
     testWidgets('times: none, or every quarter hour from 6:00 am to 9:00 pm', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
-      final dropdown = tester.widget<DropdownButton<({int hour, int minute})?>>(
-          find.byType(DropdownButton<({int hour, int minute})?>));
-      final labels = [for (final item in dropdown.items!) (item.child as Text).data];
+      await tapInView(tester, find.text('No time'));
+      await tester.pumpAndSettle();
+      final labels = [for (final item in tester.widgetList<MenuItemButton>(_options())) (item.child! as Text).data];
       expect(labels.first, 'No time');
       expect(labels[1], '6:00 am');
       expect(labels[2], '6:15 am');
@@ -115,7 +141,7 @@ void main() {
 
     testWidgets('empty: says what each required field needs, and focuses the first', (tester) async {
       final admin = FakeAdminService();
-      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
 
       await tester.tap(find.text('Add session'));
       await tester.pumpAndSettle();
@@ -128,8 +154,31 @@ void main() {
           .focusNode.hasFocus, isTrue);
     });
 
+    testWidgets('a missing date, out of view, is scrolled to as it’s focused', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(390, 300));
+      await tester.enterText(_field('Name'), 'The Novak family');
+      await tester.enterText(_field('Email'), 'novak@example.com');
+      // Or the email field, focused, keeps itself in view, and scrolls back
+      // to itself once its caret's scroll has run.
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Add session'));
+      await tester.pumpAndSettle();
+      final view = tester.getRect(find.byType(Scrollable).first);
+      expect(tester.getRect(_dateField()).bottom, lessThan(view.top), reason: 'starts out of view');
+
+      await tester.tap(find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(Focus.of(tester.element(find.text('Date'))).hasPrimaryFocus, isTrue);
+      final field = tester.getRect(_dateField());
+      expect(field.top, greaterThanOrEqualTo(view.top));
+      expect(field.bottom, lessThanOrEqualTo(view.bottom));
+      expect(find.text('Choose the day of the session.').hitTestable(), findsOneWidget);
+    });
+
     testWidgets('checks each field against what the rules accept, and clears as it’s fixed', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       await tester.enterText(_field('Name'), 'x' * 101);
       await tester.enterText(_field('Email'), 'harper@example');
@@ -149,9 +198,40 @@ void main() {
       expect(find.text('Choose the day of the session.'), findsNothing);
     });
 
+    testWidgets('refuses an email no Google sign-in could match, saying how to fix it', (tester) async {
+      final admin = FakeAdminService();
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
+      await _fillIn(tester);
+
+      for (final (email, says) in [
+        ('<novak@example.com>', 'An email address has no < or >. Enter just the address, like name@gmail.com.'),
+        (
+          'mailto:novak@example.com',
+          '“mailto:” isn’t part of the address. Enter just the address, like name@gmail.com.',
+        ),
+        ('no vak@example.com', 'That has a space in it. Take it out: an email address has none.'),
+        (
+          'novak+photos@gmail.com',
+          '“+photos” isn’t part of a Gmail address: Google signs them in without it. Take it out.',
+        ),
+      ]) {
+        await tester.enterText(_field('Email'), email);
+        await tapInView(tester, find.text('Add session'));
+        await tester.pumpAndSettle();
+        expect(find.text(says), findsOneWidget, reason: email);
+      }
+      expect(admin.calls, isEmpty);
+
+      // A tag on another domain may be how their Google account is named.
+      await tester.enterText(_field('Email'), 'novak+photos@example.com');
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+      expect(admin.sessions.values.single.email, 'novak+photos@example.com');
+    });
+
     testWidgets('saves the session and goes straight on to it; back from there skips the form', (tester) async {
       final admin = FakeAdminService();
-      await _pumpOver(tester, admin, const SessionFormPage());
+      await _pumpOver(tester, admin, SessionFormPage(now: now));
 
       await _fillIn(tester);
       await _choose(tester, 'No package', 'Premium');
@@ -178,7 +258,7 @@ void main() {
 
     testWidgets('leaves out what isn’t given', (tester) async {
       final admin = FakeAdminService();
-      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
 
       await _fillIn(tester);
       await tester.enterText(_field('Location (optional)'), '   ');
@@ -193,7 +273,7 @@ void main() {
 
     testWidgets('while saving, the button keeps focus and says so; another press does nothing', (tester) async {
       final admin = FakeAdminService()..writeDelay = const Duration(seconds: 1);
-      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
       await _fillIn(tester);
       Focus.of(tester.element(find.text('Add session'))).requestFocus();
       await tester.pump();
@@ -214,7 +294,7 @@ void main() {
 
     testWidgets('says why when it isn’t saved, and stays', (tester) async {
       final admin = FakeAdminService()..errors['createSession'] = adminError(AdminErrorKind.offline);
-      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
 
       await _fillIn(tester);
       await tapInView(tester, find.text('Add session'));
@@ -225,23 +305,312 @@ void main() {
       expect(find.text('Add session'), findsOneWidget);
     });
 
-    testWidgets('Cancel goes back without saving', (tester) async {
-      final admin = FakeAdminService();
-      await _pumpOver(tester, admin, const SessionFormPage());
+    testWidgets('trying again after no answer adds the same session, never a second', (tester) async {
+      final admin = FakeAdminService()
+        ..errors['createSession'] = adminError(AdminErrorKind.offline, kAdminTimedOutMessage);
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
 
-      await tester.enterText(_field('Name'), 'The Novak family');
+      await _fillIn(tester);
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(InlineMessage, kAdminTimedOutMessage), findsOneWidget);
+
+      admin.errors.remove('createSession');
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(admin.createSessionIds, ['session-1', 'session-1']);
+      expect(admin.sessions.keys, ['session-1']);
+      expect(tester.widget<AdminSessionPage>(find.byType(AdminSessionPage)).sessionId, 'session-1');
+    });
+
+    testWidgets('Cancel, untouched, goes straight back', (tester) async {
+      final admin = FakeAdminService();
+      await _pumpOver(tester, admin, SessionFormPage(now: now));
+
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
 
+      expect(find.byType(BrookieDialog), findsNothing);
       expect(find.text('Below'), findsOneWidget);
       expect(admin.calls, isEmpty);
+    });
+  });
+
+  group('leaving with changes', () {
+    testWidgets('anything typed or chosen: warns the browser and asks first, by Cancel or back', (tester) async {
+      final admin = FakeAdminService();
+      await _pumpOver(tester, admin, SessionFormPage(now: now));
+      expect(tester.widget<BrookieTopBar>(find.byType(BrookieTopBar)).showSessionsLink, isFalse);
+      expect(LeaveWarning.active.value, isFalse);
+
+      await tester.enterText(_field('Name'), 'The Novak family');
+      await tester.pump();
+      expect(LeaveWarning.active.value, isTrue);
+
+      for (final leave in [find.text('Cancel'), find.byTooltip('Back')]) {
+        await tester.tap(leave);
+        await tester.pumpAndSettle();
+        expect(find.text('Leave without saving?'), findsOneWidget);
+        expect(find.text('The session you started adding will be lost.'), findsOneWidget);
+        await tester.tap(_inDialog('Keep editing'));
+        await tester.pumpAndSettle();
+        expect(find.byType(SessionFormPage), findsOneWidget);
+        expect(find.text('The Novak family'), findsOneWidget);
+      }
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Leave without saving'));
+      await tester.pumpAndSettle();
+      expect(find.text('Below'), findsOneWidget);
+      expect(LeaveWarning.active.value, isFalse);
+      expect(admin.calls, isEmpty);
+    });
+
+    testWidgets('a choice counts, and undoing every change needs no asking', (tester) async {
+      await _pumpOver(tester, FakeAdminService(), SessionFormPage(now: now));
+
+      await _choose(tester, 'No package', 'Basic');
+      expect(LeaveWarning.active.value, isTrue);
+      await _choose(tester, 'Basic', 'No package');
+      await tester.enterText(_field('Email'), 'a');
+      await tester.enterText(_field('Email'), '');
+      await tester.pump();
+      expect(LeaveWarning.active.value, isFalse);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Below'), findsOneWidget);
+    });
+
+    testWidgets('the date counts too', (tester) async {
+      await _pumpOver(tester, FakeAdminService(), SessionFormPage(now: now));
+
+      await _chooseDay(tester, 15);
+
+      expect(LeaveWarning.active.value, isTrue);
+    });
+
+    testWidgets('editing: asks about the changes, and leaves the session as it was', (tester) async {
+      final session = testSession('s1', location: 'Liberty Park');
+      final admin = FakeAdminService(sessions: [session]);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: session));
+      expect(LeaveWarning.active.value, isFalse);
+
+      await tester.enterText(_field('Location (optional)'), 'The studio');
+      await tester.pump();
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      expect(find.text('The changes you made to this session will be lost.'), findsOneWidget);
+      await tester.tap(_inDialog('Leave without saving'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Below'), findsOneWidget);
+      expect(admin.sessions['s1']!.location, 'Liberty Park');
+    });
+
+    testWidgets('once saved, nothing to lose: no asking, no warning', (tester) async {
+      final admin = FakeAdminService(sessions: [testSession('s1')]);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: testSession('s1')));
+
+      await tester.enterText(_field('Name'), 'The Harpers');
+      await tapInView(tester, find.text('Save changes'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BrookieDialog), findsNothing);
+      expect(find.text('Below'), findsOneWidget);
+      expect(LeaveWarning.active.value, isFalse);
+    });
+
+    testWidgets('a save that fails keeps the warning', (tester) async {
+      final admin = FakeAdminService()..errors['createSession'] = adminError(AdminErrorKind.offline);
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
+
+      await _fillIn(tester);
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(LeaveWarning.active.value, isTrue);
+    });
+
+    testWidgets('adding: once saved, on to the session with the warning off', (tester) async {
+      final admin = FakeAdminService();
+      await _pumpOver(tester, admin, SessionFormPage(now: now));
+
+      await _fillIn(tester);
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AdminSessionPage), findsOneWidget);
+      expect(LeaveWarning.active.value, isFalse);
+    });
+  });
+
+  group('the package and time menus', () {
+    for (final brightness in Brightness.values) {
+      testWidgets('in ${brightness.name}: no shadow, a line-strong edge, as wide as the field', (tester) async {
+        final c = brightness == Brightness.dark ? BrookieColors.dark : BrookieColors.light;
+        await pumpAdminPage(tester, SessionFormPage(now: now), brightness: brightness, size: const Size(1440, 1200));
+
+        await tapInView(tester, find.text('No package'));
+        await tester.pumpAndSettle();
+
+        final style =
+            tester.widget<MenuAnchor>(find.ancestor(of: find.text('Package'), matching: find.byType(MenuAnchor))).style!;
+        expect(style.elevation!.resolve({}), 0);
+        expect(style.side!.resolve({}), BorderSide(color: c.lineStrong));
+        expect(style.backgroundColor!.resolve({}), c.surface);
+        expect(
+          style.shape!.resolve({}),
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(BrookieRadius.md)),
+        );
+        // Nothing in the open menu casts a shadow.
+        for (final material in tester.widgetList<Material>(
+            find.ancestor(of: _option('Basic'), matching: find.byType(Material)))) {
+          expect(material.elevation, 0);
+        }
+        final field = tester.getRect(find.ancestor(of: find.text('Package'), matching: find.byType(InputDecorator)));
+        final panel = tester.getRect(_menuPanel());
+        expect(panel.width, field.width);
+        expect(panel.top, greaterThan(field.bottom));
+        // The chosen option is ticked.
+        expect(find.descendant(of: _option('No package'), matching: find.byIcon(Icons.check)), findsOneWidget);
+        expect(find.descendant(of: _option('Basic'), matching: find.byIcon(Icons.check)), findsNothing);
+      });
+    }
+
+    testWidgets('opens at once, without animating', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
+      await tester.ensureVisible(find.text('No time'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('No time'));
+      await tester.pump();
+      final first = tester.getRect(_option('6:00 am'));
+      expect(_option('6:00 am').hitTestable(), findsOneWidget);
+      await tester.pumpAndSettle();
+
+      expect(tester.getRect(_option('6:00 am')), first);
+    });
+
+    testWidgets('the keyboard opens it on the chosen option, moves, wraps, chooses and comes back', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
+      Focus.of(tester.element(find.text('Package'))).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(_optionHasFocus(tester, 'No package'), isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      expect(_optionHasFocus(tester, 'Premium'), isTrue);
+      // A ring, not Material's faint band.
+      final item = tester.widget<MenuItemButton>(_option('Premium'));
+      expect(item.style!.side!.resolve({WidgetState.focused}), brookieFocusSide(BrookieColors.light.focus));
+      expect(item.style!.overlayColor!.resolve({WidgetState.focused}), Colors.transparent);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.home);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pump();
+      expect(_optionHasFocus(tester, 'Ultimate'), isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.end);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      expect(_optionHasFocus(tester, 'No package'), isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(_options(), findsNothing);
+      expect(find.text('Ultimate'), findsOneWidget);
+      expect(_fieldHasFocus(tester, 'Package'), isTrue);
+    });
+
+    testWidgets('Escape closes it, choosing nothing, with focus back on the field', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
+      Focus.of(tester.element(find.text('Package'))).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      expect(_options(), findsNothing);
+      expect(find.text('No package'), findsOneWidget);
+      expect(_fieldHasFocus(tester, 'Package'), isTrue);
+    });
+
+    testWidgets('a click opens it without moving focus into it; a click outside closes it', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
+
+      await tapInView(tester, find.text('No package'));
+      await tester.pumpAndSettle();
+      expect(_options(), findsNWidgets(4));
+      expect(_fieldHasFocus(tester, 'Package'), isTrue);
+
+      await tester.tapAt(const Offset(1400, 1150));
+      await tester.pumpAndSettle();
+      expect(_options(), findsNothing);
+      expect(find.text('No package'), findsOneWidget);
+    });
+
+    testWidgets('opening on a time far down the menu leaves the page where it was', (tester) async {
+      await pumpAdminPage(
+        tester,
+        SessionFormPage(now: now, session: testSession('s1', time: (hour: 20, minute: 45))),
+        size: const Size(390, 700),
+      );
+      await tester.ensureVisible(find.text('8:45 pm'));
+      await tester.pumpAndSettle();
+      final page = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+      final before = page.pixels;
+      expect(before, greaterThan(0));
+      final field = tester.getRect(find.text('8:45 pm'));
+
+      for (final open in [
+        () => tester.tap(find.text('8:45 pm')),
+        () async {
+          Focus.of(tester.element(find.text('Time'))).requestFocus();
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        },
+      ]) {
+        await open();
+        await tester.pumpAndSettle();
+        expect(_option('8:45 pm').hitTestable(), findsOneWidget);
+        expect(page.pixels, before);
+        expect(tester.getRect(find.text('8:45 pm').first), field);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.tapAt(const Offset(380, 690));
+        await tester.pumpAndSettle();
+      }
+    });
+
+    testWidgets('the time menu scrolls, and opens on the chosen time', (tester) async {
+      await pumpAdminPage(
+        tester,
+        SessionFormPage(now: now, session: testSession('s1', time: (hour: 18, minute: 15))),
+        size: const Size(1440, 1200),
+      );
+
+      await tapInView(tester, find.text('6:15 pm'));
+      await tester.pumpAndSettle();
+
+      final panel = tester.getRect(_menuPanel());
+      expect(panel.height, lessThanOrEqualTo(360));
+      expect(_option('6:15 pm').hitTestable(), findsOneWidget);
+      expect(_option('No time').hitTestable(), findsNothing);
     });
   });
 
   group('the date', () {
     testWidgets('a calendar in a dialog, without openings, from 2020 to a year ahead, opening on today',
         (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       await tapInView(tester, _dateField());
       await tester.pumpAndSettle();
@@ -257,8 +626,51 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('today is the page’s clock, in the calendar and the field', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: DateTime(2033, 7, 1, 0, 0, 1)), size: const Size(1440, 1200));
+
+      await tapInView(tester, _dateField());
+      await tester.pumpAndSettle();
+      final calendar = tester.widget<BookingCalendar>(find.byType(BookingCalendar));
+      expect(calendar.today, DateTime(2033, 7, 1, 0, 0, 1));
+      expect(calendar.lastDay, DateTime(2034, 7, 1));
+      expect(find.text('July 2033'), findsOneWidget);
+      await tester.tap(_inDialog('Use this date'));
+      await tester.pumpAndSettle();
+
+      // This year's day, so without the year.
+      expect(find.text('Fri, Jul 1'), findsOneWidget);
+    });
+
+    for (final width in adminTestWidths) {
+      testWidgets('${width.toInt()}px wide: full-size days with room for their rings', (tester) async {
+        await pumpAdminPage(tester, SessionFormPage(now: now), size: Size(width, 800));
+
+        await tapInView(tester, _dateField());
+        await tester.pumpAndSettle();
+
+        final page = tester.getRect(find.descendant(of: find.byType(BookingCalendar), matching: find.byType(PageView)));
+        expect(page.left, greaterThanOrEqualTo(0));
+        expect(page.right, lessThanOrEqualTo(width));
+        for (var day = 1; day <= 28; day++) {
+          final disc = tester.getRect(find
+              .ancestor(
+                of: find.descendant(of: find.byType(BookingCalendar), matching: find.text('$day')),
+                matching: find.byType(AnimatedContainer),
+              )
+              .first);
+          expect(disc.width, moreOrLessEquals(BrookieSize.day, epsilon: 0.01), reason: '$day');
+          expect(disc.height, moreOrLessEquals(BrookieSize.day, epsilon: 0.01), reason: '$day');
+          final ring = disc.inflate(4);
+          expect(ring.left >= page.left && ring.right <= page.right && ring.bottom <= page.bottom, isTrue,
+              reason: 'ring around $day ($ring) inside the month page ($page)');
+        }
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     testWidgets('Cancel keeps the field as it was', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       await tapInView(tester, _dateField());
       await tester.pumpAndSettle();
@@ -270,7 +682,7 @@ void main() {
     });
 
     testWidgets('a session from before 2020 can keep its day', (tester) async {
-      await pumpAdminPage(tester, SessionFormPage(session: testSession('s1', date: DateTime(2018, 5, 6))),
+      await pumpAdminPage(tester, SessionFormPage(now: now, session: testSession('s1', date: DateTime(2018, 5, 6))),
           size: const Size(1440, 1200));
 
       expect(find.text('Sun, May 6, 2018'), findsOneWidget);
@@ -284,7 +696,7 @@ void main() {
 
     for (final key in [LogicalKeyboardKey.enter, LogicalKeyboardKey.space]) {
       testWidgets('by keyboard: ${key.keyLabel} opens it, and focus comes back to the field', (tester) async {
-        await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+        await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
         final field = Focus.of(tester.element(find.text('Date')));
         field.requestFocus();
         await tester.pump();
@@ -316,7 +728,7 @@ void main() {
         );
 
     testWidgets('starts from the session as it is', (tester) async {
-      await pumpAdminPage(tester, SessionFormPage(session: harpers()), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now, session: harpers()), size: const Size(1440, 1200));
 
       expect(find.text('Edit session'), findsNWidgets(2));
       expect(find.text('The Harper family'), findsOneWidget);
@@ -328,8 +740,33 @@ void main() {
       expect(find.widgetWithText(FilledButton, 'Save changes'), findsOneWidget);
     });
 
+    testWidgets('a package typed in the console is kept on offer, and kept on saving', (tester) async {
+      final odd = testSession('s1', packageName: 'premium');
+      final admin = FakeAdminService(sessions: [odd]);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: odd));
+
+      expect(find.text('premium'), findsOneWidget);
+      await tapInView(tester, find.text('premium'));
+      await tester.pumpAndSettle();
+      expect(
+        [for (final item in tester.widgetList<MenuItemButton>(_options())) (item.child! as Text).data],
+        ['No package', 'Basic', 'Premium', 'Ultimate', 'premium'],
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.tapAt(const Offset(1400, 1150));
+      await tester.pumpAndSettle();
+      expect(LeaveWarning.active.value, isFalse);
+
+      await tester.enterText(_field('Location (optional)'), 'The studio');
+      await tapInView(tester, find.text('Save changes'));
+      await tester.pumpAndSettle();
+
+      expect(admin.sessions['s1']!.packageName, 'premium');
+      expect(admin.sessions['s1']!.location, 'The studio');
+    });
+
     testWidgets('a time off the quarter hours is kept on offer', (tester) async {
-      await pumpAdminPage(tester, SessionFormPage(session: harpers(time: (hour: 9, minute: 5))),
+      await pumpAdminPage(tester, SessionFormPage(now: now, session: harpers(time: (hour: 9, minute: 5))),
           size: const Size(1440, 1200));
 
       expect(find.text('9:05 am'), findsOneWidget);
@@ -337,7 +774,7 @@ void main() {
 
     testWidgets('saves the changes and goes back', (tester) async {
       final admin = FakeAdminService(sessions: [harpers()]);
-      await _pumpOver(tester, admin, SessionFormPage(session: harpers()));
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: harpers()));
 
       await tester.enterText(_field('Name'), 'The Harpers');
       await _choose(tester, '6:15 am', 'No time');
@@ -353,7 +790,7 @@ void main() {
 
     testWidgets('a new email, with the photos available, asks first', (tester) async {
       final admin = FakeAdminService(sessions: [harpers(ready: true)]);
-      await _pumpOver(tester, admin, SessionFormPage(session: harpers(ready: true)));
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: harpers(ready: true)));
 
       await tester.enterText(_field('Email'), 'Grandma@Example.com');
       await tapInView(tester, find.text('Save changes'));
@@ -378,7 +815,7 @@ void main() {
 
     testWidgets('the same email in other letters, or photos not available yet, needs no asking', (tester) async {
       final admin = FakeAdminService(sessions: [harpers(ready: true)]);
-      await _pumpOver(tester, admin, SessionFormPage(session: harpers(ready: true)));
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: harpers(ready: true)));
 
       await tester.enterText(_field('Email'), ' Harper@Example.com ');
       await tapInView(tester, find.text('Save changes'));
@@ -391,7 +828,8 @@ void main() {
     testWidgets('says why when the changes aren’t saved', (tester) async {
       final admin = FakeAdminService(sessions: [harpers()])
         ..errors['updateSession'] = adminError(AdminErrorKind.denied);
-      await pumpAdminPage(tester, SessionFormPage(session: harpers()), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now, session: harpers()),
+          admin: admin, size: const Size(1440, 1200));
 
       await tapInView(tester, find.text('Save changes'));
       await tester.pumpAndSettle();
@@ -404,7 +842,7 @@ void main() {
     for (final width in adminTestWidths) {
       testWidgets('fits ${width.toInt()}px in ${brightness.name}, errors and calendar too, with one primary button',
           (tester) async {
-        await pumpAdminPage(tester, const SessionFormPage(), brightness: brightness, size: Size(width, 800));
+        await pumpAdminPage(tester, SessionFormPage(now: now), brightness: brightness, size: Size(width, 800));
         expect(filledButtons(), 1);
 
         await tester.enterText(_field('Email'), 'not an email');
@@ -416,6 +854,13 @@ void main() {
         await tapInView(tester, _dateField());
         await tester.pumpAndSettle();
         expect(find.byType(BookingCalendar), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.tap(_inDialog('Cancel'));
+        await tester.pumpAndSettle();
+
+        await tapInView(tester, find.text('No time'));
+        await tester.pumpAndSettle();
+        expect(_option('6:00 am').hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
     }

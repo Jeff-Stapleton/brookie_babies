@@ -68,12 +68,22 @@ class BrookieDialog extends StatelessWidget {
     required this.content,
     required this.dismissLabel,
     required this.action,
+    this.contentEdgeToEdge = false,
+    this.insetPadding,
   });
 
   final String title;
 
   /// The body, in reading text: usually a [Text] or two.
   final List<Widget> content;
+
+  /// Whether [content] spans the panel from edge to edge, without the side
+  /// padding the title and actions keep: for a band, such as the date
+  /// dialog's calendar on a narrow phone.
+  final bool contentEdgeToEdge;
+
+  /// The room between the panel and the window's edges; the theme's when null.
+  final EdgeInsets? insetPadding;
 
   /// The quiet button that closes the dialog with no result.
   final String dismissLabel;
@@ -121,6 +131,7 @@ class BrookieDialog extends StatelessWidget {
       elevation: 0,
       shadowColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
+      insetPadding: insetPadding,
       semanticsRole: SemanticsRole.alertDialog,
       child: DecoratedBox(
         decoration: BoxDecoration(
@@ -155,7 +166,12 @@ class BrookieDialog extends StatelessWidget {
                           ),
                         ),
                         Padding(
-                          padding: EdgeInsets.fromLTRB(inset, BrookieSpace.s3, inset, BrookieSpace.s5),
+                          padding: EdgeInsets.fromLTRB(
+                            contentEdgeToEdge ? 0 : inset,
+                            BrookieSpace.s3,
+                            contentEdgeToEdge ? 0 : inset,
+                            BrookieSpace.s5,
+                          ),
                           child: DefaultTextStyle(
                             style: dialogTheme.contentTextStyle!,
                             child: Semantics(

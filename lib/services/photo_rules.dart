@@ -123,4 +123,32 @@ abstract final class SessionRules {
   /// [email] as stored and matched against the guest's sign-in: trimmed and
   /// lowercase.
   static String normalizeEmail(String email) => email.trim().toLowerCase();
+
+  /// Gmail's domains: their addresses never have a `+`, though Gmail
+  /// delivers mail sent to one.
+  static const _gmailDomains = {'gmail.com', 'googlemail.com'};
+
+  /// Why no Google sign-in could ever match [email] though [emailPattern]
+  /// (all the rules check) may take it, written for the admin; null if
+  /// there's nothing of the kind. The guest is matched by exact address, so
+  /// the app refuses these too, more strictly than the rules.
+  static String? googleEmailProblem(String email) {
+    final normalized = normalizeEmail(email);
+    if (normalized.contains('<') || normalized.contains('>')) {
+      return 'An email address has no < or >. Enter just the address, like name@gmail.com.';
+    }
+    if (normalized.contains('mailto:')) {
+      return '“mailto:” isn’t part of the address. Enter just the address, like name@gmail.com.';
+    }
+    if (normalized.contains(RegExp(r'\s'))) {
+      return 'That has a space in it. Take it out: an email address has none.';
+    }
+    final at = normalized.lastIndexOf('@');
+    final plus = normalized.indexOf('+');
+    if (at >= 0 && plus >= 0 && plus < at && _gmailDomains.contains(normalized.substring(at + 1))) {
+      return '“${normalized.substring(plus, at)}” isn’t part of a Gmail address: Google signs them in without it. '
+          'Take it out.';
+    }
+    return null;
+  }
 }

@@ -353,13 +353,17 @@ class FakeAdminService implements AdminService {
   /// Every upload started, in order.
   final uploads = <FakePhotoUpload>[];
 
+  /// The id each [createSession] call was for, in order.
+  final createSessionIds = <String>[];
+
   var _nextId = 1;
   final _changes = StreamController<void>.broadcast(sync: true);
 
   /// Has the live streams emit the current state again.
   void notifyChanged() => _changes.add(null);
 
-  /// Fails the live streams that are running.
+  /// Fails the live streams that are running, which then end, as
+  /// Firestore's do.
   void failLiveStreams(Object error) => _changes.addError(error);
 
   /// The uploads that haven't finished.
@@ -392,7 +396,17 @@ class FakeAdminService implements AdminService {
           return;
         }
         controller.add(current());
-        final changes = _changes.stream.listen((_) => controller.add(current()), onError: controller.addError);
+        late final StreamSubscription<void> changes;
+        changes = _changes.stream.listen(
+          (_) => controller.add(current()),
+          // Firestore ends a listener after its first error.
+          onError: (Object error) {
+            changes.cancel();
+            controller
+              ..addError(error)
+              ..close();
+          },
+        );
         controller.onCancel = changes.cancel;
       });
 
@@ -405,9 +419,12 @@ class FakeAdminService implements AdminService {
     return const SessionMissing();
   }
 
+  /// Session [id], for a change to it. One that isn't there is refused, as
+  /// the rules refuse it (they read the document's status), so the app says
+  /// what it says for any refusal.
   Booking _session(String id) {
     final session = sessions[id];
-    if (session == null) throw adminError(AdminErrorKind.notFound, 'No session $id.');
+    if (session == null) throw adminError(AdminErrorKind.denied);
     return session;
   }
 
@@ -436,12 +453,18 @@ class FakeAdminService implements AdminService {
   }
 
   @override
-  Future<String> createSession(SessionDetails details) async {
+  String newSessionId() => 'session-${_nextId++}';
+
+  @override
+  Future<String> createSession(SessionDetails details, {String? id}) async {
+    final sessionId = id ?? newSessionId();
+    createSessionIds.add(sessionId);
     await _write('createSession', 'createSession(${details.name.trim()})');
-    final id = 'session-${_nextId++}';
-    sessions[id] = _adHoc(id, details, photosReady: false);
+    // Already saved by an earlier try: the real one finds it, and never
+    // makes a second session or changes the first.
+    sessions.putIfAbsent(sessionId, () => _adHoc(sessionId, details, photosReady: false));
     notifyChanged();
-    return id;
+    return sessionId;
   }
 
   @override
@@ -477,7 +500,7 @@ class FakeAdminService implements AdminService {
   Future<void> deleteSession(String id) async {
     if (sessions[id]?.isAdHoc == false) throw StateError('deleteSession($id) is for ad hoc sessions only');
     await _write('deleteSession', 'deleteSession($id)');
-    _session(id);
+    // Already gone counts as deleted, as it does for the real one.
     sessions.remove(id);
     sessionPhotos.remove(id);
     notifyChanged();

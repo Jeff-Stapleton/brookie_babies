@@ -175,15 +175,21 @@ class _FakeDocument extends Fake implements DocumentReference<Map<String, dynami
   Future<void> set(Map<String, dynamic> data, [SetOptions? options]) =>
       _db._write('set $path', data, () => _db.docs[path] = FakeFirestore._apply({}, data));
 
+  // firestore.rules read the document's status before an update or a
+  // delete, which fails when there's none, so both are refused.
   @override
   Future<void> update(Map<Object, Object?> data) => _db._write('update $path', data, () {
         final doc = _db.docs[path];
-        if (doc == null) throw FirebaseException(plugin: 'cloud_firestore', code: 'not-found');
+        if (doc == null) throw FirebaseException(plugin: 'cloud_firestore', code: 'permission-denied');
         _db.docs[path] = FakeFirestore._apply(doc, data);
       });
 
   @override
-  Future<void> delete() => _db._write('delete $path', const {}, () => _db.docs.remove(path));
+  Future<void> delete() => _db._write('delete $path', const {}, () {
+        if (_db.docs.remove(path) == null) {
+          throw FirebaseException(plugin: 'cloud_firestore', code: 'permission-denied');
+        }
+      });
 }
 
 class _FakeSnapshot extends Fake implements DocumentSnapshot<Map<String, dynamic>> {

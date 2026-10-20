@@ -58,6 +58,19 @@ void main() {
       expect(session.uid, isNull);
     });
 
+    test('createSession with an id already saved finds it, and never makes a second', () async {
+      final admin = FakeAdminService();
+      final id = admin.newSessionId();
+      final other = SessionDetails(name: 'Other', email: 'o@example.com', date: DateTime(2027));
+
+      expect(await admin.createSession(harper, id: id), id);
+      expect(await admin.createSession(other, id: id), id);
+
+      expect(admin.sessions.keys, [id]);
+      expect(admin.sessions[id]!.name, 'The Harper family');
+      expect(admin.createSessionIds, [id, id]);
+    });
+
     test('one session: found, unreadable, or missing once deleted', () async {
       final admin = FakeAdminService(
         sessions: [testSession('s1')],
@@ -74,6 +87,19 @@ void main() {
       expect(seen.first, isA<SessionFound>());
       expect(seen.last, isA<SessionMissing>());
       expect((bad as SessionUnreadable).booking.problem, 'date isn’t YYYY-MM-DD');
+    });
+
+    test('a session that isn’t there: changes refused as the rules refuse them, deleting it done', () async {
+      final admin = FakeAdminService();
+      final refused = throwsA(isA<AdminException>()
+          .having((e) => e.kind, 'kind', AdminErrorKind.denied)
+          .having((e) => e.message, 'message', kAdminDeniedMessage));
+
+      await expectLater(admin.setPhotosReady('gone', true), refused);
+      await expectLater(admin.updateSession(testSession('gone'), harper), refused);
+      await admin.deleteSession('gone');
+
+      expect(admin.sessions, isEmpty);
     });
 
     test('nextError fails one call; errors fail every call to a method', () async {
@@ -102,6 +128,27 @@ void main() {
       admin.failLiveStreams(adminError(AdminErrorKind.offline));
       await pumpEventQueue();
       expect(errors, hasLength(1));
+    });
+
+    test('a live stream that fails ends there, as Firestore’s do', () async {
+      final admin = FakeAdminService(sessions: [testSession('s1')]);
+      final seen = <String>[];
+      var done = false;
+      admin.watchSession('s1').listen(
+            (lookup) => seen.add('value'),
+            onError: (Object _) => seen.add('error'),
+            onDone: () => done = true,
+          );
+      await pumpEventQueue();
+
+      admin.failLiveStreams(adminError(AdminErrorKind.denied));
+      admin.notifyChanged();
+      await pumpEventQueue();
+
+      expect(seen, ['value', 'error']);
+      expect(done, isTrue);
+      // Others listen afresh.
+      expect(await admin.watchSession('s1').first, isA<SessionFound>());
     });
 
     test('writes take writeDelay', () async {

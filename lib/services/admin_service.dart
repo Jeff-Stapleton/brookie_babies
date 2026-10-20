@@ -38,6 +38,13 @@ class AdminException implements Exception {
 const kAdminDeniedMessage =
     'We couldn’t save that change. If you were just made an admin, refresh the page and try again.';
 
+/// [AdminErrorKind.denied] for a read. The app checks nothing before a
+/// read, so besides a claim not yet in the token, the site may be running
+/// ahead of its rules: deployed before the rules that let admins read (see
+/// the README's deploy order).
+const kAdminReadDeniedMessage = 'We couldn’t load this. If you were just made an admin, refresh the page and try '
+    'again. If that doesn’t help, the site’s security rules may not be deployed yet.';
+
 /// [AdminErrorKind.offline].
 const kAdminOfflineMessage = 'We couldn’t reach the server. Check your connection and try again.';
 
@@ -75,13 +82,21 @@ abstract class AdminService {
   /// The session [id], updated live.
   Stream<SessionLookup> watchSession(String id);
 
-  /// Adds an ad hoc session; returns its id.
-  Future<String> createSession(SessionDetails details);
+  /// An id for a new session, made without writing anything.
+  String newSessionId();
 
-  /// Changes an ad hoc session's details.
+  /// Adds an ad hoc session as [id] (from [newSessionId]; a new one if
+  /// null) and returns its id. Trying again with the same id never makes a
+  /// second session: a try that got no answer may still have been saved, and
+  /// a retry then finds it and returns its id.
+  Future<String> createSession(SessionDetails details, {String? id});
+
+  /// Changes an ad hoc session's details. A new email also deletes the
+  /// cached zip, so links the old one was given stop working.
   Future<void> updateSession(Booking session, SessionDetails details);
 
-  /// Lets the family download the photos, or stops them.
+  /// Lets the family download the photos, or stops them. Stopping them also
+  /// deletes the cached zip, so links already given out stop working.
   Future<void> setPhotosReady(String id, bool ready);
 
   /// Deletes an ad hoc session: hides its photos, deletes them (in
@@ -99,7 +114,8 @@ abstract class AdminService {
   /// fails with [AdminErrorKind.alreadyExists].
   PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name);
 
-  /// Deletes one photo. One that's already gone counts as deleted.
+  /// Deletes one photo. One that's already gone counts as deleted. A
+  /// session photo's cached zip goes too, so links to it stop working.
   Future<void> deletePhoto(StoredPhoto photo);
 
   /// Every file directly in the public `_admin/gallery` folder, with a
@@ -162,13 +178,22 @@ class FirebaseAdminService implements AdminService {
       );
 
   @override
-  Future<String> createSession(SessionDetails details) async {
+  String newSessionId() => _bookings.doc().id;
+
+  @override
+  Future<String> createSession(SessionDetails details, {String? id}) async {
     _check(sessionDetailsProblem(details));
     final uid = _signedInUid();
     // The id is made here, not by add(), so it's known before the server
-    // answers.
-    final doc = _bookings.doc();
-    await _write('add a session', () => doc.set(newSessionData(details, createdBy: uid)));
+    // answers and a retry can use it again.
+    final doc = _bookings.doc(id == null ? newSessionId() : _sessionId(id));
+    try {
+      await _write('add a session', () => doc.set(newSessionData(details, createdBy: uid)));
+    } on AdminException catch (e) {
+      // A retry after a try that got no answer but was saved: the rules
+      // take set() on a document that's there as an update, and refuse it.
+      if (id == null || e.kind != AdminErrorKind.denied || await _isThere(doc) != true) rethrow;
+    }
     return doc.id;
   }
 
@@ -180,7 +205,7 @@ class FirebaseAdminService implements AdminService {
         AdminErrorKind.invalid,
       );
     }
-    _check(sessionDetailsProblem(details));
+    _check(sessionDetailsProblem(details, before: session));
     _signedInUid();
     final changes = sessionChanges(session, details);
     if (changes.isEmpty) return;
@@ -188,6 +213,9 @@ class FirebaseAdminService implements AdminService {
       'edit session ${session.id}',
       () => _bookings.doc(session.id).update({...changes, 'updatedAt': FieldValue.serverTimestamp()}),
     );
+    // After the change, so no download in between rebuilds it for the old
+    // email.
+    if (changes.containsKey('email')) await _deleteZip(session.id);
   }
 
   @override
@@ -197,6 +225,8 @@ class FirebaseAdminService implements AdminService {
       'set photosReady on session $id',
       () => _bookings.doc(id).update({'photosReady': ready, 'updatedAt': FieldValue.serverTimestamp()}),
     );
+    // Hidden first, so no download in between rebuilds it.
+    if (!ready) await _deleteZip(id);
   }
 
   @override
@@ -225,11 +255,15 @@ class FirebaseAdminService implements AdminService {
     await _attempt('delete the photos of session $id', _Doing.writing, () async {
       // Everything, hidden files included: the folder goes with the session.
       await _forEachLimited(await _listAllUnder(storage.ref(folder)), _deleteIfThere);
-      // Admins may delete the cached zip but not look it up, so it goes by
-      // name.
-      await _deleteIfThere(storage.ref('gallery-zips/$id.zip'));
+      await _deleteIfThere(storage.ref(_zipPath(id)));
     });
-    await _write('delete session $id', doc.delete);
+    try {
+      await _write('delete session $id', doc.delete);
+    } on AdminException catch (e) {
+      // Deleted since it was read (in another tab, say): the rules refuse
+      // deleting a document that isn't there, since they check its status.
+      if (e.kind != AdminErrorKind.denied || await _isThere(doc) != false) rethrow;
+    }
   }
 
   @override
@@ -264,6 +298,11 @@ class FirebaseAdminService implements AdminService {
   Future<void> deletePhoto(StoredPhoto photo) async {
     _signedInUid();
     await _attempt('delete ${photo.fullPath}', _Doing.writing, () => _deleteIfThere(storage.ref(photo.fullPath)));
+    // 'galleries/<id>/<name>': after the photo, so no download in between
+    // rebuilds the zip with it. A retry finds the photo gone and tries the
+    // zip again.
+    final path = photo.fullPath.split('/');
+    if (path.length > 2 && path.first == _galleries) await _deleteZip(path[1]);
   }
 
   @override
@@ -341,13 +380,36 @@ class FirebaseAdminService implements AdminService {
     }
   }
 
-  /// `galleries/<id>`, for a session id that can't reach another folder.
-  static String _galleryPath(String id) {
+  /// [id], if it's a session id that can't reach another document or
+  /// folder.
+  static String _sessionId(String id) {
     // An empty id would make it every family's photos.
     if (id.isEmpty || id.contains('/') || id == '.' || id == '..') {
       throw ArgumentError.value(id, 'id', 'Not a session id');
     }
-    return '$_galleries/$id';
+    return id;
+  }
+
+  /// `galleries/<id>`, for a session id that can't reach another folder.
+  static String _galleryPath(String id) => '$_galleries/${_sessionId(id)}';
+
+  /// The session's cached zip (getGalleryDownloadUrl, functions/src/gallery.ts).
+  static String _zipPath(String id) => 'gallery-zips/${_sessionId(id)}.zip';
+
+  /// Deletes session [id]'s cached zip, so the links already handed out for
+  /// it stop working; one that isn't there counts as deleted. Admins may
+  /// delete it but not look it up, so it goes by name.
+  Future<void> _deleteZip(String id) =>
+      _attempt('delete the zip of session $id', _Doing.writing, () => _deleteIfThere(storage.ref(_zipPath(id))));
+
+  /// Whether [doc] is there; null if that can't be read either.
+  static Future<bool?> _isThere(DocumentReference<Map<String, dynamic>> doc) async {
+    try {
+      return (await doc.get()).exists;
+    } catch (e) {
+      log('Admin: could not read ${doc.path}: $e');
+      return null;
+    }
   }
 
   static String? _nameProblem(String name) => name == PhotoRules.safeObjectName(name)
@@ -413,7 +475,7 @@ class FirebaseAdminService implements AdminService {
 /// What the admin was doing when something failed, for the message.
 enum _Doing {
   reading(
-    denied: 'We couldn’t load this. If you were just made an admin, refresh the page and try again.',
+    denied: kAdminReadDeniedMessage,
     failed: 'We couldn’t load this. Refresh the page to try again.',
   ),
   writing(denied: kAdminDeniedMessage, failed: _writeFailedMessage),
@@ -471,32 +533,45 @@ AdminException adminExceptionFrom(
 const _cancelledMessage = 'Cancelled before it finished. Try again.';
 
 /// Why firestore.rules would refuse an ad hoc session with [details] (its
-/// validName, validEmail, validDate, ... functions), written for the admin;
-/// null if it wouldn't. Change the two together.
+/// validName, validEmail, validDate, ... functions), or why no guest could
+/// ever sign in to it (SessionRules.googleEmailProblem), written for the
+/// admin; null if neither. Change the rules and this together.
+///
+/// Editing [before], only the fields that change are checked, as the rules
+/// check them: a session typed into the console may hold odd values in
+/// fields nobody touches.
 @visibleForTesting
-String? sessionDetailsProblem(SessionDetails details) {
+String? sessionDetailsProblem(SessionDetails details, {Booking? before}) {
+  final changed = before == null ? null : sessionChanges(before, details).keys.toSet();
+  bool checks(String field) => changed == null || changed.contains(field);
   final name = details.name.trim();
-  if (name.isEmpty) return 'Enter who the session is for, like “The Harper family”.';
-  if (name.length > SessionRules.nameMaxLength) {
-    return 'The name is too long. Shorten it to ${SessionRules.nameMaxLength} characters or fewer.';
+  if (checks('name')) {
+    if (name.isEmpty) return 'Enter who the session is for, like “The Harper family”.';
+    if (name.length > SessionRules.nameMaxLength) {
+      return 'The name is too long. Shorten it to ${SessionRules.nameMaxLength} characters or fewer.';
+    }
   }
-  if (!SessionRules.emailPattern.hasMatch(SessionRules.normalizeEmail(details.email))) {
-    return 'That email doesn’t look right. Enter the Google email they sign in with, like name@gmail.com.';
+  if (checks('email')) {
+    final googleEmailProblem = SessionRules.googleEmailProblem(details.email);
+    if (googleEmailProblem != null) return googleEmailProblem;
+    if (!SessionRules.emailPattern.hasMatch(SessionRules.normalizeEmail(details.email))) {
+      return 'That email doesn’t look right. Enter the Google email they sign in with, like name@gmail.com.';
+    }
   }
   final packageName = _optional(details.packageName);
-  if (packageName != null && !SessionRules.packageNames.contains(packageName)) {
+  if (checks('packageName') && packageName != null && !SessionRules.packageNames.contains(packageName)) {
     return 'That package doesn’t exist. Choose ${SessionRules.packageNames.join(', ')} or no package.';
   }
   // YYYY-MM-DD needs a four-digit year.
-  if (details.date.year < 0 || details.date.year > 9999) {
+  if (checks('date') && (details.date.year < 0 || details.date.year > 9999)) {
     return 'That date can’t be saved. Choose a date from the calendar.';
   }
   final time = details.time;
-  if (time != null && (time.hour < 0 || time.hour > 23 || time.minute < 0 || time.minute > 59)) {
+  if (checks('time') && time != null && (time.hour < 0 || time.hour > 23 || time.minute < 0 || time.minute > 59)) {
     return 'That time can’t be saved. Choose a time from the list.';
   }
   final location = _optional(details.location);
-  if (location != null && location.length > SessionRules.locationMaxLength) {
+  if (checks('location') && location != null && location.length > SessionRules.locationMaxLength) {
     return 'The location is too long. Shorten it to ${SessionRules.locationMaxLength} characters or fewer.';
   }
   return null;

@@ -59,6 +59,9 @@ class BookingCalendar extends StatefulWidget {
   /// their focus rings. Narrower than this, lay the calendar [edgeToEdge].
   static const minCardWidth = 7 * BrookieSize.day + 2 * BrookieSpace.s2 + 2;
 
+  /// The narrowest [edgeToEdge] band that still fits seven full-size days.
+  static const minBandWidth = 7 * BrookieSize.day + 2 * BrookieSpace.s1;
+
   @override
   State<BookingCalendar> createState() => _BookingCalendarState();
 }

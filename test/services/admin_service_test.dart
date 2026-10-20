@@ -144,7 +144,7 @@ void main() {
       expect(
         sessionDetailsProblem(_details(
           name: 'x' * 100,
-          email: ' Pat.Parent+photos@Gmail.COM ',
+          email: ' Pat.Parent+photos@Example.COM ',
           packageName: 'Ultimate',
           date: DateTime(9999, 12, 31),
           time: (hour: 23, minute: 59),
@@ -153,6 +153,37 @@ void main() {
         isNull,
       );
       expect(sessionDetailsProblem(_details(name: '  The Harper family  ', email: 'a@b.co')), isNull);
+      expect(sessionDetailsProblem(_details(email: ' Pat.Parent@GoogleMail.com ')), isNull);
+    });
+
+    test('editing: checks only the fields that change, as the rules do', () {
+      // Typed into the console, as the app never would.
+      final odd = testSession('s1', date: DateTime(2026, 11, 14), packageName: 'premium', location: 'y' * 201);
+      SessionDetails keeping({String name = 'The Harper family', String? packageName = 'premium'}) =>
+          _details(name: name, packageName: packageName, location: 'y' * 201);
+
+      expect(sessionDetailsProblem(keeping(), before: odd), isNull);
+      expect(sessionDetailsProblem(keeping(name: 'The Harpers'), before: odd), isNull);
+      expect(sessionDetailsProblem(keeping(packageName: 'Gold'), before: odd), contains('Choose Basic'));
+      expect(sessionDetailsProblem(keeping(name: ''), before: odd), contains('Enter who the session is for'));
+      // Adding, everything is checked.
+      expect(sessionDetailsProblem(keeping()), isNotNull);
+    });
+
+    test('refuses an email no Google sign-in could match, though the rules would take it', () {
+      for (final (email, says) in [
+        ('<harper@example.com>', 'An email address has no < or >. Enter just the address, like name@gmail.com.'),
+        ('mailto:harper@example.com', '“mailto:” isn’t part of the address. Enter just the address'),
+        ('Pat <pat@example.com>', 'no < or >'),
+        ('har per@example.com', 'That has a space in it. Take it out: an email address has none.'),
+        (
+          ' Pat.Parent+Photos@Gmail.com',
+          '“+photos” isn’t part of a Gmail address: Google signs them in without it. Take it out.',
+        ),
+        ('pat+@googlemail.com', '“+” isn’t part of a Gmail address'),
+      ]) {
+        expect(sessionDetailsProblem(_details(email: email)), contains(says), reason: email);
+      }
     });
 
     test('refuses what the rules refuse, saying how to fix it', () {
@@ -162,7 +193,6 @@ void main() {
         (_details(email: ''), 'Google email'),
         (_details(email: 'harper'), 'Google email'),
         (_details(email: 'harper@example'), 'Google email'),
-        (_details(email: 'har per@example.com'), 'Google email'),
         (_details(email: 'harper@@example.com'), 'Google email'),
         (_details(packageName: 'Gold'), 'Choose Basic, Premium, Ultimate or no package'),
         (_details(date: DateTime(10000)), 'Choose a date'),
@@ -323,6 +353,18 @@ void main() {
       expect(log, isEmpty);
     });
 
+    test('refuses an email no guest could sign in with, before writing', () async {
+      await expectLater(
+        admin.createSession(_details(email: 'pat+photos@gmail.com')),
+        throwsA(_adminError(AdminErrorKind.invalid, message: contains('“+photos”'))),
+      );
+      await expectLater(
+        admin.updateSession(testSession('s1'), _details(email: '<pat@example.com>')),
+        throwsA(_adminError(AdminErrorKind.invalid, message: contains('no < or >'))),
+      );
+      expect(log, isEmpty);
+    });
+
     test('signed out: denied, nothing written', () async {
       auth.currentUser = null;
 
@@ -337,6 +379,61 @@ void main() {
         admin.createSession(_details()),
         throwsA(_adminError(AdminErrorKind.denied, message: kAdminDeniedMessage)),
       );
+    });
+
+    test('newSessionId makes an id without writing', () {
+      expect(admin.newSessionId(), 'auto-1');
+      expect(log, ['new id bookings/auto-1']);
+    });
+
+    test('with an id, sets that document', () async {
+      final id = admin.newSessionId();
+
+      expect(await admin.createSession(_details(), id: id), id);
+      expect(log, ['new id bookings/$id', 'set bookings/$id']);
+      expect(db.docs.keys, ['bookings/$id']);
+    });
+
+    test('a retry after a try that got no answer but was saved: the same session, not a second', () async {
+      final hold = db.holdWrites = Completer();
+      await expectLater(
+        admin.createSession(_details(), id: 'a1'),
+        throwsA(_adminError(AdminErrorKind.offline, message: kAdminTimedOutMessage)),
+      );
+      // The first try reaches the server after all ...
+      hold.complete();
+      db.holdWrites = null;
+      await pumpEventQueue();
+      // ... so the rules take the retry's set() as an update, and refuse it.
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+
+      expect(await admin.createSession(_details(), id: 'a1'), 'a1');
+      expect(log, ['set bookings/a1', 'set bookings/a1', 'get bookings/a1']);
+      expect(db.docs.keys, ['bookings/a1']);
+    });
+
+    test('a refused retry with no session there is still refused', () async {
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+
+      await expectLater(admin.createSession(_details(), id: 'a1'), throwsA(_adminError(AdminErrorKind.denied)));
+      expect(log, ['set bookings/a1', 'get bookings/a1']);
+    });
+
+    test('a refused retry that can’t look either is still refused', () async {
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+      db.errors['get bookings/a1'] = _firestoreError('permission-denied');
+
+      await expectLater(
+        admin.createSession(_details(), id: 'a1'),
+        throwsA(_adminError(AdminErrorKind.denied, message: kAdminDeniedMessage)),
+      );
+    });
+
+    test('an id never reaches another document', () async {
+      for (final id in ['', 'a/b', '..']) {
+        await expectLater(admin.createSession(_details(), id: id), throwsArgumentError, reason: id);
+      }
+      expect(log, isEmpty);
     });
   });
 
@@ -355,10 +452,57 @@ void main() {
       });
     });
 
+    test('keeps an odd value typed in the console when other fields change', () async {
+      addAdHoc('s1');
+      db.docs['bookings/s1']!['packageName'] = 'premium';
+      final session = testSession('s1', date: DateTime(2026, 11, 14), packageName: 'premium');
+
+      await admin.updateSession(session, _details(packageName: 'premium', location: 'The studio'));
+
+      expect(db.writes.single.data, {'location': 'The studio', 'updatedAt': FieldValue.serverTimestamp()});
+      expect(db.docs['bookings/s1']!['packageName'], 'premium');
+    });
+
     test('nothing changed: nothing written', () async {
       await admin.updateSession(testSession('s1', date: DateTime(2026, 11, 14)), _details());
 
       expect(log, isEmpty);
+    });
+
+    test('a new email deletes the cached zip after the change, so the old one’s links stop working', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      final session = testSession('s1', date: DateTime(2026, 11, 14), photosReady: true);
+
+      await admin.updateSession(session, _details(email: 'grandma@example.com'));
+
+      expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects, isEmpty);
+    });
+
+    test('other changes, or the same email in capitals, leave the zip', () async {
+      addAdHoc('s1');
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+
+      await admin.updateSession(
+        testSession('s1', date: DateTime(2026, 11, 14)),
+        _details(name: 'The Harpers', email: ' Harper@Example.com'),
+      );
+
+      expect(log, ['update bookings/s1']);
+      expect(storage.objects, hasLength(1));
+    });
+
+    test('a new email whose change is refused leaves the zip', () async {
+      addAdHoc('s1');
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      db.errors['update bookings/s1'] = _firestoreError('permission-denied');
+
+      await expectLater(
+        admin.updateSession(testSession('s1', date: DateTime(2026, 11, 14)), _details(email: 'pat@example.com')),
+        throwsA(_adminError(AdminErrorKind.denied)),
+      );
+      expect(log, ['update bookings/s1']);
     });
 
     test('only ad hoc sessions', () async {
@@ -377,14 +521,67 @@ void main() {
     });
   });
 
-  test('setPhotosReady updates photosReady and updatedAt only', () async {
-    addAdHoc('s1');
+  group('setPhotosReady', () {
+    test('updates photosReady and updatedAt only', () async {
+      addAdHoc('s1');
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
 
-    await admin.setPhotosReady('s1', true);
+      await admin.setPhotosReady('s1', true);
 
-    expect(log, ['update bookings/s1']);
-    expect(db.writes.single.data, {'photosReady': true, 'updatedAt': FieldValue.serverTimestamp()});
-    expect(db.docs['bookings/s1']!['photosReady'], isTrue);
+      expect(log, ['update bookings/s1']);
+      expect(db.writes.single.data, {'photosReady': true, 'updatedAt': FieldValue.serverTimestamp()});
+      expect(db.docs['bookings/s1']!['photosReady'], isTrue);
+      expect(storage.objects, hasLength(1));
+    });
+
+    test('hiding them deletes the cached zip once hidden, so links already given out stop working', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects.addAll({'gallery-zips/s1.zip': 'application/zip', 'gallery-zips/s10.zip': 'application/zip'});
+
+      await admin.setPhotosReady('s1', false);
+
+      expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects.keys, ['gallery-zips/s10.zip']);
+    });
+
+    test('hiding them with no zip yet is fine', () async {
+      addAdHoc('s1', photosReady: true);
+
+      await admin.setPhotosReady('s1', false);
+
+      expect(db.docs['bookings/s1']!['photosReady'], isFalse);
+    });
+
+    test('a zip that won’t delete is an AdminException, the photos still hidden; trying again finishes', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      storage.errors['delete gallery-zips/s1.zip'] = _storageError('retry-limit-exceeded');
+
+      await expectLater(admin.setPhotosReady('s1', false), throwsA(_adminError(AdminErrorKind.offline)));
+      expect(db.docs['bookings/s1']!['photosReady'], isFalse);
+
+      storage.errors.clear();
+      await admin.setPhotosReady('s1', false);
+      expect(storage.objects, isEmpty);
+    });
+
+    test('a session that isn’t there is refused, as the rules refuse it', () async {
+      await expectLater(
+        admin.setPhotosReady('gone', false),
+        throwsA(_adminError(AdminErrorKind.denied, message: kAdminDeniedMessage)),
+      );
+      expect(log, ['update bookings/gone']);
+    });
+
+    test('refused: the zip stays, and nothing is hidden', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      db.errors['update bookings/s1'] = _firestoreError('permission-denied');
+
+      await expectLater(admin.setPhotosReady('s1', false), throwsA(_adminError(AdminErrorKind.denied)));
+      expect(log, ['update bookings/s1']);
+      expect(storage.objects, hasLength(1));
+    });
   });
 
   group('writes that get no answer', () {
@@ -458,6 +655,21 @@ void main() {
       db.errors['snapshots bookings'] = _firestoreError('permission-denied');
 
       await expectLater(admin.watchSessions().first, throwsA(_adminError(AdminErrorKind.denied)));
+    });
+
+    test('a refused read also says the rules may not be deployed yet', () async {
+      db.errors['snapshots bookings'] = _firestoreError('permission-denied');
+      storage.errors['listAll galleries/s1'] = _storageError('unauthorized');
+      db.errors['get site/home'] = _firestoreError('permission-denied');
+
+      for (final read in [
+        () => admin.watchSessions().first,
+        () => admin.listSessionPhotos('s1'),
+        () => admin.homePhotoNames(),
+      ]) {
+        await expectLater(read(), throwsA(_adminError(AdminErrorKind.denied, message: kAdminReadDeniedMessage)));
+      }
+      expect(kAdminReadDeniedMessage, contains('security rules may not be deployed yet'));
     });
 
     test('a failure once listening is an AdminException too', () async {
@@ -807,17 +1019,41 @@ void main() {
   group('deletePhoto', () {
     const photo = StoredPhoto(name: 'edits/a.jpg', fullPath: 'galleries/s1/edits/a.jpg');
 
-    test('deletes it', () async {
-      storage.objects[photo.fullPath] = 'image/jpeg';
+    test('deletes it, then the session’s cached zip, so links to the photo stop working', () async {
+      storage.objects.addAll({
+        photo.fullPath: 'image/jpeg',
+        'gallery-zips/s1.zip': 'application/zip',
+        'gallery-zips/s10.zip': 'application/zip',
+      });
 
       await admin.deletePhoto(photo);
 
-      expect(log, ['delete galleries/s1/edits/a.jpg']);
+      expect(log, ['delete galleries/s1/edits/a.jpg', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects.keys, ['gallery-zips/s10.zip']);
+    });
+
+    test('a home page library photo has no zip to delete', () async {
+      storage.objects['_admin/gallery/a.jpg'] = 'image/jpeg';
+
+      await admin.deletePhoto(const StoredPhoto(name: 'a.jpg', fullPath: '_admin/gallery/a.jpg'));
+
+      expect(log, ['delete _admin/gallery/a.jpg']);
+    });
+
+    test('one already gone counts as deleted, and its zip goes all the same', () async {
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+
+      await admin.deletePhoto(photo);
+
       expect(storage.objects, isEmpty);
     });
 
-    test('one already gone counts as deleted', () async {
-      await admin.deletePhoto(photo);
+    test('a photo that won’t delete leaves the zip', () async {
+      storage.objects.addAll({photo.fullPath: 'image/jpeg', 'gallery-zips/s1.zip': 'application/zip'});
+      storage.errors['delete ${photo.fullPath}'] = _storageError('unknown');
+
+      await expectLater(admin.deletePhoto(photo), throwsA(isA<AdminException>()));
+      expect(log, isNot(contains('delete gallery-zips/s1.zip')));
     });
 
     test('fails as an AdminException', () async {
@@ -898,6 +1134,35 @@ void main() {
 
       expect(log, ['get bookings/s1']);
       expect(storage.objects, hasLength(6));
+    });
+
+    test('deleted in another tab since it was read: done, not refused', () async {
+      addAdHoc('s1');
+      final slow = FirebaseAdminService(db, storage, auth, writeTimeLimit: const Duration(seconds: 10));
+      final hold = db.holdWrites = Completer();
+      final deleting = slow.deleteSession('s1');
+      await pumpEventQueue();
+      expect(log.last, 'delete bookings/s1');
+
+      // The other tab gets there first; the rules refuse deleting what's gone.
+      db.docs.remove('bookings/s1');
+      db.holdWrites = null;
+      hold.complete();
+      await deleting;
+
+      expect(log.sublist(log.length - 2), ['delete bookings/s1', 'get bookings/s1']);
+    });
+
+    test('a refused deletion of a session still there is refused', () async {
+      addAdHoc('s1');
+      db.errors['delete bookings/s1'] = _firestoreError('permission-denied');
+
+      await expectLater(
+        admin.deleteSession('s1'),
+        throwsA(_adminError(AdminErrorKind.denied, message: kAdminDeniedMessage)),
+      );
+      expect(log.last, 'get bookings/s1');
+      expect(db.docs, contains('bookings/s1'));
     });
 
     test('only ad hoc sessions', () async {

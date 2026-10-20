@@ -1,3 +1,4 @@
+import 'package:brookie_babies/components/upload_progress_list.dart';
 import 'package:brookie_babies/models/picked_photo.dart';
 import 'package:brookie_babies/services/admin_service.dart';
 import 'package:brookie_babies/services/photo_rules.dart';
@@ -131,17 +132,36 @@ void main() {
       expect(queue.countOf(UploadStatus.queued), 2);
     });
 
-    test('a name uploaded earlier counts as already here', () async {
+    test('a name uploaded earlier is skipped while the page still lists it', () async {
       queue.add(photos(1));
       admin.uploads.single.complete();
       await pumpEventQueue();
 
-      queue.add(photos(2));
+      queue.add(photos(2), existing: ['IMG_1.jpg']);
 
       expect(queue.items.where((item) => item.name == 'IMG_1.jpg').map((item) => item.status),
           [UploadStatus.done, UploadStatus.skipped]);
       expect(queue.items.last.name, 'IMG_2.jpg');
       expect(admin.uploads.map((u) => u.name), ['IMG_1.jpg', 'IMG_2.jpg']);
+    });
+
+    test('a photo deleted since it was uploaded can go again, and replaces its entry', () async {
+      queue.add(photos(2));
+      for (final upload in admin.pendingUploads) {
+        upload.complete();
+      }
+      await pumpEventQueue();
+      // "Delete all photos": the page lists neither now.
+      admin.sessionPhotos['s1']!.clear();
+
+      queue.add(photos(2));
+
+      expect(queue.items.map((item) => (item.name, item.status)), [
+        ('IMG_1.jpg', UploadStatus.uploading),
+        ('IMG_2.jpg', UploadStatus.uploading),
+      ]);
+      expect(admin.uploads, hasLength(4));
+      expect(uploadSummary(queue), 'Uploading 0 of 2');
     });
 
     test('stored since the page listed it (another tab): skipped, not failed', () async {

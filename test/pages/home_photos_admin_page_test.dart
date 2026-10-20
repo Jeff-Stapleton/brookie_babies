@@ -481,6 +481,48 @@ void main() {
       expect(Focus.of(tester.element(find.text('Save home page'))).hasPrimaryFocus, isTrue);
     });
 
+    photoTest('every control names its photo, for screen readers', (tester) async {
+      admin.library.add('IMG_50.HEIC');
+      await pumpPage(tester);
+
+      expect(
+        tester.getSemantics(rowButton('IMG_01.jpg', Icons.arrow_upward)),
+        isSemantics(tooltip: 'Move IMG_01.jpg up'),
+      );
+      expect(
+        tester.getSemantics(rowButton('IMG_01.jpg', Icons.arrow_downward)),
+        isSemantics(tooltip: 'Move IMG_01.jpg down'),
+      );
+      expect(tester.getSemantics(rowButton('IMG_01.jpg', Icons.close)), isSemantics(tooltip: 'Remove IMG_01.jpg'));
+      expect(tester.getSemantics(deleteButton(tile('IMG_02.jpg'))), isSemantics(tooltip: 'Delete IMG_02.jpg'));
+      expect(
+        tester.getSemantics(deleteButton(tile('IMG_01.jpg'))),
+        isSemantics(tooltip: 'Can’t delete IMG_01.jpg: remove it from the home page first'),
+      );
+      expect(
+        tester.getSemantics(check('IMG_02.jpg')),
+        isSemantics(label: 'IMG_02.jpg on the home page', hasCheckedState: true, isChecked: false),
+      );
+      final heic = find.ancestor(of: find.text('IMG_50.HEIC'), matching: find.byKey(const ValueKey('IMG_50.HEIC')));
+      await reveal(tester, heic);
+      expect(tester.getSemantics(deleteButton(heic)), isSemantics(tooltip: 'Delete IMG_50.HEIC'));
+    });
+
+    photoTest('a move says where the photo went', (tester) async {
+      await pumpPage(tester);
+      tester.takeAnnouncements();
+
+      await pressWithKeyboard(tester, rowButton('IMG_05.jpg', Icons.arrow_upward));
+      await pressWithKeyboard(tester, rowButton('IMG_05.jpg', Icons.arrow_upward));
+      await pressWithKeyboard(tester, rowButton('IMG_05.jpg', Icons.arrow_downward));
+
+      expect([for (final announcement in tester.takeAnnouncements()) announcement.message], [
+        'IMG_05.jpg is now photo 2 of 3',
+        'IMG_05.jpg is now photo 1 of 3, the full-screen photo',
+        'IMG_05.jpg is now photo 2 of 3',
+      ]);
+    });
+
     photoTest('"Discard changes" hands focus to Save as it goes', (tester) async {
       await pumpPage(tester);
       await tapAndSettle(tester, check('IMG_09.jpg'));
@@ -613,7 +655,7 @@ void main() {
         await reveal(tester, tile(name));
         final delete = tester.widget<IconButton>(deleteButton(tile(name)));
         expect(delete.onPressed, isNull, reason: name);
-        expect(delete.tooltip, 'Remove it from the home page first', reason: name);
+        expect(delete.tooltip, 'Can’t delete $name: remove it from the home page first', reason: name);
       }
       expect(iconEnabled(tester, deleteButton(tile('IMG_02.jpg'))), isTrue);
       expect(find.text('Photos on the home page can’t be deleted. Remove them from the home page first.'),

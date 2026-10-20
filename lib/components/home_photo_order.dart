@@ -4,6 +4,7 @@ import 'package:brookie_babies/components/home_photo_library.dart';
 import 'package:brookie_babies/models/stored_photo.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 /// The home page photos in their order, one row each: a thumbnail, where
 /// the photo goes on the home page, its name, and "Move up", "Move down"
@@ -96,6 +97,13 @@ class _HomePhotoOrderState extends State<HomePhotoOrder> {
     if (focus.up.hasFocus && to == 0) focus.down.requestFocus();
     if (focus.down.hasFocus && to == names.length - 1) focus.up.requestFocus();
     widget.onChanged(names);
+    // Focus stays on the button, so nothing else says where the photo went.
+    final hero = to == 0 ? ', the full-screen photo' : '';
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      '$name is now photo ${to + 1} of ${names.length}$hero',
+      Directionality.of(context),
+    );
   }
 
   void _remove(int index) {
@@ -201,23 +209,24 @@ class _OrderRow extends StatelessWidget {
     final buttons = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // Each names its photo: a screen reader lists them all together.
         IconButton(
           focusNode: focus.up,
-          tooltip: 'Move up',
+          tooltip: 'Move ${photo.name} up',
           onPressed: onMoveUp,
           icon: const Icon(Icons.arrow_upward),
         ),
         const SizedBox(width: BrookieSpace.s1),
         IconButton(
           focusNode: focus.down,
-          tooltip: 'Move down',
+          tooltip: 'Move ${photo.name} down',
           onPressed: onMoveDown,
           icon: const Icon(Icons.arrow_downward),
         ),
         const SizedBox(width: BrookieSpace.s1),
         IconButton(
           focusNode: focus.remove,
-          tooltip: 'Remove',
+          tooltip: 'Remove ${photo.name}',
           onPressed: onRemove,
           icon: const Icon(Icons.close),
         ),

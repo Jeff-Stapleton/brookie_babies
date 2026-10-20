@@ -70,7 +70,7 @@ void _focusNear(
 
 /// The home page library's photos as a grid of prints, built a row at a
 /// time as they scroll into view: a library can hold hundreds. Under each,
-/// its name, "Delete photo", and whether it's on the home page.
+/// its name, "Delete", and whether it's on the home page.
 ///
 /// A sliver, for the admin page's scroll view. Each row of the grid is one
 /// item rather than a SliverGrid's fixed-height tiles, so the captions can
@@ -284,14 +284,14 @@ class _LibraryTile extends StatelessWidget {
             ),
             _DeleteButton(
               focusNode: focus.delete,
-              tooltip: 'Delete photo',
-              lockedReason: locked ? 'Remove it from the home page first' : null,
+              tooltip: 'Delete ${photo.name}',
+              lockedReason: locked ? 'Can’t delete ${photo.name}: remove it from the home page first' : null,
               deleting: deleting,
               onDelete: onDelete,
             ),
           ],
         ),
-        _OnHomePageCheck(focusNode: focus.toggle, selected: selected, onToggle: onToggle),
+        _OnHomePageCheck(name: photo.name, focusNode: focus.toggle, selected: selected, onToggle: onToggle),
       ],
     );
   }
@@ -301,7 +301,15 @@ class _LibraryTile extends StatelessWidget {
 /// button under the photo. Checked, it turns butter with the 1.5px ink edge
 /// of every selected state; disabled, it's quiet.
 class _OnHomePageCheck extends StatelessWidget {
-  const _OnHomePageCheck({required this.focusNode, required this.selected, required this.onToggle});
+  const _OnHomePageCheck({
+    required this.name,
+    required this.focusNode,
+    required this.selected,
+    required this.onToggle,
+  });
+
+  /// The photo's, for screen readers: every tile has one of these.
+  final String name;
 
   final FocusNode focusNode;
   final bool selected;
@@ -319,7 +327,7 @@ class _OnHomePageCheck extends StatelessWidget {
     } else {
       foreground = enabled ? c.ink : c.inkSoft;
     }
-    // One node: "On the home page", checked or not.
+    // One node: "IMG_1.jpg on the home page", checked or not.
     return MergeSemantics(
       child: Semantics(
         checked: selected,
@@ -358,7 +366,7 @@ class _OnHomePageCheck extends StatelessWidget {
               // Grows with the words beside it at large text sizes.
               Icon(selected ? Icons.check_box : Icons.check_box_outline_blank, size: 20, applyTextScaling: true),
               const SizedBox(width: BrookieSpace.s2),
-              const Expanded(child: Text('On the home page')),
+              Expanded(child: Text('On the home page', semanticsLabel: '$name on the home page')),
             ],
           ),
         ),
@@ -381,12 +389,12 @@ class _DeleteButton extends StatelessWidget {
 
   final FocusNode focusNode;
 
-  /// "Delete photo", or "Delete file".
+  /// "Delete IMG_1.jpg": a screen reader lists every file's together.
   final String tooltip;
 
   final VoidCallback onDelete;
 
-  /// Why it can't be deleted, if it can't.
+  /// Why it can't be deleted, if it can't, naming it as [tooltip] does.
   final String? lockedReason;
 
   final bool deleting;
@@ -416,7 +424,7 @@ class _DeleteButton extends StatelessWidget {
 }
 
 /// Files in the library the site can't show (not a JPEG, PNG or WebP by
-/// name, or hidden), each with why and "Delete file". Shows nothing when
+/// name, or hidden), each with why and "Delete". Shows nothing when
 /// there are none.
 class HomeLibraryOtherFiles extends StatefulWidget {
   const HomeLibraryOtherFiles({super.key, required this.files, required this.deleting, required this.onDelete});
@@ -439,7 +447,7 @@ class HomeLibraryOtherFiles extends StatefulWidget {
 }
 
 class _HomeLibraryOtherFilesState extends State<HomeLibraryOtherFiles> {
-  /// Each file's "Delete file" by name.
+  /// Each file's "Delete" by name.
   final _focus = <String, FocusNode>{};
 
   FocusNode _focusFor(String name) => _focus.putIfAbsent(name, () => FocusNode(debugLabel: 'Delete $name'));
@@ -507,7 +515,7 @@ class _HomeLibraryOtherFilesState extends State<HomeLibraryOtherFiles> {
                   const SizedBox(width: BrookieSpace.s2),
                   _DeleteButton(
                     focusNode: _focusFor(file.name),
-                    tooltip: 'Delete file',
+                    tooltip: 'Delete ${file.name}',
                     deleting: widget.deleting.contains(file.name),
                     onDelete: () => widget.onDelete(file),
                   ),

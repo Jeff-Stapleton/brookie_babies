@@ -16,11 +16,13 @@ import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/empty_state.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/admin_test_app.dart';
+import '../support/fake_firebase.dart';
 import '../support/fakes.dart';
 import '../support/local_first_admin_service.dart';
 
@@ -81,6 +83,43 @@ Future<void> _settleUploads(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 300));
   await tester.pump();
 }
+
+/// In-memory Firestore and Storage, sharing [log], for the page on the
+/// real FirebaseAdminService.
+typedef _Firebase = ({FakeFirestore db, FakeStorage storage, List<String> log});
+
+/// The page on the real FirebaseAdminService, over in-memory Firestore and
+/// Storage: the Harper family's ad hoc session 's1' with [photos] and a
+/// cached zip.
+Future<_Firebase> _pumpOnFirebase(WidgetTester tester, {bool ready = false, List<String> photos = _photos}) async {
+  final log = <String>[];
+  final firebase = (db: FakeFirestore(log: log), storage: FakeStorage(log: log), log: log);
+  firebase.db.docs['bookings/s1'] = {
+    'status': 'adhoc',
+    'name': 'The Harper family',
+    'email': 'harper@example.com',
+    'date': '2999-03-04',
+    'photosReady': ready,
+  };
+  firebase.storage.objects.addAll({
+    for (final name in photos) 'galleries/s1/$name': 'image/jpeg',
+    'gallery-zips/s1.zip': 'application/zip',
+  });
+  tester.view.physicalSize = const Size(1440, 900);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(testApp(
+    auth: FakeAuthService(signedInAs: studio, admin: true),
+    admin: FirebaseAdminService(firebase.db, firebase.storage, FakeFirebaseAuth(uid: studio.uid)),
+    home: const AdminSessionPage(sessionId: 's1'),
+  ));
+  await tester.pumpAndSettle();
+  return firebase;
+}
+
+/// Has Storage refuse to delete the session's cached zip, every time.
+void _zipWontDelete(_Firebase firebase) => firebase.storage.errors['delete gallery-zips/s1.zip'] =
+    FirebaseException(plugin: 'firebase_storage', code: 'retry-limit-exceeded');
 
 void main() {
   tearDown(LeaveWarning.reset);
@@ -896,6 +935,53 @@ void main() {
       expect(find.widgetWithText(InlineMessage, message), findsOneWidget);
       expect(find.text('Refresh the page to load the photos first.'), findsOneWidget);
       expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Upload photos')).onPressed, isNull);
+    });
+  });
+
+  // On the real service: deleting the zip follows a change that's already
+  // saved, so its failure isn't the change's.
+  group('a cached zip that won’t delete', () {
+    testWidgets('"Hide photos" hides them, saying nothing', (tester) async {
+      final firebase = await _pumpOnFirebase(tester, ready: true);
+      _zipWontDelete(firebase);
+
+      await tapInView(tester, find.text('Hide photos'));
+      await tester.pumpAndSettle();
+
+      expect(firebase.db.docs['bookings/s1']!['photosReady'], isFalse);
+      expect(find.text('Not ready'), findsOneWidget);
+      expect(find.byType(InlineMessage), findsNothing);
+    });
+
+    testWidgets('a photo deleted comes off the list, saying nothing', (tester) async {
+      final firebase = await _pumpOnFirebase(tester, ready: true);
+      _zipWontDelete(firebase);
+
+      await tapInView(tester, find.byTooltip('Delete IMG_2.jpg'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete photo'));
+      await tester.pumpAndSettle();
+
+      expect(firebase.storage.objects, isNot(contains('galleries/s1/IMG_2.jpg')));
+      expect(_listed(tester), ['IMG_1.jpg', 'edits/IMG_3.jpg']);
+      expect(find.text('2 photos'), findsOneWidget);
+      expect(find.byType(InlineMessage), findsNothing);
+    });
+
+    testWidgets('"Delete all photos" hides them, then deletes and counts every one', (tester) async {
+      final firebase = await _pumpOnFirebase(tester, ready: true);
+      _zipWontDelete(firebase);
+
+      await tapInView(tester, find.text('Delete all photos'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete all photos'));
+      await tester.pumpAndSettle();
+
+      expect(firebase.db.docs['bookings/s1']!['photosReady'], isFalse);
+      expect(firebase.storage.objects.keys, ['gallery-zips/s1.zip']);
+      expect(find.widgetWithText(EmptyState, 'No photos yet. Upload them above.'), findsOneWidget);
+      expect(find.text('Not ready'), findsOneWidget);
+      expect(find.byType(InlineMessage), findsNothing);
     });
   });
 

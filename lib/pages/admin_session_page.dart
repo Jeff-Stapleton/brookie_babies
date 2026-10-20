@@ -496,6 +496,8 @@ class _SessionBodyState extends State<_SessionBody> {
       try {
         await _admin.setPhotosReady(widget.sessionId, false);
       } catch (e) {
+        // Only hiding them fails it: the zip's deletion after is best
+        // effort.
         if (!mounted) return;
         setState(() {
           _deletingAll = null;

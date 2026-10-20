@@ -480,6 +480,19 @@ void main() {
       expect(storage.objects, isEmpty);
     });
 
+    test('a zip that won’t delete doesn’t fail the change: the old email’s links expire instead', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      storage.errors['delete gallery-zips/s1.zip'] = _storageError('unauthorized');
+      final session = testSession('s1', date: DateTime(2026, 11, 14), photosReady: true);
+
+      await admin.updateSession(session, _details(email: 'grandma@example.com'));
+
+      expect(db.docs['bookings/s1']!['email'], 'grandma@example.com');
+      expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects, hasLength(1));
+    });
+
     test('other changes, or the same email in capitals, leave the zip', () async {
       addAdHoc('s1');
       storage.objects['gallery-zips/s1.zip'] = 'application/zip';
@@ -552,17 +565,16 @@ void main() {
       expect(db.docs['bookings/s1']!['photosReady'], isFalse);
     });
 
-    test('a zip that won’t delete is an AdminException, the photos still hidden; trying again finishes', () async {
+    test('a zip that won’t delete doesn’t fail hiding them: links already given out expire instead', () async {
       addAdHoc('s1', photosReady: true);
       storage.objects['gallery-zips/s1.zip'] = 'application/zip';
       storage.errors['delete gallery-zips/s1.zip'] = _storageError('retry-limit-exceeded');
 
-      await expectLater(admin.setPhotosReady('s1', false), throwsA(_adminError(AdminErrorKind.offline)));
-      expect(db.docs['bookings/s1']!['photosReady'], isFalse);
-
-      storage.errors.clear();
       await admin.setPhotosReady('s1', false);
-      expect(storage.objects, isEmpty);
+
+      expect(db.docs['bookings/s1']!['photosReady'], isFalse);
+      expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects, hasLength(1));
     });
 
     test('a session that isn’t there is refused, as the rules refuse it', () async {
@@ -1056,6 +1068,16 @@ void main() {
       expect(log, isNot(contains('delete gallery-zips/s1.zip')));
     });
 
+    test('a zip that won’t delete doesn’t fail it: the photo is deleted, and links to it expire instead', () async {
+      storage.objects.addAll({photo.fullPath: 'image/jpeg', 'gallery-zips/s1.zip': 'application/zip'});
+      storage.errors['delete gallery-zips/s1.zip'] = _storageError('unknown');
+
+      await admin.deletePhoto(photo);
+
+      expect(log, ['delete galleries/s1/edits/a.jpg', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects.keys, ['gallery-zips/s1.zip']);
+    });
+
     test('fails as an AdminException', () async {
       storage.objects[photo.fullPath] = 'image/jpeg';
       storage.errors['delete galleries/s1/edits/a.jpg'] = _storageError('unauthorized');
@@ -1181,6 +1203,15 @@ void main() {
       expect(db.docs['bookings/s1']!['photosReady'], isFalse);
       expect(log, isNot(contains('delete gallery-zips/s1.zip')));
       expect(log, isNot(contains('delete bookings/s1')));
+    });
+
+    test('a zip that won’t delete stops it before the document: once that’s gone, nothing deletes the zip', () async {
+      addAdHoc('s1');
+      storage.errors['delete gallery-zips/s1.zip'] = _storageError('retry-limit-exceeded');
+
+      await expectLater(admin.deleteSession('s1'), throwsA(_adminError(AdminErrorKind.offline)));
+      expect(log, isNot(contains('delete bookings/s1')));
+      expect(storage.objects, contains('gallery-zips/s1.zip'));
     });
 
     test('deletes a few files at a time', () async {

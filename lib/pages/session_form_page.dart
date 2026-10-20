@@ -12,6 +12,7 @@ import 'package:brookie_babies/services/admin_service.dart';
 import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/photo_rules.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/leave_warning.dart';
 import 'package:brookie_babies/utilities/utils.dart';
 import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/busy_button.dart';
@@ -43,7 +44,13 @@ class SessionFormPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final adding = session == null;
     return Scaffold(
-      appBar: BrookieTopBar(title: adding ? 'Add a session' : 'Edit session', showAdminLink: false),
+      // No way off the page from the account menu but signing out, which
+      // asks first while there are changes to lose.
+      appBar: BrookieTopBar(
+        title: adding ? 'Add a session' : 'Edit session',
+        showAdminLink: false,
+        showSessionsLink: false,
+      ),
       body: AdminGate(child: _SessionForm(session: session, now: now)),
     );
   }
@@ -127,8 +134,9 @@ class _SessionFormState extends State<_SessionForm> {
 
   // Sessions are only ever saved with one of these, but a name the form
   // doesn't offer would trip the dropdown, so it starts on "No package".
-  late String? _package =
+  late final String? _startPackage =
       SessionRules.packageNames.contains(widget.session?.packageName) ? widget.session!.packageName : null;
+  late String? _package = _startPackage;
   late DateTime? _date = widget.session?.date;
   late _Time? _time = widget.session?.time;
 
@@ -157,8 +165,53 @@ class _SessionFormState extends State<_SessionForm> {
   bool _saving = false;
   String? _error;
 
+  /// Whether leaving would lose what's typed or chosen: on while any field
+  /// differs from how the form started, until it's saved.
+  bool _hasChanges = false;
+  bool _saved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final text in [_name, _email, _location]) {
+      text.addListener(_checkChanges);
+    }
+  }
+
+  void _checkChanges() {
+    final session = widget.session;
+    final changed = !_saved &&
+        (_name.text != (session?.name ?? '') ||
+            _email.text != (session?.email ?? '') ||
+            _location.text != (session?.location ?? '') ||
+            _package != _startPackage ||
+            _date != session?.date ||
+            _time != session?.time);
+    if (changed == _hasChanges) return;
+    LeaveWarning.set(this, changed);
+    setState(() => _hasChanges = changed);
+  }
+
+  /// Back (the top bar's, the browser's, Cancel) with changes to lose.
+  Future<void> _confirmLeave() async {
+    final leave = await showBrookieConfirm(
+      context,
+      title: 'Leave without saving?',
+      message: widget.session == null
+          ? 'The session you started adding will be lost.'
+          : 'The changes you made to this session will be lost.',
+      confirmLabel: 'Leave without saving',
+      cancelLabel: 'Keep editing',
+      destructive: true,
+    );
+    if (!leave || !mounted) return;
+    // Navigator.pop leaves whatever PopScope says.
+    Navigator.of(context).pop();
+  }
+
   @override
   void dispose() {
+    LeaveWarning.set(this, false);
     _name.dispose();
     _email.dispose();
     _location.dispose();
@@ -181,6 +234,7 @@ class _SessionFormState extends State<_SessionForm> {
     if (chosen == null || !mounted) return;
     setState(() => _date = chosen);
     field.didChange(chosen);
+    _checkChanges();
   }
 
   /// Takes keyboard focus to the first field that needs fixing.
@@ -244,6 +298,7 @@ class _SessionFormState extends State<_SessionForm> {
       if (session == null) {
         final id = await admin.createSession(details, id: _newId ??= admin.newSessionId());
         if (!mounted) return;
+        _markSaved();
         // Straight on to its photos; back from there is Admin, not this form.
         Navigator.of(context).pushReplacement(
           MaterialPageRoute<void>(builder: (context) => AdminSessionPage(sessionId: id)),
@@ -251,9 +306,15 @@ class _SessionFormState extends State<_SessionForm> {
       } else {
         await admin.updateSession(session, details);
         if (!mounted) return;
-        // Back to the session. (With nothing below, it stays, saved.)
-        final left = await Navigator.of(context).maybePop();
-        if (!left && mounted) setState(() => _saving = false);
+        _markSaved();
+        // Back to the session, past PopScope: nothing's left to lose. (With
+        // nothing below, it stays, saved.)
+        final navigator = Navigator.of(context);
+        if (navigator.canPop()) {
+          navigator.pop();
+        } else {
+          setState(() => _saving = false);
+        }
       }
     } catch (e) {
       if (e is! AdminException) log('Saving session ${session?.id ?? '(new)'} failed: $e');
@@ -265,12 +326,17 @@ class _SessionFormState extends State<_SessionForm> {
     }
   }
 
+  void _markSaved() {
+    _saved = true;
+    _checkChanges();
+  }
+
   @override
   Widget build(BuildContext context) {
     final adding = widget.session == null;
     final error = _error;
     const gap = SizedBox(height: BrookieSpace.s5);
-    return AdminFrame(
+    final form = AdminFrame(
       maxWidth: BrookieSize.readingWidth,
       child: Form(
         key: _form,
@@ -325,7 +391,10 @@ class _SessionFormState extends State<_SessionForm> {
                 (value: null, label: 'No package'),
                 for (final name in SessionRules.packageNames) (value: name, label: name),
               ],
-              onChanged: (value) => setState(() => _package = value),
+              onChanged: (value) {
+                setState(() => _package = value);
+                _checkChanges();
+              },
             ),
             gap,
             FormField<DateTime>(
@@ -349,7 +418,10 @@ class _SessionFormState extends State<_SessionForm> {
                 (value: null, label: 'No time'),
                 for (final time in _times) (value: time, label: SessionTime.clockLabel(time.hour, time.minute)),
               ],
-              onChanged: (value) => setState(() => _time = value),
+              onChanged: (value) {
+                setState(() => _time = value);
+                _checkChanges();
+              },
             ),
             gap,
             TextFormField(
@@ -388,6 +460,13 @@ class _SessionFormState extends State<_SessionForm> {
           ],
         ),
       ),
+    );
+    return PopScope(
+      canPop: !_hasChanges,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _confirmLeave();
+      },
+      child: form,
     );
   }
 }

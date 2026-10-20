@@ -7,9 +7,11 @@ import 'package:brookie_babies/pages/admin_session_page.dart';
 import 'package:brookie_babies/pages/session_form_page.dart';
 import 'package:brookie_babies/services/admin_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/leave_warning.dart';
 import 'package:brookie_babies/utilities/utils.dart';
 import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
+import 'package:brookie_babies/widgets/top_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -80,6 +82,8 @@ void main() {
   // Pinned, so a run that crosses midnight or a month reads the same day
   // everywhere. Late in the day, as the clock might be.
   final now = DateTime(2031, 2, 10, 23, 59);
+
+  tearDown(LeaveWarning.reset);
 
   group('adding', () {
     testWidgets('the fields, what each is for, and the one primary button', (tester) async {
@@ -297,16 +301,126 @@ void main() {
       expect(tester.widget<AdminSessionPage>(find.byType(AdminSessionPage)).sessionId, 'session-1');
     });
 
-    testWidgets('Cancel goes back without saving', (tester) async {
+    testWidgets('Cancel, untouched, goes straight back', (tester) async {
       final admin = FakeAdminService();
       await _pumpOver(tester, admin, SessionFormPage(now: now));
 
-      await tester.enterText(_field('Name'), 'The Novak family');
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
 
+      expect(find.byType(BrookieDialog), findsNothing);
       expect(find.text('Below'), findsOneWidget);
       expect(admin.calls, isEmpty);
+    });
+  });
+
+  group('leaving with changes', () {
+    testWidgets('anything typed or chosen: warns the browser and asks first, by Cancel or back', (tester) async {
+      final admin = FakeAdminService();
+      await _pumpOver(tester, admin, SessionFormPage(now: now));
+      expect(tester.widget<BrookieTopBar>(find.byType(BrookieTopBar)).showSessionsLink, isFalse);
+      expect(LeaveWarning.active.value, isFalse);
+
+      await tester.enterText(_field('Name'), 'The Novak family');
+      await tester.pump();
+      expect(LeaveWarning.active.value, isTrue);
+
+      for (final leave in [find.text('Cancel'), find.byTooltip('Back')]) {
+        await tester.tap(leave);
+        await tester.pumpAndSettle();
+        expect(find.text('Leave without saving?'), findsOneWidget);
+        expect(find.text('The session you started adding will be lost.'), findsOneWidget);
+        await tester.tap(_inDialog('Keep editing'));
+        await tester.pumpAndSettle();
+        expect(find.byType(SessionFormPage), findsOneWidget);
+        expect(find.text('The Novak family'), findsOneWidget);
+      }
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Leave without saving'));
+      await tester.pumpAndSettle();
+      expect(find.text('Below'), findsOneWidget);
+      expect(LeaveWarning.active.value, isFalse);
+      expect(admin.calls, isEmpty);
+    });
+
+    testWidgets('a choice counts, and undoing every change needs no asking', (tester) async {
+      await _pumpOver(tester, FakeAdminService(), SessionFormPage(now: now));
+
+      await _choose(tester, 'No package', 'Basic');
+      expect(LeaveWarning.active.value, isTrue);
+      await _choose(tester, 'Basic', 'No package');
+      await tester.enterText(_field('Email'), 'a');
+      await tester.enterText(_field('Email'), '');
+      await tester.pump();
+      expect(LeaveWarning.active.value, isFalse);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Below'), findsOneWidget);
+    });
+
+    testWidgets('the date counts too', (tester) async {
+      await _pumpOver(tester, FakeAdminService(), SessionFormPage(now: now));
+
+      await _chooseDay(tester, 15);
+
+      expect(LeaveWarning.active.value, isTrue);
+    });
+
+    testWidgets('editing: asks about the changes, and leaves the session as it was', (tester) async {
+      final session = testSession('s1', location: 'Liberty Park');
+      final admin = FakeAdminService(sessions: [session]);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: session));
+      expect(LeaveWarning.active.value, isFalse);
+
+      await tester.enterText(_field('Location (optional)'), 'The studio');
+      await tester.pump();
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      expect(find.text('The changes you made to this session will be lost.'), findsOneWidget);
+      await tester.tap(_inDialog('Leave without saving'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Below'), findsOneWidget);
+      expect(admin.sessions['s1']!.location, 'Liberty Park');
+    });
+
+    testWidgets('once saved, nothing to lose: no asking, no warning', (tester) async {
+      final admin = FakeAdminService(sessions: [testSession('s1')]);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: testSession('s1')));
+
+      await tester.enterText(_field('Name'), 'The Harpers');
+      await tapInView(tester, find.text('Save changes'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BrookieDialog), findsNothing);
+      expect(find.text('Below'), findsOneWidget);
+      expect(LeaveWarning.active.value, isFalse);
+    });
+
+    testWidgets('a save that fails keeps the warning', (tester) async {
+      final admin = FakeAdminService()..errors['createSession'] = adminError(AdminErrorKind.offline);
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
+
+      await _fillIn(tester);
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(LeaveWarning.active.value, isTrue);
+    });
+
+    testWidgets('adding: once saved, on to the session with the warning off', (tester) async {
+      final admin = FakeAdminService();
+      await _pumpOver(tester, admin, SessionFormPage(now: now));
+
+      await _fillIn(tester);
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AdminSessionPage), findsOneWidget);
+      expect(LeaveWarning.active.value, isFalse);
     });
   });
 

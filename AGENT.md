@@ -222,8 +222,9 @@ Admin flows (accounts with the `admin: true` claim, from `scripts/grant-admin.sh
    sessions" and "Sign out") → `AdminPage.open`, which puts `AdminPage` over
    the home page; the named route `/admin` (`/#/admin`) opens it too. Every
    admin page wraps its body in `AdminGate`, which
-   checks `isAdmin(refresh: true)` per uid and otherwise asks to sign in or
-   says the account isn't an admin.
+   checks `isAdmin()` per uid (and `isAdmin(refresh: true)` only after a
+   "no", so moving between admin pages needs no network) and otherwise asks
+   to sign in or says the account isn't an admin.
 6. "Add a session" → `SessionFormPage` → `AdminService.createSession` (an ad
    hoc `bookings` doc: `status: 'adhoc'`, name, email, date, ...) → replaced by
    `AdminSessionPage` for the new id. A session card on Admin opens the same page.

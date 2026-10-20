@@ -16,6 +16,26 @@ const _notAdminText =
     'This account (parent@example.com) isn’t an admin. Sign out and sign in with the studio’s Google account.';
 const _errorText = 'We couldn’t check your access. Refresh the page to try again.';
 
+/// Signed in as the studio, with a token that says [cached] about the
+/// admin claim. A fresh one says [admin], or fails with [refreshError].
+class _TokenAuth extends FakeAuthService {
+  _TokenAuth({required this.cached, super.admin, this.refreshError}) : super(signedInAs: _studio);
+
+  final bool cached;
+  final Object? refreshError;
+
+  @override
+  Future<bool> isAdmin({bool refresh = false}) {
+    if (refresh && refreshError != null) {
+      isAdminCalls.add(refresh);
+      return Future.error(refreshError!);
+    }
+    if (refresh) return super.isAdmin(refresh: true);
+    isAdminCalls.add(refresh);
+    return Future.value(cached);
+  }
+}
+
 void main() {
   Future<void> pumpGate(
     WidgetTester tester,
@@ -56,15 +76,30 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Admin only'), findsOneWidget);
-    expect(auth.isAdminCalls, [true]);
+    expect(auth.isAdminCalls, [false]);
   });
 
-  testWidgets('an admin sees the page, checked with a fresh token', (tester) async {
+  testWidgets('an admin sees the page on the token the app has, with no fresh one to wait for', (tester) async {
     final auth = FakeAuthService(signedInAs: _studio, admin: true);
     await pumpGate(tester, auth);
 
     expect(find.text('Admin only'), findsOneWidget);
-    expect(auth.isAdminCalls, [true]);
+    expect(auth.isAdminCalls, [false]);
+  });
+
+  testWidgets('a “no” is checked again with a fresh token, so someone just made an admin gets in', (tester) async {
+    final auth = _TokenAuth(cached: false, admin: true);
+    await pumpGate(tester, auth);
+
+    expect(find.text('Admin only'), findsOneWidget);
+    expect(auth.isAdminCalls, [false, true]);
+  });
+
+  testWidgets('a “no” that can’t be checked again says to refresh', (tester) async {
+    await pumpGate(tester, _TokenAuth(cached: false, admin: true, refreshError: Exception('offline')));
+
+    expect(find.widgetWithText(InlineMessage, _errorText), findsOneWidget);
+    expect(find.text('Admin only'), findsNothing);
   });
 
   testWidgets('while checking: a spinner, and not the page', (tester) async {
@@ -93,6 +128,7 @@ void main() {
 
     expect(find.text(_notAdminText), findsOneWidget);
     expect(find.text('Admin only'), findsNothing);
+    expect(auth.isAdminCalls, [false, true]);
     await tester.tap(find.widgetWithText(OutlinedButton, 'Sign out'));
     await tester.pumpAndSettle();
 
@@ -119,7 +155,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Admin only'), findsOneWidget);
-    expect(auth.isAdminCalls, [true, true]);
+    expect(auth.isAdminCalls, [false, true, false]);
   });
 
   // Every state the gate shows on its own, in both themes, on a phone and a

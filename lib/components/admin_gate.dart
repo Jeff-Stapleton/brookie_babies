@@ -4,6 +4,7 @@ import 'package:brookie_babies/components/account_button.dart';
 import 'package:brookie_babies/components/sign_in_dialog.dart';
 import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/services/app_services.dart';
+import 'package:brookie_babies/services/auth_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/widgets/content_width.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
@@ -13,8 +14,10 @@ import 'package:flutter/material.dart';
 /// asked to sign in with the studio's account.
 ///
 /// The check is for the page's sake: firestore.rules and storage.rules
-/// refuse non-admins whatever the app shows. Each user is checked with a
-/// fresh token, so someone just made an admin only needs to refresh.
+/// refuse non-admins whatever the app shows. The token the app has
+/// answers, so moving between admin pages needs no network; only a "no" is
+/// checked again with a fresh token, so someone just made an admin only
+/// needs to open the page again.
 class AdminGate extends StatelessWidget {
   const AdminGate({super.key, required this.child});
 
@@ -75,8 +78,12 @@ class _AdminCheckState extends State<_AdminCheck> {
   @override
   void initState() {
     super.initState();
-    _isAdmin = AppServices.of(context).auth.isAdmin(refresh: true);
+    _isAdmin = _check(AppServices.of(context).auth);
   }
+
+  // The first check after a page load fetches a new token anyway; after
+  // that, a fresh one only for a "no", which it might change.
+  static Future<bool> _check(AuthService auth) async => await auth.isAdmin() || await auth.isAdmin(refresh: true);
 
   @override
   Widget build(BuildContext context) {

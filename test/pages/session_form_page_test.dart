@@ -154,6 +154,29 @@ void main() {
           .focusNode.hasFocus, isTrue);
     });
 
+    testWidgets('a missing date, out of view, is scrolled to as it’s focused', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(390, 300));
+      await tester.enterText(_field('Name'), 'The Novak family');
+      await tester.enterText(_field('Email'), 'novak@example.com');
+      // Or the email field, focused, keeps itself in view, and scrolls back
+      // to itself once its caret's scroll has run.
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Add session'));
+      await tester.pumpAndSettle();
+      final view = tester.getRect(find.byType(Scrollable).first);
+      expect(tester.getRect(_dateField()).bottom, lessThan(view.top), reason: 'starts out of view');
+
+      await tester.tap(find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(Focus.of(tester.element(find.text('Date'))).hasPrimaryFocus, isTrue);
+      final field = tester.getRect(_dateField());
+      expect(field.top, greaterThanOrEqualTo(view.top));
+      expect(field.bottom, lessThanOrEqualTo(view.bottom));
+      expect(find.text('Choose the day of the session.').hitTestable(), findsOneWidget);
+    });
+
     testWidgets('checks each field against what the rules accept, and clears as it’s fixed', (tester) async {
       await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 

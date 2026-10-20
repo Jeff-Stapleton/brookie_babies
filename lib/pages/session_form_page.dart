@@ -255,7 +255,9 @@ class _SessionFormState extends State<_SessionForm> {
     } else {
       first = null;
     }
-    first?.requestFocus();
+    // Scrolled to as well: the date field doesn't scroll itself into view
+    // when focused, as text fields do.
+    if (first != null) requestFocusInView(first);
   }
 
   // The button stays enabled while saving (BusyButton), so keyboard focus

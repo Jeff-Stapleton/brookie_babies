@@ -439,6 +439,10 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
 - Hiding photos, deleting a photo, and changing an ad hoc session's email
   delete the cached `gallery-zips/<id>.zip` (admins may only delete it), so
   signed links already handed out stop working; the next download rebuilds it.
+  Best effort: a zip that won't delete is logged and the change still succeeds
+  (links then expire within the hour), except in `deleteSession`, which stops
+  so the document is never deleted ahead of its zip. "Delete all photos"
+  deletes it once, while hiding, then `deletePhoto(deleteZip: false)` per photo.
 - Download IDs: `getGalleryDownloadUrl` only accepts booking IDs matching
   `^[A-Za-z0-9_-]{1,128}$` (`BOOKING_ID_PATTERN`); the session page mirrors it
   and warns instead of offering "Make photos available".

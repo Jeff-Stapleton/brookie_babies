@@ -216,7 +216,7 @@ says so by **Upload photos**).
 
 ## Delivering photos
 
-Families download their photos from **Your sessions** once the session's `photosReady` is `true` and its `status` is `paid` or `adhoc`. The **Download all photos** button appears on the session's card even before the session date, so check that the session is right before making its photos available. Photos are never public through the site: families get a zip download link that expires after one hour. Hiding the photos, deleting one, or changing who an ad hoc session is shared with also deletes the cached zip, so links already handed out stop working at once.
+Families download their photos from **Your sessions** once the session's `photosReady` is `true` and its `status` is `paid` or `adhoc`. The **Download all photos** button appears on the session's card even before the session date, so check that the session is right before making its photos available. Photos are never public through the site: families get a zip download link that expires after one hour. Hiding the photos, deleting one, or changing who an ad hoc session is shared with also deletes the cached zip, so links already handed out stop working at once (if that delete fails, the change still goes through and those links expire within the hour).
 
 ### In the admin portal
 

@@ -646,18 +646,33 @@ void main() {
 
     photoTest('photos on the home page, saved or not, can’t be deleted, and the page says why', (tester) async {
       await pumpPage(tester);
+      expect(find.text('Photos on the home page can’t be deleted. Remove them from the home page first.'),
+          findsOneWidget);
       // Saved, then taken off but not saved: still on the site.
       await tapAndSettle(tester, rowButton('IMG_05.jpg', Icons.close));
       // Not saved yet.
       await tapAndSettle(tester, check('IMG_08.jpg'));
 
-      for (final name in ['IMG_01.jpg', 'IMG_05.jpg', 'IMG_08.jpg']) {
+      for (final name in ['IMG_01.jpg', 'IMG_08.jpg']) {
         await reveal(tester, tile(name));
         final delete = tester.widget<IconButton>(deleteButton(tile(name)));
         expect(delete.onPressed, isNull, reason: name);
         expect(delete.tooltip, 'Can’t delete $name: remove it from the home page first', reason: name);
       }
+      // Already taken off: saving is what's left.
+      final removed = tester.widget<IconButton>(deleteButton(tile('IMG_05.jpg')));
+      expect(removed.onPressed, isNull);
+      expect(removed.tooltip, 'Can’t delete IMG_05.jpg: the site shows it until you save the home page');
       expect(iconEnabled(tester, deleteButton(tile('IMG_02.jpg'))), isTrue);
+      expect(
+        find.text('Photos on the home page can’t be deleted. Remove them from the home page and save first: until '
+            'you save, the site still shows the ones you removed.'),
+        findsOneWidget,
+      );
+
+      await tapAndSettle(tester, save());
+
+      expect(iconEnabled(tester, deleteButton(tile('IMG_05.jpg'))), isTrue);
       expect(find.text('Photos on the home page can’t be deleted. Remove them from the home page first.'),
           findsOneWidget);
     });

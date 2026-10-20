@@ -510,10 +510,15 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   Widget _librarySection(List<StoredPhoto> library) {
     final c = BrookieColors.of(context);
     final photoCount = library.where((file) => StoragePortfolioService.isPhoto(file.name)).length;
+    // Taken off the home page, but on the site until it's saved.
+    final removed = _saved.any((name) => !_chosen.contains(name));
     final notes = [
       if (_chosen.length >= PhotoRules.homeMaxPhotos)
         'The home page has ${PhotoRules.homeMaxPhotos} photos, the most it shows. Remove one to add another.',
-      if (_chosen.isNotEmpty || _saved.isNotEmpty)
+      if (removed)
+        'Photos on the home page can’t be deleted. Remove them from the home page and save first: until you '
+            'save, the site still shows the ones you removed.'
+      else if (_chosen.isNotEmpty)
         'Photos on the home page can’t be deleted. Remove them from the home page first.',
     ];
     return Column(

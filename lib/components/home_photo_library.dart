@@ -99,7 +99,8 @@ class HomePhotoLibrary extends StatefulWidget {
   /// PhotoRules.homeMaxPhotos are).
   final bool canAdd;
 
-  /// Names that can't be deleted: on the home page, saved or not.
+  /// Names that can't be deleted: on the home page, saved or not, or taken
+  /// off it but still on the site until it's saved.
   final Set<String> locked;
 
   /// Names being deleted.
@@ -220,6 +221,15 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
     final name = photo.name;
     final selected = widget.chosen.contains(name);
     final deleting = widget.deleting.contains(name);
+    final String? lockedReason;
+    if (!widget.locked.contains(name)) {
+      lockedReason = null;
+    } else if (selected) {
+      lockedReason = 'Can’t delete $name: remove it from the home page first';
+    } else {
+      // Taken off already: saving is what's left.
+      lockedReason = 'Can’t delete $name: the site shows it until you save the home page';
+    }
     return _LibraryTile(
       key: ValueKey(name),
       photo: photo,
@@ -227,7 +237,7 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
       focus: _focusFor(name),
       selected: selected,
       onToggle: !deleting && (selected || widget.canAdd) ? () => widget.onToggle(name) : null,
-      locked: widget.locked.contains(name),
+      lockedReason: lockedReason,
       deleting: deleting,
       onDelete: () => widget.onDelete(photo),
     );
@@ -242,7 +252,7 @@ class _LibraryTile extends StatelessWidget {
     required this.focus,
     required this.selected,
     required this.onToggle,
-    required this.locked,
+    required this.lockedReason,
     required this.deleting,
     required this.onDelete,
   });
@@ -256,7 +266,9 @@ class _LibraryTile extends StatelessWidget {
   /// it's being deleted.
   final VoidCallback? onToggle;
 
-  final bool locked;
+  /// Why it can't be deleted, if it can't.
+  final String? lockedReason;
+
   final bool deleting;
   final VoidCallback onDelete;
 
@@ -285,7 +297,7 @@ class _LibraryTile extends StatelessWidget {
             _DeleteButton(
               focusNode: focus.delete,
               tooltip: 'Delete ${photo.name}',
-              lockedReason: locked ? 'Can’t delete ${photo.name}: remove it from the home page first' : null,
+              lockedReason: lockedReason,
               deleting: deleting,
               onDelete: onDelete,
             ),

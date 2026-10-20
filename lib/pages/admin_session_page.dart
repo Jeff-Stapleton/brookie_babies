@@ -175,8 +175,10 @@ class _SessionBodyState extends State<_SessionBody> {
 
   // Each button keeps focus as it changes: the readiness button from "Make
   // photos available" to "Hide photos", the upload button from primary to
-  // outlined. A deleted photo hands focus to the next one.
+  // outlined. A deleted photo hands focus to the next one; a button its own
+  // press removes or switches off hands it to a neighbour.
   final _readyFocus = FocusNode(debugLabel: 'Photos ready');
+  final _clearFocus = FocusNode(debugLabel: 'Clear upload list');
   final _uploadFocus = FocusNode(debugLabel: 'Upload photos');
   final _deleteAllFocus = FocusNode(debugLabel: 'Delete all photos');
   final _photoFocus = <String, FocusNode>{};
@@ -203,6 +205,7 @@ class _SessionBodyState extends State<_SessionBody> {
       ..removeListener(_queueChanged)
       ..dispose();
     _readyFocus.dispose();
+    _clearFocus.dispose();
     _uploadFocus.dispose();
     _deleteAllFocus.dispose();
     for (final node in _photoFocus.values) {
@@ -358,8 +361,34 @@ class _SessionBodyState extends State<_SessionBody> {
     } catch (e) {
       if (mounted) setState(() => _readyError = _messageFor(e, 'That didn’t save. Try again.'));
     } finally {
-      if (mounted) setState(() => _savingReadyTo = null);
+      if (mounted) {
+        // "Hide photos" pressed while photos upload becomes a switched-off
+        // "Make photos available".
+        _handFocusOn(_readyFocus, [_uploadFocus, _deleteAllFocus]);
+        setState(() => _savingReadyTo = null);
+      }
     }
+  }
+
+  /// If [from] has focus and the next frame takes it away (its button gone
+  /// or switched off), gives it to the first of [to] that can take it,
+  /// rather than leaving it at the top of the page.
+  void _handFocusOn(FocusNode from, List<FocusNode> to) {
+    if (!_focusIsOn(from)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Still there and switched on, it keeps focus. (Its own hasFocus
+      // only catches up after this.)
+      if (!mounted || (from.context?.mounted == true && from.canRequestFocus)) return;
+      final next = to.where((node) => node.context?.mounted == true && node.canRequestFocus).firstOrNull;
+      next?.requestFocus();
+    });
+  }
+
+  /// "Clear upload list" goes with the failures it clears; focus goes up to
+  /// "Make photos available", which they were holding back.
+  void _clearUploads() {
+    _handFocusOn(_clearFocus, [_readyFocus, _uploadFocus]);
+    _queue.clearFinished();
   }
 
   /// Whether the page shows [booking]'s photos as available. While a change
@@ -695,7 +724,8 @@ class _SessionBodyState extends State<_SessionBody> {
         if (reason != null) ...[
           const SizedBox(height: BrookieSpace.s2),
           Text(reason, style: BrookieType.small.copyWith(color: c.inkSoft)),
-          if (failuresInTheWay) TextButton(onPressed: _queue.clearFinished, child: const Text('Clear upload list')),
+          if (failuresInTheWay)
+            TextButton(onPressed: _clearUploads, focusNode: _clearFocus, child: const Text('Clear upload list')),
         ],
         if (ready && _addedWhileReady.isNotEmpty) ...[
           const SizedBox(height: BrookieSpace.s4),

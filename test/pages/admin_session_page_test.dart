@@ -478,6 +478,37 @@ void main() {
       expect(find.widgetWithText(FilledButton, 'Make photos available'), findsOneWidget);
     });
 
+    testWidgets('keyboard: "Clear upload list" hands focus to "Make photos available"', (tester) async {
+      final picker = FakePhotoPicker();
+      await _pumpSession(tester, picker: picker);
+      await _upload(tester, picker, ['notes.txt']);
+      await _settleUploads(tester);
+      Focus.of(tester.element(find.text('Clear upload list'))).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Clear upload list'), findsNothing);
+      expect(hasFocus(tester, find.text('Make photos available')), isTrue);
+    });
+
+    testWidgets('keyboard: "Hide photos" while uploading hands focus to "Upload photos"', (tester) async {
+      final picker = FakePhotoPicker();
+      await _pumpSession(tester, admin: _service(ready: true), picker: picker);
+      await _upload(tester, picker, ['IMG_4.jpg']);
+      Focus.of(tester.element(find.text('Hide photos'))).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      // It's "Make photos available" now, switched off until the upload ends.
+      expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Make photos available')).onPressed,
+          isNull);
+      expect(hasFocus(tester, find.text('Upload photos')), isTrue);
+    });
+
     testWidgets('a failed upload says why, and can be retried', (tester) async {
       final admin = _service();
       final picker = FakePhotoPicker();

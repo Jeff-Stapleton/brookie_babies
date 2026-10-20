@@ -362,7 +362,8 @@ class FakeAdminService implements AdminService {
   /// Has the live streams emit the current state again.
   void notifyChanged() => _changes.add(null);
 
-  /// Fails the live streams that are running.
+  /// Fails the live streams that are running, which then end, as
+  /// Firestore's do.
   void failLiveStreams(Object error) => _changes.addError(error);
 
   /// The uploads that haven't finished.
@@ -395,7 +396,17 @@ class FakeAdminService implements AdminService {
           return;
         }
         controller.add(current());
-        final changes = _changes.stream.listen((_) => controller.add(current()), onError: controller.addError);
+        late final StreamSubscription<void> changes;
+        changes = _changes.stream.listen(
+          (_) => controller.add(current()),
+          // Firestore ends a listener after its first error.
+          onError: (Object error) {
+            changes.cancel();
+            controller
+              ..addError(error)
+              ..close();
+          },
+        );
         controller.onCancel = changes.cancel;
       });
 

@@ -130,6 +130,27 @@ void main() {
       expect(errors, hasLength(1));
     });
 
+    test('a live stream that fails ends there, as Firestore’s do', () async {
+      final admin = FakeAdminService(sessions: [testSession('s1')]);
+      final seen = <String>[];
+      var done = false;
+      admin.watchSession('s1').listen(
+            (lookup) => seen.add('value'),
+            onError: (Object _) => seen.add('error'),
+            onDone: () => done = true,
+          );
+      await pumpEventQueue();
+
+      admin.failLiveStreams(adminError(AdminErrorKind.denied));
+      admin.notifyChanged();
+      await pumpEventQueue();
+
+      expect(seen, ['value', 'error']);
+      expect(done, isTrue);
+      // Others listen afresh.
+      expect(await admin.watchSession('s1').first, isA<SessionFound>());
+    });
+
     test('writes take writeDelay', () async {
       final admin = FakeAdminService(sessions: [testSession('s1')])
         ..writeDelay = const Duration(milliseconds: 30);

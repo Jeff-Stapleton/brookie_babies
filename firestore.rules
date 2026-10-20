@@ -5,19 +5,165 @@ rules_version = '2';
 // Only what is matched below is allowed; everything else is denied. Cloud
 // Functions (Admin SDK) and the Firebase console bypass these rules, so they
 // can still create and edit bookings.
+//
+// Admins are accounts with the custom claim `admin: true`, granted by the
+// project owner with scripts/grant-admin.sh. The admin pages write directly
+// from the app, so these rules are the only check on what they write. The app
+// (lib/services/admin_service.dart) checks the same constraints before
+// writing, so a rejection here only ever means a real access problem: change
+// both together.
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // bookings/{bookingId}: {uid, email, packageName, date, time, location,
-    // status, photosReady, createdAt}. Written only by the server or the
-    // photographer; a signed-in customer can read their own.
+    // The same check as in storage.rules. A missing claim reads as false.
+    function isAdmin() {
+      return request.auth != null && request.auth.token.get('admin', false) == true;
+    }
+
+    // bookings/{bookingId}. Customers' bookings: {uid, email, packageName,
+    // date, time, location, status, photosReady, createdAt}, written only by
+    // the server or by the photographer in the console. Ad hoc sessions (for
+    // family and friends, no payment): {status: 'adhoc', name, email,
+    // packageName?, date, time?, location?, photosReady, createdAt,
+    // createdBy}, written by admins; they have no uid, because the guest is
+    // known only by the Google email the session is shared with.
     //
-    // Queries must filter on the caller's uid
-    // (`where('uid', isEqualTo: currentUser.uid)`), or Firestore refuses the
-    // whole query instead of filtering it.
+    // Readers:
+    //   - a signed-in customer: bookings carrying their uid;
+    //   - an ad hoc guest: ad hoc sessions whose email is the one they
+    //     verified with Google (the session's email is saved lowercase; the
+    //     token's may have capitals);
+    //   - admins: everything.
+    // getGalleryDownloadUrl (functions/src/gallery.ts) lets the same
+    // customers and guests download the photos. On a booking without a uid
+    // the first check is an error, which counts as false between the ||s, so
+    // the others decide.
+    //
+    // Rules aren't filters: a query must match one of these on its own, i.e.
+    // `where('uid', isEqualTo: uid)` for customers, and
+    // `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: email)`
+    // (the lowercased email) for guests, or Firestore refuses the whole query
+    // instead of filtering it.
     match /bookings/{bookingId} {
-      allow get, list: if request.auth != null
-                       && resource.data.uid == request.auth.uid;
+      allow get, list: if (request.auth != null
+                           && resource.data.uid == request.auth.uid)
+                       || (request.auth != null
+                           && resource.data.status == 'adhoc'
+                           && request.auth.token.get('email_verified', false) == true
+                           && resource.data.email == request.auth.token.email.lower())
+                       || isAdmin();
+
+      // Admins create ad hoc sessions only, never a booking with a uid:
+      // customers' bookings come from payments.
+      allow create: if isAdmin()
+                    && request.resource.data.keys().hasAll(
+                         ['status', 'name', 'email', 'date', 'photosReady',
+                          'createdAt', 'createdBy'])
+                    && request.resource.data.keys().hasOnly(
+                         ['status', 'name', 'email', 'packageName', 'date', 'time',
+                          'location', 'photosReady', 'createdAt', 'createdBy'])
+                    && request.resource.data.status == 'adhoc'
+                    && validName(request.resource.data)
+                    && validEmail(request.resource.data)
+                    && validDate(request.resource.data)
+                    && (!('packageName' in request.resource.data)
+                        || validPackageName(request.resource.data))
+                    && (!('time' in request.resource.data)
+                        || validTime(request.resource.data))
+                    && (!('location' in request.resource.data)
+                        || validLocation(request.resource.data))
+                    && request.resource.data.photosReady == false
+                    && request.resource.data.createdAt == request.time
+                    && request.resource.data.createdBy == request.auth.uid;
+
+      // Every admin update stamps updatedAt (serverTimestamp) and changes
+      // only the keys allowed for that kind of booking. Only what changes is
+      // validated: bookings typed into the console may hold odd values in
+      // fields nobody touches. uid, status, createdAt and createdBy never
+      // change, so a booking never moves between customer and guest.
+      allow update: if isAdmin()
+                    && request.resource.data.updatedAt == request.time
+                    && (resource.data.get('status', null) == 'adhoc'
+                        ? validAdHocUpdate()
+                        : changedKeys().hasOnly(['photosReady', 'updatedAt'])
+                          && validPhotosReadyChange());
+
+      // Customers' bookings are records of a payment; only ad hoc sessions
+      // can be deleted.
+      allow delete: if isAdmin() && resource.data.get('status', null) == 'adhoc';
+    }
+
+    // Ad hoc session fields. Each takes the document's data, so create and
+    // update share them.
+    function validName(data) {
+      return data.name is string
+        && data.name == data.name.trim()
+        && data.name.size() >= 1
+        && data.name.size() <= 100;
+    }
+    function validEmail(data) {
+      return data.email is string
+        && data.email == data.email.trim().lower()
+        && data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+    }
+    function validPackageName(data) {
+      return data.packageName in ['Basic', 'Premium', 'Ultimate'];
+    }
+    // YYYY-MM-DD and 24-hour HH:mm, as Booking.fromMap reads them.
+    function validDate(data) {
+      return data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+    function validTime(data) {
+      return data.time is string && data.time.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+    }
+    function validLocation(data) {
+      return data.location is string && data.location.size() <= 200;
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+    function removedKeys() {
+      return request.resource.data.diff(resource.data).removedKeys();
+    }
+    function validPhotosReadyChange() {
+      return !('photosReady' in changedKeys())
+        || request.resource.data.photosReady is bool;
+    }
+
+    // An ad hoc session's details can be edited. Only the optional fields
+    // can be removed (FieldValue.delete()); any field that changes must be
+    // valid, as on create.
+    function validAdHocUpdate() {
+      let data = request.resource.data;
+      let changed = changedKeys();
+      return changed.hasOnly(['name', 'email', 'packageName', 'date', 'time',
+                              'location', 'photosReady', 'updatedAt'])
+        && removedKeys().hasOnly(['packageName', 'time', 'location'])
+        && (!('name' in changed) || validName(data))
+        && (!('email' in changed) || validEmail(data))
+        && (!('date' in changed) || validDate(data))
+        && validPhotosReadyChange()
+        && (!('packageName' in changed) || !('packageName' in data)
+            || validPackageName(data))
+        && (!('time' in changed) || !('time' in data) || validTime(data))
+        && (!('location' in changed) || !('location' in data)
+            || validLocation(data));
+    }
+
+    // site/home: {photos, updatedAt, updatedBy}. The home page's photos in
+    // order, as file names in Storage _admin/gallery/: the full-screen photo,
+    // then up to six featured (FeaturedPhotos.maxCount). Anyone may read it;
+    // admins save it whole with set().
+    match /site/home {
+      allow get: if true;
+      allow create, update: if isAdmin()
+                            && request.resource.data.keys().hasOnly(
+                                 ['photos', 'updatedAt', 'updatedBy'])
+                            && request.resource.data.photos is list
+                            && request.resource.data.photos.size() <= 7
+                            && request.resource.data.updatedAt == request.time
+                            && request.resource.data.updatedBy == request.auth.uid;
     }
   }
 }

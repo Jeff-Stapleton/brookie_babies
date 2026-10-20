@@ -19,6 +19,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../support/admin_test_app.dart';
 import '../support/fakes.dart';
+import '../support/local_first_admin_service.dart';
 
 const _photos = ['IMG_1.jpg', 'IMG_2.jpg', 'edits/IMG_3.jpg'];
 
@@ -309,6 +310,42 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpAndSettle();
       expect(hasFocus(tester, find.text('Hide photos')), isTrue);
+    });
+
+    testWidgets('the pressed button stays busy until the server has the change, though it shows locally at once',
+        (tester) async {
+      final admin = LocalFirstAdminService(
+        sessions: [testSession('s1')],
+        sessionPhotos: {'s1': _photos},
+      )..writeDelay = const Duration(seconds: 1);
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.text('Make photos available'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Make photos available'));
+      await tester.pump();
+      await tester.pump(kThemeAnimationDuration);
+
+      expect(admin.sessions['s1']!.photosReady, isTrue);
+      expect(find.text('Making photos available…'), findsOneWidget);
+      expect(find.text('Hiding photos…'), findsNothing);
+      expect(find.text('Not ready'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(OutlinedButton, 'Hide photos'), findsOneWidget);
+      expect(find.text('Ready to download'), findsOneWidget);
+
+      await tester.tap(find.text('Hide photos'));
+      await tester.pump();
+
+      expect(admin.sessions['s1']!.photosReady, isFalse);
+      expect(find.text('Hiding photos…'), findsOneWidget);
+      expect(find.text('Making photos available…'), findsNothing);
+      expect(find.text('Ready to download'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(FilledButton, 'Make photos available'), findsOneWidget);
+      expect(find.text('Not ready'), findsOneWidget);
     });
 
     for (final (status, note) in [

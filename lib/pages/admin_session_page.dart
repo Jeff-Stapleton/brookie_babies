@@ -147,7 +147,9 @@ class _SessionBodyState extends State<_SessionBody> {
   /// not on every bit of progress (UploadProgressList follows that).
   ({bool busy, int items, int failed, int done})? _queueSummary;
 
-  bool _savingReady = false;
+  /// The photosReady being saved; null when not saving.
+  bool? _savingReadyTo;
+  bool get _savingReady => _savingReadyTo != null;
   String? _readyError;
 
   /// Progress through "Delete all photos"; null when not deleting.
@@ -327,7 +329,7 @@ class _SessionBodyState extends State<_SessionBody> {
   Future<void> _setReady(bool ready) async {
     if (_savingReady) return;
     setState(() {
-      _savingReady = true;
+      _savingReadyTo = ready;
       _readyError = null;
     });
     try {
@@ -335,9 +337,19 @@ class _SessionBodyState extends State<_SessionBody> {
     } catch (e) {
       if (mounted) setState(() => _readyError = _messageFor(e, 'That didn’t save. Try again.'));
     } finally {
-      if (mounted) setState(() => _savingReady = false);
+      if (mounted) setState(() => _savingReadyTo = null);
     }
   }
+
+  /// Whether the page shows [booking]'s photos as available. While a change
+  /// saves it shows them as they were: the session's local copy changes at
+  /// once (Firestore's latency compensation), but families only see the
+  /// change once the server has it, and the pressed button stays busy
+  /// until then.
+  bool _shownReady(Booking booking) => switch (_savingReadyTo) {
+        final saving? => !saving,
+        null => booking.photosReady,
+      };
 
   FocusNode _focusFor(StoredPhoto photo) =>
       _photoFocus.putIfAbsent(photo.fullPath, () => FocusNode(debugLabel: 'Delete ${photo.name}'));
@@ -563,7 +575,7 @@ class _SessionBodyState extends State<_SessionBody> {
   /// changes it.
   Widget _readiness(BuildContext context, Booking booking) {
     final c = BrookieColors.of(context);
-    final ready = booking.photosReady;
+    final ready = _shownReady(booking);
     final reason = ready ? null : _notReadyReason();
     // Failed uploads are the only thing holding it back, and the admin may
     // choose to go ahead without them.
@@ -643,7 +655,7 @@ class _SessionBodyState extends State<_SessionBody> {
     final deletingAll = _deletingAll;
     final error = _deleteError;
     // Primary until the photos can be made available; then that is.
-    final primary = !booking.photosReady && _notReadyReason() != null;
+    final primary = !_shownReady(booking) && _notReadyReason() != null;
     final canUpload = photos != null && deletingAll == null && !_deletingSession;
     final upload = primary
         ? FilledButton.icon(

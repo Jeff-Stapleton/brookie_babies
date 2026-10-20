@@ -49,8 +49,14 @@ class _HomePageState extends State<HomePage> {
   final _failedPhotos = <Uri>{};
 
   /// Counts photo loads, so an older one that answers late can't replace a
-  /// newer one.
+  /// newer one's photos.
   int _photoLoads = 0;
+
+  /// The load whose photos are shown; 0 for none yet.
+  int _shownLoad = 0;
+
+  /// Loads still waiting for their answer.
+  final _pendingLoads = <int>{};
 
   @override
   void initState() {
@@ -80,18 +86,25 @@ class _HomePageState extends State<HomePage> {
   Future<void> _loadPhotos() async {
     final load = ++_photoLoads;
     final portfolio = AppServices.of(context).portfolio;
+    _pendingLoads.add(load);
     List<Uri> photos;
     try {
       photos = await portfolio.photoUrls(limit: 1 + FeaturedPhotos.maxCount);
     } catch (e) {
       log('Could not list the portfolio photos: $e');
-      // A reload that fails keeps the photos already shown.
-      if (_photos != null) return;
+      // A load that fails keeps the photos already shown, or waits for an
+      // older load's.
+      if (_photos != null || _pendingLoads.any((other) => other < load)) return;
       // The page still works without photographs, so carry on without them.
       photos = const [];
+    } finally {
+      _pendingLoads.remove(load);
     }
-    if (!mounted || load != _photoLoads) return;
+    // Only a newer answer than the one shown counts, so a load that fails
+    // doesn't throw away an older one that works.
+    if (!mounted || load < _shownLoad) return;
     setState(() {
+      _shownLoad = load;
       _photos = photos;
       // A fresh list: photos that failed before get another try.
       _failedPhotos.clear();

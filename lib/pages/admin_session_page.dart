@@ -152,6 +152,11 @@ class _SessionBodyState extends State<_SessionBody> {
   bool get _savingReady => _savingReadyTo != null;
   String? _readyError;
 
+  /// Photos stored while the others could already be downloaded, by name:
+  /// families who already downloaded need to again to get these. Forgotten
+  /// when the photos are hidden.
+  final _addedWhileReady = <String>{};
+
   /// Progress through "Delete all photos"; null when not deleting.
   ({int done, int total})? _deletingAll;
 
@@ -206,7 +211,10 @@ class _SessionBodyState extends State<_SessionBody> {
 
   void _answered(SessionLookup lookup) {
     if (lookup is SessionFound) _lastFound = lookup;
-    setState(() => _lookup = lookup);
+    setState(() {
+      _lookup = lookup;
+      if (lookup is SessionFound && !lookup.booking.photosReady) _addedWhileReady.clear();
+    });
     // Deleting it from here: it stays as it was until the page is back on
     // Admin.
     if (_deletingSession && lookup is SessionMissing) return;
@@ -264,6 +272,7 @@ class _SessionBodyState extends State<_SessionBody> {
     if (!mounted || photos == null || photos.any((photo) => photo.name == item.name)) return;
     setState(() {
       _photos = [...photos, _storedPhoto(widget.sessionId, item.name)]..sort((a, b) => a.name.compareTo(b.name));
+      if (_lastFound?.booking.photosReady ?? false) _addedWhileReady.add(item.name);
     });
   }
 
@@ -375,7 +384,13 @@ class _SessionBodyState extends State<_SessionBody> {
       final kept = photos.take(focused).where((photo) => !gone.contains(photo.fullPath)).length;
       (rest.isEmpty ? _uploadFocus : _focusFor(rest[math.min(kept, rest.length - 1)])).requestFocus();
     }
-    setState(() => _photos = rest);
+    setState(() {
+      _photos = rest;
+      _addedWhileReady.removeAll([
+        for (final photo in photos)
+          if (gone.contains(photo.fullPath)) photo.name,
+      ]);
+    });
     // Their buttons go with the next frame.
     final nodes = [
       for (final path in gone)
@@ -630,7 +645,7 @@ class _SessionBodyState extends State<_SessionBody> {
           Text(reason, style: BrookieType.small.copyWith(color: c.inkSoft)),
           if (failuresInTheWay) TextButton(onPressed: _queue.clearFinished, child: const Text('Clear upload list')),
         ],
-        if (ready && _queue.countOf(UploadStatus.done) > 0) ...[
+        if (ready && _addedWhileReady.isNotEmpty) ...[
           const SizedBox(height: BrookieSpace.s4),
           const InlineMessage(
             message: 'Families who already downloaded need to download again to get these.',

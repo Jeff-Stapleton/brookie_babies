@@ -502,6 +502,47 @@ void main() {
       );
     });
 
+    testWidgets('only photos added after they’re available need downloading again, while they’re still here',
+        (tester) async {
+      final picker = FakePhotoPicker();
+      await _pumpSession(tester, admin: _service(autoCompleteUploads: true), picker: picker);
+      const note = 'Families who already downloaded need to download again to get these.';
+
+      // Uploaded first, then made available: nobody could have downloaded.
+      await _upload(tester, picker, ['IMG_4.jpg']);
+      await _settleUploads(tester);
+      await tapInView(tester, find.text('Make photos available'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Make photos available'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ready to download'), findsOneWidget);
+      expect(find.text(note), findsNothing);
+
+      await _upload(tester, picker, ['IMG_5.jpg']);
+      await _settleUploads(tester);
+      expect(find.widgetWithText(InlineMessage, note), findsOneWidget);
+
+      // Gone again, so there's nothing new to get.
+      await tapInView(tester, find.byTooltip('Delete IMG_5.jpg'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete photo'));
+      await tester.pumpAndSettle();
+      expect(find.text(note), findsNothing);
+
+      // Hiding them starts over.
+      await _upload(tester, picker, ['IMG_6.jpg']);
+      await _settleUploads(tester);
+      expect(find.text(note), findsOneWidget);
+      await tapInView(tester, find.text('Hide photos'));
+      await tester.pumpAndSettle();
+      await tapInView(tester, find.text('Make photos available'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Make photos available'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ready to download'), findsOneWidget);
+      expect(find.text(note), findsNothing);
+    });
+
     group('leaving', () {
       /// The session page over a page to go back to.
       Future<void> pumpOver(WidgetTester tester, FakeAdminService admin, FakePhotoPicker picker) async {

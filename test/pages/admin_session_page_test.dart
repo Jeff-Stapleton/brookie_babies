@@ -462,11 +462,13 @@ void main() {
       admin.uploads.single.complete();
       await _settleUploads(tester);
 
-      // A failure holds back "Make photos available" until it's dealt with.
+      // A failure holds back "Make photos available" until it's dealt with;
+      // this one can't be retried.
       expect(
-        find.text('Some photos didn’t upload. Retry them, or clear the upload list to go ahead without them.'),
+        find.text('Some files can’t be uploaded (see below). Clear the upload list to go ahead without them.'),
         findsOneWidget,
       );
+      expect(find.text('Retry failed'), findsNothing);
       expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Make photos available')).onPressed,
           isNull);
       await tapInView(tester, find.text('Clear upload list'));
@@ -487,6 +489,10 @@ void main() {
 
       expect(find.text(kAdminOfflineMessage), findsOneWidget);
       expect(LeaveWarning.active.value, isFalse);
+      expect(
+        find.text('Some photos didn’t upload. Retry them, or clear the upload list to go ahead without them.'),
+        findsOneWidget,
+      );
       await tapInView(tester, find.text('Retry failed'));
       await tester.pump();
       admin.uploads.last.complete();

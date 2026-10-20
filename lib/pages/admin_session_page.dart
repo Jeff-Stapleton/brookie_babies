@@ -322,7 +322,10 @@ class _SessionBodyState extends State<_SessionBody> {
     if (_deletingAll != null) return 'Wait for the photos to finish deleting.';
     if (_queue.isBusy) return 'Wait for the uploads to finish.';
     if (_queue.countOf(UploadStatus.failed) > 0) {
-      return 'Some photos didn’t upload. Retry them, or clear the upload list to go ahead without them.';
+      // Files the rules refuse (too large, not a photo) can't be retried.
+      return _queue.canRetry
+          ? 'Some photos didn’t upload. Retry them, or clear the upload list to go ahead without them.'
+          : 'Some files can’t be uploaded (see below). Clear the upload list to go ahead without them.';
     }
     final photos = _photos;
     if (photos == null) return _listFailed ? 'Refresh the page to load the photos first.' : 'Checking the photos…';

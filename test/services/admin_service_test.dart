@@ -565,6 +565,14 @@ void main() {
       expect(storage.objects, isEmpty);
     });
 
+    test('a session that isn’t there is refused, as the rules refuse it', () async {
+      await expectLater(
+        admin.setPhotosReady('gone', false),
+        throwsA(_adminError(AdminErrorKind.denied, message: kAdminDeniedMessage)),
+      );
+      expect(log, ['update bookings/gone']);
+    });
+
     test('refused: the zip stays, and nothing is hidden', () async {
       addAdHoc('s1', photosReady: true);
       storage.objects['gallery-zips/s1.zip'] = 'application/zip';
@@ -1126,6 +1134,35 @@ void main() {
 
       expect(log, ['get bookings/s1']);
       expect(storage.objects, hasLength(6));
+    });
+
+    test('deleted in another tab since it was read: done, not refused', () async {
+      addAdHoc('s1');
+      final slow = FirebaseAdminService(db, storage, auth, writeTimeLimit: const Duration(seconds: 10));
+      final hold = db.holdWrites = Completer();
+      final deleting = slow.deleteSession('s1');
+      await pumpEventQueue();
+      expect(log.last, 'delete bookings/s1');
+
+      // The other tab gets there first; the rules refuse deleting what's gone.
+      db.docs.remove('bookings/s1');
+      db.holdWrites = null;
+      hold.complete();
+      await deleting;
+
+      expect(log.sublist(log.length - 2), ['delete bookings/s1', 'get bookings/s1']);
+    });
+
+    test('a refused deletion of a session still there is refused', () async {
+      addAdHoc('s1');
+      db.errors['delete bookings/s1'] = _firestoreError('permission-denied');
+
+      await expectLater(
+        admin.deleteSession('s1'),
+        throwsA(_adminError(AdminErrorKind.denied, message: kAdminDeniedMessage)),
+      );
+      expect(log.last, 'get bookings/s1');
+      expect(db.docs, contains('bookings/s1'));
     });
 
     test('only ad hoc sessions', () async {

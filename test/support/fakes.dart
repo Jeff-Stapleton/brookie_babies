@@ -408,9 +408,12 @@ class FakeAdminService implements AdminService {
     return const SessionMissing();
   }
 
+  /// Session [id], for a change to it. One that isn't there is refused, as
+  /// the rules refuse it (they read the document's status), so the app says
+  /// what it says for any refusal.
   Booking _session(String id) {
     final session = sessions[id];
-    if (session == null) throw adminError(AdminErrorKind.notFound, 'No session $id.');
+    if (session == null) throw adminError(AdminErrorKind.denied);
     return session;
   }
 
@@ -486,7 +489,7 @@ class FakeAdminService implements AdminService {
   Future<void> deleteSession(String id) async {
     if (sessions[id]?.isAdHoc == false) throw StateError('deleteSession($id) is for ad hoc sessions only');
     await _write('deleteSession', 'deleteSession($id)');
-    _session(id);
+    // Already gone counts as deleted, as it does for the real one.
     sessions.remove(id);
     sessionPhotos.remove(id);
     notifyChanged();

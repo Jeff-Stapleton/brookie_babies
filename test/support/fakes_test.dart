@@ -89,6 +89,19 @@ void main() {
       expect((bad as SessionUnreadable).booking.problem, 'date isn’t YYYY-MM-DD');
     });
 
+    test('a session that isn’t there: changes refused as the rules refuse them, deleting it done', () async {
+      final admin = FakeAdminService();
+      final refused = throwsA(isA<AdminException>()
+          .having((e) => e.kind, 'kind', AdminErrorKind.denied)
+          .having((e) => e.message, 'message', kAdminDeniedMessage));
+
+      await expectLater(admin.setPhotosReady('gone', true), refused);
+      await expectLater(admin.updateSession(testSession('gone'), harper), refused);
+      await admin.deleteSession('gone');
+
+      expect(admin.sessions, isEmpty);
+    });
+
     test('nextError fails one call; errors fail every call to a method', () async {
       final admin = FakeAdminService(sessions: [testSession('s1')])
         ..nextError = adminError(AdminErrorKind.offline)

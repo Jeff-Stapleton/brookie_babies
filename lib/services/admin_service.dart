@@ -192,7 +192,7 @@ class FirebaseAdminService implements AdminService {
     } on AdminException catch (e) {
       // A retry after a try that got no answer but was saved: the rules
       // take set() on a document that's there as an update, and refuse it.
-      if (id == null || e.kind != AdminErrorKind.denied || !await _exists(doc)) rethrow;
+      if (id == null || e.kind != AdminErrorKind.denied || await _isThere(doc) != true) rethrow;
     }
     return doc.id;
   }
@@ -257,7 +257,13 @@ class FirebaseAdminService implements AdminService {
       await _forEachLimited(await _listAllUnder(storage.ref(folder)), _deleteIfThere);
       await _deleteIfThere(storage.ref(_zipPath(id)));
     });
-    await _write('delete session $id', doc.delete);
+    try {
+      await _write('delete session $id', doc.delete);
+    } on AdminException catch (e) {
+      // Deleted since it was read (in another tab, say): the rules refuse
+      // deleting a document that isn't there, since they check its status.
+      if (e.kind != AdminErrorKind.denied || await _isThere(doc) != false) rethrow;
+    }
   }
 
   @override
@@ -396,13 +402,13 @@ class FirebaseAdminService implements AdminService {
   Future<void> _deleteZip(String id) =>
       _attempt('delete the zip of session $id', _Doing.writing, () => _deleteIfThere(storage.ref(_zipPath(id))));
 
-  /// Whether [doc] is there; false if that can't be read either.
-  static Future<bool> _exists(DocumentReference<Map<String, dynamic>> doc) async {
+  /// Whether [doc] is there; null if that can't be read either.
+  static Future<bool?> _isThere(DocumentReference<Map<String, dynamic>> doc) async {
     try {
       return (await doc.get()).exists;
     } catch (e) {
       log('Admin: could not read ${doc.path}: $e');
-      return false;
+      return null;
     }
   }
 

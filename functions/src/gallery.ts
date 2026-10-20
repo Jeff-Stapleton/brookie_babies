@@ -1,7 +1,13 @@
 // Core logic of the getGalleryDownloadUrl callable: checks that the caller
-// owns a paid booking whose photos are ready, zips the photos in
-// galleries/{bookingId}/ into gallery-zips/{bookingId}.zip (reusing the zip
-// while the photos are unchanged) and returns a short-lived signed URL for it.
+// may download a booking whose photos are ready (their own paid booking, or
+// an ad hoc session shared with their verified Google email), zips the
+// photos in galleries/{bookingId}/ into gallery-zips/{bookingId}.zip
+// (reusing the zip while the photos are unchanged) and returns a short-lived
+// signed URL for it.
+//
+// Who may download mirrors who may read the booking in firestore.rules
+// (admins aside: they read every booking but download none), so the app only
+// ever shows a download the caller can get.
 //
 // Firestore and Storage are injected as the small interfaces below, so the
 // unit tests can use in-memory fakes. index.ts passes the real Admin SDK
@@ -103,8 +109,17 @@ export interface GalleryDeps {
 // Callable entry points.
 // ---------------------------------------------------------------------------
 
+/**
+ * The signed-in caller: the uid and the ID token's claims, as onCall passes
+ * them. The claims are `unknown` because nothing guarantees their types.
+ */
+export interface CallerAuth {
+  uid: string;
+  token?: {email?: unknown; email_verified?: unknown};
+}
+
 export interface CallableRequestLike {
-  auth?: {uid: string} | null;
+  auth?: CallerAuth | null;
   data: unknown;
 }
 
@@ -117,18 +132,19 @@ export async function handleGalleryDownloadRequest(
   deps: GalleryDeps & {logError: (message: string, error: unknown) => void},
   request: CallableRequestLike,
 ): Promise<GalleryDownload> {
-  const uid = request.auth?.uid;
-  if (!uid) {
+  const auth = request.auth;
+  if (!auth?.uid) {
     throw new HttpsError("unauthenticated", MESSAGES.unauthenticated);
   }
   try {
-    return await getGalleryDownload(deps, uid, request.data);
+    return await getGalleryDownload(deps, auth, request.data);
   } catch (error) {
     if (error instanceof HttpsError) throw error;
-    // Only reachable after the booking ID passed validation.
+    // Only reachable after the booking ID passed validation. Never log the
+    // caller's email: the uid is enough to find them.
     const bookingId = (request.data as {bookingId?: unknown} | null)?.bookingId;
     deps.logError(
-      `getGalleryDownloadUrl failed for booking ${String(bookingId)} (uid ${uid})`,
+      `getGalleryDownloadUrl failed for booking ${String(bookingId)} (uid ${auth.uid})`,
       error,
     );
     throw new HttpsError("internal", MESSAGES.internal);
@@ -136,29 +152,31 @@ export async function handleGalleryDownloadRequest(
 }
 
 /**
- * Returns a signed download URL for the zip of all photos of the caller's
- * booking, building (or rebuilding) the zip if needed.
+ * Returns a signed download URL for the zip of all photos of a booking the
+ * caller may download, building (or rebuilding) the zip if needed.
  */
 export async function getGalleryDownload(
   deps: GalleryDeps,
-  uid: string,
+  caller: CallerAuth,
   data: unknown,
 ): Promise<GalleryDownload> {
   const bookingId = parseBookingId(data);
 
   const snapshot = await deps.db.doc(`bookings/${bookingId}`).get();
   const booking = snapshot.exists ? snapshot.data() : undefined;
-  // Same error for "doesn't exist" and "someone else's", so booking IDs
-  // can't be probed.
-  if (!booking || booking.uid !== uid) {
+  // Same error for "doesn't exist" and "someone else's", and before any
+  // status or readiness check, so booking IDs can't be probed.
+  if (!booking || !canDownload(booking, caller)) {
     throw new HttpsError("not-found", MESSAGES.notFound);
   }
   // Bookings are typed in by hand; accept " Paid " the same way the Flutter
   // client (Booking.fromMap) does, so it never shows a download that fails.
-  if (
-    typeof booking.status !== "string" ||
-    booking.status.trim().toLowerCase() !== "paid"
-  ) {
+  // Ad hoc sessions need no payment.
+  const status =
+    typeof booking.status === "string"
+      ? booking.status.trim().toLowerCase()
+      : undefined;
+  if (status !== "paid" && status !== "adhoc") {
     throw new HttpsError("failed-precondition", MESSAGES.notPaid);
   }
   if (booking.photosReady !== true) {
@@ -193,6 +211,31 @@ export async function getGalleryDownload(
 // ---------------------------------------------------------------------------
 // Helpers (exported for tests).
 // ---------------------------------------------------------------------------
+
+/**
+ * Whether the caller may download this booking's photos: it carries their
+ * uid, or it's an ad hoc session (status exactly "adhoc", as only the admin
+ * pages write it) shared with the email the caller verified with Google.
+ * Like the bookings read rule in firestore.rules, which compares the stored
+ * email (saved lowercase) with the token's email lowercased.
+ *
+ * Booking fields and claims are checked with typeof first, so odd values
+ * typed into the console mean "not theirs", never a TypeError ('internal').
+ */
+export function canDownload(
+  booking: Record<string, unknown>,
+  caller: CallerAuth,
+): boolean {
+  if (booking.uid === caller.uid) return true;
+  const email = caller.token?.email;
+  return (
+    booking.status === "adhoc" &&
+    caller.token?.email_verified === true &&
+    typeof email === "string" &&
+    typeof booking.email === "string" &&
+    booking.email === email.toLowerCase()
+  );
+}
 
 export function parseBookingId(data: unknown): string {
   const bookingId =

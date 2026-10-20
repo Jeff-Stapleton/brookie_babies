@@ -6,6 +6,8 @@ import {HttpsError} from "firebase-functions/https";
 import * as yauzl from "yauzl";
 import {
   BucketLike,
+  CallableRequestLike,
+  CallerAuth,
   computeFingerprint,
   DocumentSnapshotLike,
   FirestoreLike,
@@ -166,6 +168,9 @@ const NOW = new Date("2026-10-16T12:00:00.000Z");
 const UID = "customer-uid";
 const BOOKING_ID = "b1";
 const ZIP_NAME = "gallery-zips/b1.zip";
+const GUEST_UID = "guest-uid";
+const GUEST_EMAIL = "harper@example.com";
+const GUEST_TOKEN = {email: GUEST_EMAIL, email_verified: true};
 
 let db: FakeFirestore;
 let bucket: FakeBucket;
@@ -184,9 +189,28 @@ function addBooking(id: string, fields: Record<string, unknown> = {}): void {
   });
 }
 
+/** An ad hoc session as the admin pages write it: no uid, shared by email. */
+function addAdHocSession(id: string, fields: Record<string, unknown> = {}): void {
+  db.docs.set(`bookings/${id}`, {
+    status: "adhoc",
+    name: "The Harper family",
+    email: GUEST_EMAIL,
+    date: "2026-09-01",
+    photosReady: true,
+    createdAt: NOW,
+    createdBy: "admin-uid",
+    ...fields,
+  });
+}
+
 /** Calls as UID; with no arguments, for BOOKING_ID. */
 function call(...args: [data?: unknown]) {
-  return getGalleryDownload(deps, UID, args.length > 0 ? args[0] : {bookingId: BOOKING_ID});
+  return getGalleryDownload(deps, {uid: UID}, args.length > 0 ? args[0] : {bookingId: BOOKING_ID});
+}
+
+/** Calls as GUEST_UID with these token claims, for BOOKING_ID. */
+function callAsGuest(token: CallerAuth["token"]) {
+  return getGalleryDownload(deps, {uid: GUEST_UID, token}, {bookingId: BOOKING_ID});
 }
 
 async function assertHttpsError(
@@ -332,6 +356,106 @@ describe("getGalleryDownload: access checks", {timeout: 10_000}, () => {
     bucket.put("galleries/b10/a.jpg", "photo");
     await assertHttpsError(call(), "failed-precondition", MESSAGES.notReady);
     assert.equal(bucket.writeStreamsOpened, 0);
+  });
+});
+
+describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000}, () => {
+  test("a guest signed in with the session's verified email can download", async () => {
+    addAdHocSession(BOOKING_ID);
+    bucket.put("galleries/b1/a.jpg", "photo");
+    // The session's email is saved lowercase; Google may report capitals.
+    for (const email of [GUEST_EMAIL, "Harper@Example.COM"]) {
+      const result = await callAsGuest({email, email_verified: true});
+      assert.equal(result.photoCount, 1);
+    }
+  });
+
+  test("another verified email is not found", async () => {
+    addAdHocSession(BOOKING_ID);
+    bucket.put("galleries/b1/a.jpg", "photo");
+    await assertHttpsError(
+      callAsGuest({email: "someone@example.com", email_verified: true}),
+      "not-found",
+      MESSAGES.notFound,
+    );
+    // A session email typed with capitals in the console matches no one, as
+    // in firestore.rules.
+    addAdHocSession(BOOKING_ID, {email: "Harper@example.com"});
+    await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+    assert.equal(bucket.writeStreamsOpened, 0);
+    assert.equal(bucket.signedUrlConfigs.length, 0);
+  });
+
+  test("the session's email is not found until Google has verified it", async () => {
+    addAdHocSession(BOOKING_ID);
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const email_verified of [false, undefined, "true", 1]) {
+      await assertHttpsError(
+        callAsGuest({email: GUEST_EMAIL, email_verified}),
+        "not-found",
+        MESSAGES.notFound,
+      );
+    }
+    assert.equal(bucket.writeStreamsOpened, 0);
+  });
+
+  test("an email never opens a paid booking", async () => {
+    // Only the uid opens a customer's booking, even with the same email on it.
+    addBooking(BOOKING_ID, {email: GUEST_EMAIL});
+    bucket.put("galleries/b1/a.jpg", "photo");
+    await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+    // Nor does a status that is only nearly "adhoc".
+    for (const status of ["Adhoc", " adhoc", "ADHOC", undefined]) {
+      addAdHocSession(BOOKING_ID, {status});
+      await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+    }
+    assert.equal(bucket.writeStreamsOpened, 0);
+  });
+
+  test("a missing or non-string token email is not found", async () => {
+    addAdHocSession(BOOKING_ID);
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const token of [
+      undefined,
+      {},
+      {email_verified: true},
+      {email: null, email_verified: true},
+      {email: 42, email_verified: true},
+      {email: [GUEST_EMAIL], email_verified: true},
+    ]) {
+      await assertHttpsError(callAsGuest(token), "not-found", MESSAGES.notFound);
+    }
+  });
+
+  test("a session email that isn't a string is not found", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const email of [undefined, null, 42, [GUEST_EMAIL], {toLowerCase: () => GUEST_EMAIL}]) {
+      addAdHocSession(BOOKING_ID, {email});
+      await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+    }
+  });
+
+  test("access is checked before readiness, so IDs can't be probed", async () => {
+    addAdHocSession(BOOKING_ID, {photosReady: false});
+    bucket.put("galleries/b1/a.jpg", "photo");
+    await assertHttpsError(
+      callAsGuest({email: "someone@example.com", email_verified: true}),
+      "not-found",
+      MESSAGES.notFound,
+    );
+    await assertHttpsError(callAsGuest(GUEST_TOKEN), "failed-precondition", MESSAGES.notReady);
+  });
+
+  test("an ad hoc session is deliverable without payment", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    addAdHocSession(BOOKING_ID);
+    assert.equal((await callAsGuest(GUEST_TOKEN)).photoCount, 1);
+    // Its uid, if one was typed in, opens it too; like " Paid ", a hand-typed
+    // " Adhoc " is forgiven there, as in the app.
+    for (const status of ["adhoc", " Adhoc "]) {
+      addAdHocSession(BOOKING_ID, {uid: UID, status});
+      assert.equal((await call()).photoCount, 1);
+    }
   });
 });
 
@@ -562,11 +686,22 @@ describe("getGalleryDownload: signed URL", {timeout: 10_000}, () => {
 
 describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
   let logged: unknown[];
-  const handle = (request: {auth?: {uid: string} | null; data: unknown}) =>
-    handleGalleryDownloadRequest({...deps, logError: (_m, e) => logged.push(e)}, request);
+  let loggedMessages: string[];
+  const handle = (request: CallableRequestLike) =>
+    handleGalleryDownloadRequest(
+      {
+        ...deps,
+        logError: (message, error) => {
+          loggedMessages.push(message);
+          logged.push(error);
+        },
+      },
+      request,
+    );
 
   beforeEach(() => {
     logged = [];
+    loggedMessages = [];
   });
 
   test("requires sign-in", async () => {
@@ -588,6 +723,20 @@ describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
     assert.equal(result.photoCount, 1);
   });
 
+  test("passes the token's email claims to the access check", async () => {
+    addAdHocSession(BOOKING_ID);
+    bucket.put("galleries/b1/a.jpg", "a");
+    const result = await handle({
+      auth: {uid: GUEST_UID, token: GUEST_TOKEN},
+      data: {bookingId: BOOKING_ID},
+    });
+    assert.equal(result.photoCount, 1);
+    await assertHttpsError(
+      handle({auth: {uid: GUEST_UID}, data: {bookingId: BOOKING_ID}}),
+      "not-found",
+    );
+  });
+
   test("passes HttpsErrors through without logging", async () => {
     await assertHttpsError(handle({auth: {uid: UID}, data: {bookingId: "missing"}}), "not-found");
     assert.deepEqual(logged, []);
@@ -602,6 +751,18 @@ describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
       MESSAGES.internal,
     );
     assert.deepEqual(logged, [bucket.getFilesError]);
+  });
+
+  test("logs the uid, never the email", async () => {
+    addAdHocSession(BOOKING_ID);
+    bucket.getFilesError = new Error("storage is down");
+    await assertHttpsError(
+      handle({auth: {uid: GUEST_UID, token: GUEST_TOKEN}, data: {bookingId: BOOKING_ID}}),
+      "internal",
+    );
+    assert.equal(loggedMessages.length, 1);
+    assert.match(loggedMessages[0], new RegExp(GUEST_UID));
+    assert.doesNotMatch(loggedMessages[0], /harper|@/i);
   });
 });
 

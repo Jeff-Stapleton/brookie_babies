@@ -26,7 +26,8 @@ function realDeps(): GalleryDeps {
 
 /**
  * Callable: {bookingId} -> {url, photoCount, expiresAt}, a signed URL (valid
- * for 60 minutes) to a zip of every photo of the caller's paid booking.
+ * for 60 minutes) to a zip of every photo of the caller's paid booking, or of
+ * an ad hoc session shared with the caller's verified Google email.
  *
  * Signing uses the IAM signBlob API, so the runtime service account needs
  * "Service Account Token Creator" on itself and the IAM Service Account

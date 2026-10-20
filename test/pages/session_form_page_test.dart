@@ -26,7 +26,23 @@ Finder _dateField() => find.ancestor(of: find.text('Date'), matching: find.byTyp
 /// [label] inside the open dialog.
 Finder _inDialog(String label) => find.descendant(of: find.byType(BrookieDialog), matching: find.text(label));
 
-/// Opens the dropdown showing [current] and chooses [label] in it.
+/// The open menu's options.
+Finder _options() => find.byType(MenuItemButton);
+
+/// The option labelled [label] in the open menu.
+Finder _option(String label) => find.widgetWithText(MenuItemButton, label);
+
+/// The open menu itself: the Material closest around its options.
+Finder _menuPanel() => find.ancestor(of: _options().first, matching: find.byType(Material)).first;
+
+/// Whether the option labelled [label] has keyboard focus.
+bool _optionHasFocus(WidgetTester tester, String label) =>
+    Focus.of(tester.element(find.descendant(of: _option(label), matching: find.text(label)))).hasPrimaryFocus;
+
+/// Whether the field labelled [label] has keyboard focus.
+bool _fieldHasFocus(WidgetTester tester, String label) => Focus.of(tester.element(find.text(label))).hasPrimaryFocus;
+
+/// Opens the menu of the field showing [current] and chooses [label] in it.
 Future<void> _choose(WidgetTester tester, String current, String label) async {
   await tapInView(tester, find.text(current));
   await tester.pumpAndSettle();
@@ -108,9 +124,9 @@ void main() {
     testWidgets('times: none, or every quarter hour from 6:00 am to 9:00 pm', (tester) async {
       await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
-      final dropdown = tester.widget<DropdownButton<({int hour, int minute})?>>(
-          find.byType(DropdownButton<({int hour, int minute})?>));
-      final labels = [for (final item in dropdown.items!) (item.child as Text).data];
+      await tapInView(tester, find.text('No time'));
+      await tester.pumpAndSettle();
+      final labels = [for (final item in tester.widgetList<MenuItemButton>(_options())) (item.child! as Text).data];
       expect(labels.first, 'No time');
       expect(labels[1], '6:00 am');
       expect(labels[2], '6:15 am');
@@ -291,6 +307,166 @@ void main() {
 
       expect(find.text('Below'), findsOneWidget);
       expect(admin.calls, isEmpty);
+    });
+  });
+
+  group('the package and time menus', () {
+    for (final brightness in Brightness.values) {
+      testWidgets('in ${brightness.name}: no shadow, a line-strong edge, as wide as the field', (tester) async {
+        final c = brightness == Brightness.dark ? BrookieColors.dark : BrookieColors.light;
+        await pumpAdminPage(tester, SessionFormPage(now: now), brightness: brightness, size: const Size(1440, 1200));
+
+        await tapInView(tester, find.text('No package'));
+        await tester.pumpAndSettle();
+
+        final style =
+            tester.widget<MenuAnchor>(find.ancestor(of: find.text('Package'), matching: find.byType(MenuAnchor))).style!;
+        expect(style.elevation!.resolve({}), 0);
+        expect(style.side!.resolve({}), BorderSide(color: c.lineStrong));
+        expect(style.backgroundColor!.resolve({}), c.surface);
+        expect(
+          style.shape!.resolve({}),
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(BrookieRadius.md)),
+        );
+        // Nothing in the open menu casts a shadow.
+        for (final material in tester.widgetList<Material>(
+            find.ancestor(of: _option('Basic'), matching: find.byType(Material)))) {
+          expect(material.elevation, 0);
+        }
+        final field = tester.getRect(find.ancestor(of: find.text('Package'), matching: find.byType(InputDecorator)));
+        final panel = tester.getRect(_menuPanel());
+        expect(panel.width, field.width);
+        expect(panel.top, greaterThan(field.bottom));
+        // The chosen option is ticked.
+        expect(find.descendant(of: _option('No package'), matching: find.byIcon(Icons.check)), findsOneWidget);
+        expect(find.descendant(of: _option('Basic'), matching: find.byIcon(Icons.check)), findsNothing);
+      });
+    }
+
+    testWidgets('opens at once, without animating', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
+      await tester.ensureVisible(find.text('No time'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('No time'));
+      await tester.pump();
+      final first = tester.getRect(_option('6:00 am'));
+      expect(_option('6:00 am').hitTestable(), findsOneWidget);
+      await tester.pumpAndSettle();
+
+      expect(tester.getRect(_option('6:00 am')), first);
+    });
+
+    testWidgets('the keyboard opens it on the chosen option, moves, wraps, chooses and comes back', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
+      Focus.of(tester.element(find.text('Package'))).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(_optionHasFocus(tester, 'No package'), isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      expect(_optionHasFocus(tester, 'Premium'), isTrue);
+      // A ring, not Material's faint band.
+      final item = tester.widget<MenuItemButton>(_option('Premium'));
+      expect(item.style!.side!.resolve({WidgetState.focused}), brookieFocusSide(BrookieColors.light.focus));
+      expect(item.style!.overlayColor!.resolve({WidgetState.focused}), Colors.transparent);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.home);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pump();
+      expect(_optionHasFocus(tester, 'Ultimate'), isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.end);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      expect(_optionHasFocus(tester, 'No package'), isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(_options(), findsNothing);
+      expect(find.text('Ultimate'), findsOneWidget);
+      expect(_fieldHasFocus(tester, 'Package'), isTrue);
+    });
+
+    testWidgets('Escape closes it, choosing nothing, with focus back on the field', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
+      Focus.of(tester.element(find.text('Package'))).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      expect(_options(), findsNothing);
+      expect(find.text('No package'), findsOneWidget);
+      expect(_fieldHasFocus(tester, 'Package'), isTrue);
+    });
+
+    testWidgets('a click opens it without moving focus into it; a click outside closes it', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
+
+      await tapInView(tester, find.text('No package'));
+      await tester.pumpAndSettle();
+      expect(_options(), findsNWidgets(4));
+      expect(_fieldHasFocus(tester, 'Package'), isTrue);
+
+      await tester.tapAt(const Offset(1400, 1150));
+      await tester.pumpAndSettle();
+      expect(_options(), findsNothing);
+      expect(find.text('No package'), findsOneWidget);
+    });
+
+    testWidgets('opening on a time far down the menu leaves the page where it was', (tester) async {
+      await pumpAdminPage(
+        tester,
+        SessionFormPage(now: now, session: testSession('s1', time: (hour: 20, minute: 45))),
+        size: const Size(390, 700),
+      );
+      await tester.ensureVisible(find.text('8:45 pm'));
+      await tester.pumpAndSettle();
+      final page = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+      final before = page.pixels;
+      expect(before, greaterThan(0));
+      final field = tester.getRect(find.text('8:45 pm'));
+
+      for (final open in [
+        () => tester.tap(find.text('8:45 pm')),
+        () async {
+          Focus.of(tester.element(find.text('Time'))).requestFocus();
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        },
+      ]) {
+        await open();
+        await tester.pumpAndSettle();
+        expect(_option('8:45 pm').hitTestable(), findsOneWidget);
+        expect(page.pixels, before);
+        expect(tester.getRect(find.text('8:45 pm').first), field);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.tapAt(const Offset(380, 690));
+        await tester.pumpAndSettle();
+      }
+    });
+
+    testWidgets('the time menu scrolls, and opens on the chosen time', (tester) async {
+      await pumpAdminPage(
+        tester,
+        SessionFormPage(now: now, session: testSession('s1', time: (hour: 18, minute: 15))),
+        size: const Size(1440, 1200),
+      );
+
+      await tapInView(tester, find.text('6:15 pm'));
+      await tester.pumpAndSettle();
+
+      final panel = tester.getRect(_menuPanel());
+      expect(panel.height, lessThanOrEqualTo(360));
+      expect(_option('6:15 pm').hitTestable(), findsOneWidget);
+      expect(_option('No time').hitTestable(), findsNothing);
     });
   });
 
@@ -489,6 +665,13 @@ void main() {
         await tapInView(tester, _dateField());
         await tester.pumpAndSettle();
         expect(find.byType(BookingCalendar), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.tap(_inDialog('Cancel'));
+        await tester.pumpAndSettle();
+
+        await tapInView(tester, find.text('No time'));
+        await tester.pumpAndSettle();
+        expect(_option('6:00 am').hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
     }

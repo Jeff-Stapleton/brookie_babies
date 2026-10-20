@@ -1,4 +1,5 @@
 import 'dart:developer';
+import 'dart:math' as math;
 
 import 'package:brookie_babies/components/admin_frame.dart';
 import 'package:brookie_babies/components/admin_gate.dart';
@@ -14,10 +15,12 @@ import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/utils.dart';
 import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/busy_button.dart';
+import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 
 typedef _Time = ({int hour, int minute});
 
@@ -315,18 +318,12 @@ class _SessionFormState extends State<_SessionForm> {
               validator: _emailProblem,
             ),
             gap,
-            DropdownButtonFormField<String?>(
-              initialValue: _package,
-              isExpanded: true,
-              style: _inputStyle(context),
-              decoration: _decoration(context, label: 'Package'),
-              dropdownColor: BrookieColors.of(context).surface,
-              // Material's grey otherwise; ink-soft like the date field's icon.
-              iconEnabledColor: BrookieColors.of(context).inkSoft,
-              borderRadius: BorderRadius.circular(BrookieRadius.sm),
-              items: [
-                const DropdownMenuItem(value: null, child: Text('No package')),
-                for (final name in SessionRules.packageNames) DropdownMenuItem(value: name, child: Text(name)),
+            _Choice<String?>(
+              label: 'Package',
+              value: _package,
+              options: [
+                (value: null, label: 'No package'),
+                for (final name in SessionRules.packageNames) (value: name, label: name),
               ],
               onChanged: (value) => setState(() => _package = value),
             ),
@@ -343,20 +340,14 @@ class _SessionFormState extends State<_SessionForm> {
               ),
             ),
             gap,
-            DropdownButtonFormField<_Time?>(
-              initialValue: _time,
-              isExpanded: true,
-              style: _inputStyle(context),
-              decoration: _decoration(context, label: 'Time'),
-              dropdownColor: BrookieColors.of(context).surface,
-              iconEnabledColor: BrookieColors.of(context).inkSoft,
-              borderRadius: BorderRadius.circular(BrookieRadius.sm),
+            _Choice<_Time?>(
+              label: 'Time',
+              value: _time,
               // Five dozen times: a scrolling menu, not one taller than the window.
               menuMaxHeight: 360,
-              items: [
-                const DropdownMenuItem(value: null, child: Text('No time')),
-                for (final time in _times)
-                  DropdownMenuItem(value: time, child: Text(SessionTime.clockLabel(time.hour, time.minute))),
+              options: [
+                (value: null, label: 'No time'),
+                for (final time in _times) (value: time, label: SessionTime.clockLabel(time.hour, time.minute)),
               ],
               onChanged: (value) => setState(() => _time = value),
             ),
@@ -395,6 +386,233 @@ class _SessionFormState extends State<_SessionForm> {
               InlineMessage(message: error),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One of a [_Choice]'s options: what's saved, and what the admin reads.
+typedef _Option<T> = ({T value, String label});
+
+/// A field that opens a menu of [options] to choose one from (Package,
+/// Time), shown like the form's other fields.
+///
+/// The menu is drawn like the account menu: no shadow (only photographs and
+/// dialogs cast one), a line-strong edge, a ring on the option with keyboard
+/// focus, and no animation. It works like a select on the web: Enter, Space
+/// or an arrow key opens it on the chosen option; the arrow keys move
+/// between options and wrap around, Home and End jump to the first and
+/// last, and Enter chooses. Choosing, or Escape, closes it with focus back
+/// on the field. Opened with a click or a tap, focus stays on the field.
+class _Choice<T> extends StatefulWidget {
+  const _Choice({
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    this.menuMaxHeight = double.infinity,
+  });
+
+  final String label;
+  final T value;
+  final List<_Option<T>> options;
+  final ValueChanged<T> onChanged;
+
+  /// How tall the menu grows before it scrolls.
+  final double menuMaxHeight;
+
+  @override
+  State<_Choice<T>> createState() => _ChoiceState<T>();
+}
+
+class _ChoiceState<T> extends State<_Choice<T>> {
+  final _controller = MenuController();
+  late final _fieldFocus = FocusNode(debugLabel: widget.label);
+  late List<FocusNode> _optionFocus = _focusNodes();
+  bool _hovered = false;
+
+  List<FocusNode> _focusNodes() => [for (final option in widget.options) FocusNode(debugLabel: option.label)];
+
+  @override
+  void didUpdateWidget(_Choice<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.options.length != widget.options.length) {
+      _disposeOptionFocus();
+      _optionFocus = _focusNodes();
+    }
+  }
+
+  @override
+  void dispose() {
+    _fieldFocus.dispose();
+    _disposeOptionFocus();
+    super.dispose();
+  }
+
+  void _disposeOptionFocus() {
+    for (final node in _optionFocus) {
+      node.dispose();
+    }
+  }
+
+  /// The chosen option's place in the menu (the first, if it isn't there).
+  int get _chosen => math.max(0, widget.options.indexWhere((option) => option.value == widget.value));
+
+  /// Opens the menu (if it isn't open) scrolled to the chosen option, and
+  /// moves keyboard focus onto it if [focusChosen].
+  void _open({required bool focusChosen}) {
+    if (!_controller.isOpen) _controller.open();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_controller.isOpen) return;
+      final node = _optionFocus[_chosen];
+      if (focusChosen) node.requestFocus();
+      final option = node.context;
+      if (option != null) Scrollable.ensureVisible(option, alignment: 0.5);
+    });
+  }
+
+  /// A click or a tap: opens the menu, or closes it if it's open.
+  void _toggle() {
+    _fieldFocus.requestFocus();
+    if (_controller.isOpen) {
+      _controller.close();
+    } else {
+      _open(focusChosen: false);
+    }
+  }
+
+  /// Moves focus [by] options, wrapping around at either end.
+  void _move(int by) {
+    final count = _optionFocus.length;
+    final current = _optionFocus.indexWhere((node) => node.hasPrimaryFocus);
+    final next = current < 0 ? (by > 0 ? 0 : count - 1) : (current + by) % count;
+    requestFocusInView(_optionFocus[next]);
+  }
+
+  void _choose(T value) {
+    _fieldFocus.requestFocus();
+    if (value != widget.value) widget.onChanged(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = BrookieColors.of(context);
+    final itemStyle = ButtonStyle(
+      backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.hovered) ? c.surfaceSunk : Colors.transparent),
+      foregroundColor: WidgetStatePropertyAll(c.ink),
+      iconColor: WidgetStatePropertyAll(c.ink),
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+      // A real ring, like every other control, rather than a faint band.
+      side: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.focused) ? brookieFocusSide(c.focus) : BorderSide.none),
+      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(BrookieRadius.sm))),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: BrookieSpace.s3)),
+      minimumSize: const WidgetStatePropertyAll(Size(0, kMinInteractiveDimension)),
+      textStyle: WidgetStatePropertyAll(_inputStyle(context)),
+      animationDuration: kBrookieStateDuration,
+    );
+    final open = CallbackAction<Intent>(onInvoke: (_) {
+      _open(focusChosen: true);
+      return null;
+    });
+
+    return LayoutBuilder(
+      builder: (context, constraints) => MenuAnchor(
+        controller: _controller,
+        childFocusNode: _fieldFocus,
+        // A click outside only closes the menu.
+        consumeOutsideTap: true,
+        crossAxisUnconstrained: false,
+        alignmentOffset: const Offset(0, BrookieSpace.s1),
+        style: MenuStyle(
+          alignment: AlignmentDirectional.bottomStart,
+          backgroundColor: WidgetStatePropertyAll(c.surface),
+          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+          // No shadow, so the edge is what sets the menu apart from the
+          // fields under it: an edge that carries meaning, so line-strong.
+          elevation: const WidgetStatePropertyAll(0),
+          shadowColor: const WidgetStatePropertyAll(Colors.transparent),
+          side: WidgetStatePropertyAll(BorderSide(color: c.lineStrong)),
+          shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(BrookieRadius.md))),
+          padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+          visualDensity: VisualDensity.standard,
+          // As wide as the field.
+          minimumSize: WidgetStatePropertyAll(Size(constraints.maxWidth, 0)),
+          maximumSize: WidgetStatePropertyAll(Size(constraints.maxWidth, widget.menuMaxHeight)),
+        ),
+        menuChildren: [
+          CallbackShortcuts(
+            bindings: {
+              const SingleActivator(LogicalKeyboardKey.arrowDown): () => _move(1),
+              const SingleActivator(LogicalKeyboardKey.arrowUp): () => _move(-1),
+              const SingleActivator(LogicalKeyboardKey.home): () => requestFocusInView(_optionFocus.first),
+              const SingleActivator(LogicalKeyboardKey.end): () => requestFocusInView(_optionFocus.last),
+            },
+            // The options sit in from the menu's edge so their focus ring
+            // (2px out, past a 2px gap) isn't clipped.
+            child: Padding(
+              padding: const EdgeInsets.all(BrookieSpace.s2),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final (i, option) in widget.options.indexed)
+                    MergeSemantics(
+                      child: Semantics(
+                        selected: option.value == widget.value,
+                        child: MenuItemButton(
+                          focusNode: _optionFocus[i],
+                          // Hovering highlights a row; only the keyboard moves the ring.
+                          requestFocusOnHover: false,
+                          style: itemStyle,
+                          trailingIcon: option.value == widget.value ? const Icon(Icons.check, size: 20) : null,
+                          onPressed: () => _choose(option.value),
+                          child: Text(option.label),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+        builder: (context, controller, child) => CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.arrowDown): () => _open(focusChosen: true),
+            const SingleActivator(LogicalKeyboardKey.arrowUp): () => _open(focusChosen: true),
+          },
+          child: MergeSemantics(
+            child: Semantics(
+              button: true,
+              expanded: controller.isOpen,
+              child: FocusableActionDetector(
+                focusNode: _fieldFocus,
+                mouseCursor: SystemMouseCursors.click,
+                onShowHoverHighlight: (value) => setState(() => _hovered = value),
+                // The field's ink edge shows focus, as the text fields' does.
+                onFocusChange: (focused) => setState(() {}),
+                // On the web, Enter only activates buttons (ButtonActivateIntent).
+                actions: {ActivateIntent: open, ButtonActivateIntent: open},
+                child: GestureDetector(
+                  onTap: _toggle,
+                  behavior: HitTestBehavior.opaque,
+                  child: InputDecorator(
+                    decoration: _decoration(
+                      context,
+                      label: widget.label,
+                      suffixIcon: Icon(Icons.arrow_drop_down, color: c.inkSoft),
+                    ),
+                    baseStyle: _inputStyle(context),
+                    isFocused: _fieldFocus.hasFocus,
+                    isHovering: _hovered,
+                    child: Text(widget.options[_chosen].label, style: _inputStyle(context)),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

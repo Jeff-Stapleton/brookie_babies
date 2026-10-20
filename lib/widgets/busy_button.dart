@@ -29,12 +29,18 @@ class BusyButton extends StatelessWidget {
     this.kind = BusyButtonKind.outlined,
     this.icon,
     this.focusNode,
+    this.busySemanticsLabel,
   });
 
   final String label;
 
   /// What it says while [busy]: "Saving changes…".
   final String busyLabel;
+
+  /// What screen readers hear while [busy], when [busyLabel] changes as it
+  /// goes ("Deleting 40 of 150…"): the button is a live region, so each new
+  /// count would be announced. Null for [busyLabel] itself.
+  final String? busySemanticsLabel;
 
   final bool busy;
   final VoidCallback? onPressed;
@@ -63,7 +69,7 @@ class BusyButton extends StatelessWidget {
     final Widget? iconWidget = busy
         ? SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: c.inkSoft))
         : (icon == null ? null : Icon(icon));
-    final text = Text(busy ? busyLabel : label);
+    final text = Text(busy ? busyLabel : label, semanticsLabel: busy ? busySemanticsLabel : null);
     // Pressing it again while busy does nothing.
     final VoidCallback? press = onPressed == null ? null : (busy ? () {} : onPressed);
     final style = _busyStyle(c);

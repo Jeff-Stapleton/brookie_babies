@@ -2,7 +2,10 @@
 // for them, making the photos available, uploading, the photo list, and
 // deleting photos or the whole (ad hoc) session.
 
+import 'dart:async';
+
 import 'package:brookie_babies/models/booking.dart';
+import 'package:brookie_babies/models/picked_photo.dart';
 import 'package:brookie_babies/models/session_lookup.dart';
 import 'package:brookie_babies/pages/admin_page.dart';
 import 'package:brookie_babies/pages/admin_session_page.dart';
@@ -19,6 +22,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../support/admin_test_app.dart';
 import '../support/fakes.dart';
+import '../support/local_first_admin_service.dart';
 
 const _photos = ['IMG_1.jpg', 'IMG_2.jpg', 'edits/IMG_3.jpg'];
 
@@ -116,6 +120,19 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.widget<SessionFormPage>(find.byType(SessionFormPage)).session?.id, 's1');
+    });
+
+    testWidgets('the account menu has no way off the page but back and "Sign out"', (tester) async {
+      await _pumpSession(tester);
+
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+
+      // "Your sessions" leads to "Admin" and "See packages", which would
+      // close this page without asking, stopping its uploads.
+      expect(find.text('Your sessions'), findsNothing);
+      expect(find.text('Admin'), findsNothing);
+      expect(find.text('Sign out'), findsOneWidget);
     });
 
     testWidgets('changes made elsewhere show at once', (tester) async {
@@ -298,6 +315,42 @@ void main() {
       expect(hasFocus(tester, find.text('Hide photos')), isTrue);
     });
 
+    testWidgets('the pressed button stays busy until the server has the change, though it shows locally at once',
+        (tester) async {
+      final admin = LocalFirstAdminService(
+        sessions: [testSession('s1')],
+        sessionPhotos: {'s1': _photos},
+      )..writeDelay = const Duration(seconds: 1);
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.text('Make photos available'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Make photos available'));
+      await tester.pump();
+      await tester.pump(kThemeAnimationDuration);
+
+      expect(admin.sessions['s1']!.photosReady, isTrue);
+      expect(find.text('Making photos available…'), findsOneWidget);
+      expect(find.text('Hiding photos…'), findsNothing);
+      expect(find.text('Not ready'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(OutlinedButton, 'Hide photos'), findsOneWidget);
+      expect(find.text('Ready to download'), findsOneWidget);
+
+      await tester.tap(find.text('Hide photos'));
+      await tester.pump();
+
+      expect(admin.sessions['s1']!.photosReady, isFalse);
+      expect(find.text('Hiding photos…'), findsOneWidget);
+      expect(find.text('Making photos available…'), findsNothing);
+      expect(find.text('Ready to download'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(FilledButton, 'Make photos available'), findsOneWidget);
+      expect(find.text('Not ready'), findsOneWidget);
+    });
+
     for (final (status, note) in [
       (
         BookingStatus.pending,
@@ -315,6 +368,51 @@ void main() {
         expect(find.widgetWithText(FilledButton, 'Make photos available'), findsOneWidget);
       });
     }
+
+    for (final ready in [false, true]) {
+      testWidgets('an ID the download refuses (${ready ? 'available' : 'not available'}): says to recreate it, '
+          'and offers only to hide the photos', (tester) async {
+        const id = 'smith family';
+        final admin = FakeAdminService(
+          sessions: [testSession(id, status: BookingStatus.paid, uid: 'uid-smith', photosReady: ready)],
+          sessionPhotos: {id: _photos},
+        );
+        await _pumpSession(tester, admin: admin, id: id, size: const Size(320, 800));
+
+        expect(
+          find.widgetWithText(InlineMessage,
+              'Families can’t download this session’s photos: its document ID, “smith family”, may only use '
+              'letters, numbers, - and _. Recreate it in the Firestore console with an Auto-ID.'),
+          findsOneWidget,
+        );
+        expect(find.text('Make photos available'), findsNothing);
+        expect(find.byType(StatusTag), findsOneWidget); // Only the booking's status.
+        expect(find.text('Hide photos'), ready ? findsOneWidget : findsNothing);
+        expect(tester.takeException(), isNull);
+        expect(filledButtons(), lessThanOrEqualTo(1));
+      });
+    }
+
+    testWidgets('IDs with letters, numbers, - and _ are fine', (tester) async {
+      const id = 'Harper_2026-b';
+      final admin = FakeAdminService(sessions: [testSession(id)], sessionPhotos: {id: _photos});
+      await _pumpSession(tester, admin: admin, id: id);
+
+      expect(find.textContaining('document ID'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Make photos available'), findsOneWidget);
+    });
+
+    testWidgets('available on a booking that can’t be delivered: the tag says why, not "Ready to download"',
+        (tester) async {
+      final admin = FakeAdminService(
+        sessions: [testSession('b', status: BookingStatus.pending, photosReady: true)],
+        sessionPhotos: {'b': _photos},
+      );
+      await _pumpSession(tester, admin: admin, id: 'b');
+
+      expect(tester.widget<StatusTag>(find.widgetWithText(StatusTag, 'Ready once paid')).tone, StatusTone.neutral);
+      expect(find.text('Ready to download'), findsNothing);
+    });
   });
 
   group('uploading', () {
@@ -364,11 +462,13 @@ void main() {
       admin.uploads.single.complete();
       await _settleUploads(tester);
 
-      // A failure holds back "Make photos available" until it's dealt with.
+      // A failure holds back "Make photos available" until it's dealt with;
+      // this one can't be retried.
       expect(
-        find.text('Some photos didn’t upload. Retry them, or clear the upload list to go ahead without them.'),
+        find.text('Some files can’t be uploaded (see below). Clear the upload list to go ahead without them.'),
         findsOneWidget,
       );
+      expect(find.text('Retry failed'), findsNothing);
       expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Make photos available')).onPressed,
           isNull);
       await tapInView(tester, find.text('Clear upload list'));
@@ -376,6 +476,37 @@ void main() {
 
       expect(find.textContaining('Uploaded'), findsNothing);
       expect(find.widgetWithText(FilledButton, 'Make photos available'), findsOneWidget);
+    });
+
+    testWidgets('keyboard: "Clear upload list" hands focus to "Make photos available"', (tester) async {
+      final picker = FakePhotoPicker();
+      await _pumpSession(tester, picker: picker);
+      await _upload(tester, picker, ['notes.txt']);
+      await _settleUploads(tester);
+      Focus.of(tester.element(find.text('Clear upload list'))).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Clear upload list'), findsNothing);
+      expect(hasFocus(tester, find.text('Make photos available')), isTrue);
+    });
+
+    testWidgets('keyboard: "Hide photos" while uploading hands focus to "Upload photos"', (tester) async {
+      final picker = FakePhotoPicker();
+      await _pumpSession(tester, admin: _service(ready: true), picker: picker);
+      await _upload(tester, picker, ['IMG_4.jpg']);
+      Focus.of(tester.element(find.text('Hide photos'))).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      // It's "Make photos available" now, switched off until the upload ends.
+      expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Make photos available')).onPressed,
+          isNull);
+      expect(hasFocus(tester, find.text('Upload photos')), isTrue);
     });
 
     testWidgets('a failed upload says why, and can be retried', (tester) async {
@@ -389,6 +520,10 @@ void main() {
 
       expect(find.text(kAdminOfflineMessage), findsOneWidget);
       expect(LeaveWarning.active.value, isFalse);
+      expect(
+        find.text('Some photos didn’t upload. Retry them, or clear the upload list to go ahead without them.'),
+        findsOneWidget,
+      );
       await tapInView(tester, find.text('Retry failed'));
       await tester.pump();
       admin.uploads.last.complete();
@@ -450,6 +585,47 @@ void main() {
         find.widgetWithText(InlineMessage, 'Families who already downloaded need to download again to get these.'),
         findsOneWidget,
       );
+    });
+
+    testWidgets('only photos added after they’re available need downloading again, while they’re still here',
+        (tester) async {
+      final picker = FakePhotoPicker();
+      await _pumpSession(tester, admin: _service(autoCompleteUploads: true), picker: picker);
+      const note = 'Families who already downloaded need to download again to get these.';
+
+      // Uploaded first, then made available: nobody could have downloaded.
+      await _upload(tester, picker, ['IMG_4.jpg']);
+      await _settleUploads(tester);
+      await tapInView(tester, find.text('Make photos available'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Make photos available'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ready to download'), findsOneWidget);
+      expect(find.text(note), findsNothing);
+
+      await _upload(tester, picker, ['IMG_5.jpg']);
+      await _settleUploads(tester);
+      expect(find.widgetWithText(InlineMessage, note), findsOneWidget);
+
+      // Gone again, so there's nothing new to get.
+      await tapInView(tester, find.byTooltip('Delete IMG_5.jpg'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete photo'));
+      await tester.pumpAndSettle();
+      expect(find.text(note), findsNothing);
+
+      // Hiding them starts over.
+      await _upload(tester, picker, ['IMG_6.jpg']);
+      await _settleUploads(tester);
+      expect(find.text(note), findsOneWidget);
+      await tapInView(tester, find.text('Hide photos'));
+      await tester.pumpAndSettle();
+      await tapInView(tester, find.text('Make photos available'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Make photos available'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ready to download'), findsOneWidget);
+      expect(find.text(note), findsNothing);
     });
 
     group('leaving', () {
@@ -550,20 +726,37 @@ void main() {
 
     testWidgets('keyboard: a deleted photo hands focus to the next one, and the last to the one before',
         (tester) async {
-      await _pumpSession(tester);
+      // As slow as the real thing, so the page draws the delete running.
+      final admin = _service()..writeDelay = const Duration(milliseconds: 300);
+      await _pumpSession(tester, admin: admin);
 
       tester.widget<IconButton>(_deleteButton('IMG_2.jpg')).focusNode!.requestFocus();
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       await tester.tap(_inDialog('Delete photo'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // While it works, its button keeps focus: enabled, with a spinner.
+      final deleting = tester.widget<IconButton>(_deleteButton('IMG_2.jpg'));
+      expect(find.descendant(of: _deleteButton('IMG_2.jpg'), matching: find.byType(CircularProgressIndicator)),
+          findsOneWidget);
+      expect(deleting.onPressed, isNotNull);
+      expect(deleting.focusNode!.hasPrimaryFocus, isTrue);
+      await tester.pump(const Duration(milliseconds: 100));
       await tester.pumpAndSettle();
 
+      expect(_listed(tester), ['IMG_1.jpg', 'edits/IMG_3.jpg']);
       expect(tester.widget<IconButton>(_deleteButton('edits/IMG_3.jpg')).focusNode!.hasPrimaryFocus, isTrue);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       await tester.tap(_inDialog('Delete photo'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(tester.widget<IconButton>(_deleteButton('edits/IMG_3.jpg')).focusNode!.hasPrimaryFocus, isTrue);
+      await tester.pump(const Duration(milliseconds: 100));
       await tester.pumpAndSettle();
 
       expect(tester.widget<IconButton>(_deleteButton('IMG_1.jpg')).focusNode!.hasPrimaryFocus, isTrue);
@@ -597,6 +790,28 @@ void main() {
       expect(find.text('Upload photos first.'), findsOneWidget);
     });
 
+    testWidgets('"Delete all photos": screen readers hear it start once, not every count', (tester) async {
+      final semantics = tester.ensureSemantics();
+      final names = [for (var i = 1; i <= 5; i++) 'IMG_$i.jpg'];
+      final admin = _service(photos: names)..writeDelay = const Duration(milliseconds: 100);
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.text('Delete all photos'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete all photos'));
+      await tester.pump();
+      for (final done in [0, 3]) {
+        expect(find.text('Deleting $done of 5…'), findsOneWidget);
+        final button = find.ancestor(of: find.text('Deleting $done of 5…'), matching: find.byType(TextButton));
+        expect(tester.getSemantics(button),
+            isSemantics(label: 'Deleting 5 photos…', isLiveRegion: true, isButton: true));
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      semantics.dispose();
+    });
+
     testWidgets('"Delete all photos" stops at a failure, and says how far it got', (tester) async {
       final names = [for (var i = 1; i <= 5; i++) 'IMG_$i.jpg'];
       final admin = _service(photos: names);
@@ -612,6 +827,52 @@ void main() {
       expect(find.widgetWithText(InlineMessage, 'Deleted 2 of 5. $kAdminOfflineMessage'), findsOneWidget);
       expect(_listed(tester), hasLength(3));
       expect(find.text('Delete all photos'), findsOneWidget);
+    });
+
+    testWidgets('"Delete all photos" hides available photos from the family first, and says so', (tester) async {
+      final admin = _service(ready: true);
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.text('Delete all photos'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('All 3 photos in this session will be deleted for good. They’ll be hidden from the family first.'),
+        findsOneWidget,
+      );
+      await tester.tap(_inDialog('Delete all photos'));
+      await tester.pumpAndSettle();
+
+      final hidden = admin.calls.indexOf('setPhotosReady(s1, false)');
+      expect(hidden, isNonNegative);
+      expect(admin.calls.indexWhere((call) => call.startsWith('deletePhoto')), greaterThan(hidden));
+      expect(admin.sessionPhotos['s1'], isEmpty);
+      expect(find.text('Not ready'), findsOneWidget);
+    });
+
+    testWidgets('"Delete all photos" deletes nothing if the photos can’t be hidden first', (tester) async {
+      final admin = _service(ready: true)..errors['setPhotosReady'] = adminError(AdminErrorKind.offline);
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.text('Delete all photos'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete all photos'));
+      await tester.pumpAndSettle();
+
+      expect(admin.calls.where((call) => call.startsWith('deletePhoto')), isEmpty);
+      expect(
+        find.widgetWithText(InlineMessage, 'The photos weren’t hidden, so none were deleted. $kAdminOfflineMessage'),
+        findsOneWidget,
+      );
+      expect(_listed(tester), _photos);
+      expect(find.text('Ready to download'), findsOneWidget);
+    });
+
+    testWidgets('available with no photos: says the family’s download has nothing in it', (tester) async {
+      await _pumpSession(tester, admin: _service(ready: true, photos: const []));
+
+      expect(find.text('There are no photos to download. Upload them, or hide the photos until you do.'),
+          findsOneWidget);
+      expect(find.textContaining('every photo below'), findsNothing);
     });
 
     testWidgets('keyboard: after "Delete all photos", focus goes to "Upload photos"', (tester) async {
@@ -665,7 +926,7 @@ void main() {
 
       expect(admin.calls, contains('deleteSession(s1)'));
       expect(find.byType(AdminSessionPage), findsNothing);
-      expect(find.widgetWithText(InlineMessage, 'Deleted the Harper family’s session.'), findsOneWidget);
+      expect(find.widgetWithText(InlineMessage, 'Deleted the session for the Harper family.'), findsOneWidget);
       expect(find.byKey(const ValueKey('s1')), findsNothing);
     });
 
@@ -679,7 +940,19 @@ void main() {
       await tester.tap(_inDialog('Delete session'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Deleted Grandma Jo’s session.'), findsOneWidget);
+      expect(find.text('Deleted the session for Grandma Jo.'), findsOneWidget);
+    });
+
+    testWidgets('a plural name reads right: no possessive', (tester) async {
+      final admin = FakeAdminService(sessions: [testSession('s1', name: 'The Novaks')]);
+      await openFromAdmin(tester, admin);
+
+      await tapInView(tester, find.text('Delete session'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete session'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Deleted the session for the Novaks.'), findsOneWidget);
     });
 
     testWidgets('stops uploads first, so nothing lands in its folder afterwards', (tester) async {
@@ -699,8 +972,51 @@ void main() {
       expect(admin.calls.last, 'deleteSession(s1)');
     });
 
+    testWidgets('failed uploads can’t be retried into it while it’s being deleted', (tester) async {
+      final admin = _service()..writeDelay = const Duration(seconds: 1);
+      final picker = FakePhotoPicker();
+      await _pumpSession(tester, admin: admin, picker: picker);
+      await _upload(tester, picker, ['IMG_4.jpg', 'IMG_5.jpg']);
+      for (final upload in admin.pendingUploads) {
+        upload.fail(AdminErrorKind.offline);
+      }
+      await _settleUploads(tester);
+      expect(find.text('Retry failed'), findsOneWidget);
+
+      await tapInView(tester, find.text('Delete session'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete session'));
+      await tester.pump();
+
+      expect(find.text('Deleting session…'), findsOneWidget);
+      expect(find.text('Retry failed'), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(admin.uploads, hasLength(2));
+    });
+
+    testWidgets('photos picked before it started deleting aren’t uploaded into it', (tester) async {
+      final admin = _service()..writeDelay = const Duration(seconds: 1);
+      final picker = _LatePicker();
+      await _pumpSession(tester, admin: admin, picker: picker);
+      await tapInView(tester, find.text('Upload photos'));
+      await tester.pumpAndSettle();
+
+      await tapInView(tester, find.text('Delete session'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete session'));
+      await tester.pump();
+      picker.answer.complete([testPhoto('IMG_9.jpg')]);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(admin.calls, contains('deleteSession(s1)'));
+      expect(admin.uploads, isEmpty);
+    });
+
     testWidgets('says why when it isn’t deleted, and stays', (tester) async {
-      final admin = _service()..errors['deleteSession'] = adminError(AdminErrorKind.denied);
+      final admin = _service(photos: const [])..errors['deleteSession'] = adminError(AdminErrorKind.denied);
       await _pumpSession(tester, admin: admin);
 
       await tapInView(tester, find.text('Delete session'));
@@ -711,6 +1027,30 @@ void main() {
       expect(find.widgetWithText(InlineMessage, kAdminDeniedMessage), findsOneWidget);
       expect(find.byType(AdminSessionPage), findsOneWidget);
       expect(find.text('Delete session'), findsOneWidget);
+    });
+
+    testWidgets('failing part way: lists the photos again, so the page shows only what’s left', (tester) async {
+      final admin = _PartDeletingAdminService(
+        sessions: [testSession('s1', photosReady: true)],
+        sessionPhotos: {'s1': _photos},
+      );
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.text('Delete session'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete session'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(InlineMessage,
+            '$kAdminOfflineMessage Some of its photos may already be deleted: the list shows what’s left.'),
+        findsOneWidget,
+      );
+      expect(_listed(tester), ['edits/IMG_3.jpg']);
+      expect(find.text('1 photo'), findsOneWidget);
+      await tapInView(tester, find.text('Make photos available'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('1 photo. '), findsOneWidget);
     });
   });
 
@@ -822,5 +1162,32 @@ void main() {
         expect(filledButtons(), 0);
       });
     }
+  }
+}
+
+/// A file picker that answers only when the test completes [answer], as a
+/// person still choosing files does.
+class _LatePicker extends FakePhotoPicker {
+  final answer = Completer<List<PickedPhoto>>();
+
+  @override
+  Future<List<PickedPhoto>> call({required String accept}) {
+    accepts.add(accept);
+    return answer.future;
+  }
+}
+
+/// Deletes a session's photos as AdminService does (hidden first, then the
+/// photos) but goes offline after the first two, before the document.
+class _PartDeletingAdminService extends FakeAdminService {
+  _PartDeletingAdminService({super.sessions, super.sessionPhotos});
+
+  @override
+  Future<void> deleteSession(String id) async {
+    calls.add('deleteSession($id)');
+    await setPhotosReady(id, false);
+    final names = sessionPhotos[id]!..sort();
+    names.removeRange(0, 2);
+    throw adminError(AdminErrorKind.offline);
   }
 }

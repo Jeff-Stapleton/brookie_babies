@@ -14,17 +14,27 @@ import 'package:flutter/material.dart';
 String sessionDisplayName(Booking booking) => booking.name ?? booking.email ?? 'Session';
 
 /// Whether the family can download a session's photos, as a tag: "Ready
-/// to download" or "Not ready".
+/// to download" or "Not ready". Photos made available on a booking that
+/// can't have them delivered (unpaid, cancelled or refunded: the download
+/// function refuses those) get a neutral tag saying why instead.
 class PhotosReadyTag extends StatelessWidget {
-  const PhotosReadyTag({super.key, required this.ready});
+  const PhotosReadyTag({super.key, required this.ready, required this.status});
 
+  /// The session's photosReady.
   final bool ready;
+
+  final BookingStatus status;
 
   @override
   Widget build(BuildContext context) {
-    return ready
-        ? const StatusTag(label: 'Ready to download', tone: StatusTone.success)
-        : const StatusTag(label: 'Not ready');
+    if (!ready) return const StatusTag(label: 'Not ready');
+    return switch (status) {
+      BookingStatus.paid || BookingStatus.adhoc =>
+        const StatusTag(label: 'Ready to download', tone: StatusTone.success),
+      BookingStatus.pending => const StatusTag(label: 'Ready once paid'),
+      BookingStatus.cancelled => const StatusTag(label: 'Can’t download: cancelled'),
+      BookingStatus.refunded => const StatusTag(label: 'Can’t download: refunded'),
+    };
   }
 }
 
@@ -112,7 +122,7 @@ class _AdminSessionCardState extends State<AdminSessionCard> {
                             runSpacing: BrookieSpace.s2,
                             children: [
                               BookingStatusTag(status: booking.status),
-                              PhotosReadyTag(ready: booking.photosReady),
+                              PhotosReadyTag(ready: booking.photosReady, status: booking.status),
                             ],
                           ),
                         ],

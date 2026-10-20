@@ -75,7 +75,9 @@ class _AdminSessionPageState extends State<AdminSessionPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: BrookieTopBar(title: _title ?? 'Session', showAdminLink: false),
+      // No "Your sessions" either: its "Admin" and "See packages" would
+      // close this page without asking, stopping any uploads.
+      appBar: BrookieTopBar(title: _title ?? 'Session', showSessionsLink: false, showAdminLink: false),
       body: AdminGate(child: _SessionBody(sessionId: widget.sessionId, onTitle: _setTitle)),
     );
   }
@@ -105,6 +107,12 @@ String _messageFor(Object error, String fallback) {
   log('Admin action failed: $error');
   return fallback;
 }
+
+/// The session ids families can download photos from: getGalleryDownloadUrl
+/// refuses any other (BOOKING_ID_PATTERN in functions/src/gallery.ts; change
+/// them together). The app's own are Auto-IDs; one typed into the console
+/// may not be.
+final _downloadableId = RegExp(r'^[A-Za-z0-9_-]{1,128}$');
 
 /// Where AdminService stores a session's photo (storage.rules:
 /// `galleries/{bookingId}/`), for one the page uploaded itself.
@@ -145,8 +153,15 @@ class _SessionBodyState extends State<_SessionBody> {
   /// not on every bit of progress (UploadProgressList follows that).
   ({bool busy, int items, int failed, int done})? _queueSummary;
 
-  bool _savingReady = false;
+  /// The photosReady being saved; null when not saving.
+  bool? _savingReadyTo;
+  bool get _savingReady => _savingReadyTo != null;
   String? _readyError;
+
+  /// Photos stored while the others could already be downloaded, by name:
+  /// families who already downloaded need to again to get these. Forgotten
+  /// when the photos are hidden.
+  final _addedWhileReady = <String>{};
 
   /// Progress through "Delete all photos"; null when not deleting.
   ({int done, int total})? _deletingAll;
@@ -160,8 +175,10 @@ class _SessionBodyState extends State<_SessionBody> {
 
   // Each button keeps focus as it changes: the readiness button from "Make
   // photos available" to "Hide photos", the upload button from primary to
-  // outlined. A deleted photo hands focus to the next one.
+  // outlined. A deleted photo hands focus to the next one; a button its own
+  // press removes or switches off hands it to a neighbour.
   final _readyFocus = FocusNode(debugLabel: 'Photos ready');
+  final _clearFocus = FocusNode(debugLabel: 'Clear upload list');
   final _uploadFocus = FocusNode(debugLabel: 'Upload photos');
   final _deleteAllFocus = FocusNode(debugLabel: 'Delete all photos');
   final _photoFocus = <String, FocusNode>{};
@@ -188,6 +205,7 @@ class _SessionBodyState extends State<_SessionBody> {
       ..removeListener(_queueChanged)
       ..dispose();
     _readyFocus.dispose();
+    _clearFocus.dispose();
     _uploadFocus.dispose();
     _deleteAllFocus.dispose();
     for (final node in _photoFocus.values) {
@@ -202,7 +220,10 @@ class _SessionBodyState extends State<_SessionBody> {
 
   void _answered(SessionLookup lookup) {
     if (lookup is SessionFound) _lastFound = lookup;
-    setState(() => _lookup = lookup);
+    setState(() {
+      _lookup = lookup;
+      if (lookup is SessionFound && !lookup.booking.photosReady) _addedWhileReady.clear();
+    });
     // Deleting it from here: it stays as it was until the page is back on
     // Admin.
     if (_deletingSession && lookup is SessionMissing) return;
@@ -253,11 +274,14 @@ class _SessionBodyState extends State<_SessionBody> {
   }
 
   /// Adds a stored photo to the list, without listing the folder again.
+  /// The queue also reports one it found already stored (from another tab,
+  /// say), which may be listed by then, so it's added only once.
   void _uploaded(UploadItem item) {
     final photos = _photos;
-    if (!mounted || photos == null) return;
+    if (!mounted || photos == null || photos.any((photo) => photo.name == item.name)) return;
     setState(() {
       _photos = [...photos, _storedPhoto(widget.sessionId, item.name)]..sort((a, b) => a.name.compareTo(b.name));
+      if (_lastFound?.booking.photosReady ?? false) _addedWhileReady.add(item.name);
     });
   }
 
@@ -270,6 +294,9 @@ class _SessionBodyState extends State<_SessionBody> {
       (photos) {
         final existing = _photos;
         if (!mounted || photos.isEmpty || existing == null) return;
+        // Too late: they're being deleted (or are gone), and what lands now
+        // would outlive them.
+        if (_deletingSession || _deletingAll != null || _lookup is! SessionFound) return;
         _queue.add(photos, existing: existing.map((photo) => photo.name));
       },
       onError: (Object e) => log('Picking photos failed: $e'),
@@ -298,7 +325,10 @@ class _SessionBodyState extends State<_SessionBody> {
     if (_deletingAll != null) return 'Wait for the photos to finish deleting.';
     if (_queue.isBusy) return 'Wait for the uploads to finish.';
     if (_queue.countOf(UploadStatus.failed) > 0) {
-      return 'Some photos didn’t upload. Retry them, or clear the upload list to go ahead without them.';
+      // Files the rules refuse (too large, not a photo) can't be retried.
+      return _queue.canRetry
+          ? 'Some photos didn’t upload. Retry them, or clear the upload list to go ahead without them.'
+          : 'Some files can’t be uploaded (see below). Clear the upload list to go ahead without them.';
     }
     final photos = _photos;
     if (photos == null) return _listFailed ? 'Refresh the page to load the photos first.' : 'Checking the photos…';
@@ -323,7 +353,7 @@ class _SessionBodyState extends State<_SessionBody> {
   Future<void> _setReady(bool ready) async {
     if (_savingReady) return;
     setState(() {
-      _savingReady = true;
+      _savingReadyTo = ready;
       _readyError = null;
     });
     try {
@@ -331,9 +361,45 @@ class _SessionBodyState extends State<_SessionBody> {
     } catch (e) {
       if (mounted) setState(() => _readyError = _messageFor(e, 'That didn’t save. Try again.'));
     } finally {
-      if (mounted) setState(() => _savingReady = false);
+      if (mounted) {
+        // "Hide photos" pressed while photos upload becomes a switched-off
+        // "Make photos available".
+        _handFocusOn(_readyFocus, [_uploadFocus, _deleteAllFocus]);
+        setState(() => _savingReadyTo = null);
+      }
     }
   }
+
+  /// If [from] has focus and the next frame takes it away (its button gone
+  /// or switched off), gives it to the first of [to] that can take it,
+  /// rather than leaving it at the top of the page.
+  void _handFocusOn(FocusNode from, List<FocusNode> to) {
+    if (!_focusIsOn(from)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Still there and switched on, it keeps focus. (Its own hasFocus
+      // only catches up after this.)
+      if (!mounted || (from.context?.mounted == true && from.canRequestFocus)) return;
+      final next = to.where((node) => node.context?.mounted == true && node.canRequestFocus).firstOrNull;
+      next?.requestFocus();
+    });
+  }
+
+  /// "Clear upload list" goes with the failures it clears; focus goes up to
+  /// "Make photos available", which they were holding back.
+  void _clearUploads() {
+    _handFocusOn(_clearFocus, [_readyFocus, _uploadFocus]);
+    _queue.clearFinished();
+  }
+
+  /// Whether the page shows [booking]'s photos as available. While a change
+  /// saves it shows them as they were: the session's local copy changes at
+  /// once (Firestore's latency compensation), but families only see the
+  /// change once the server has it, and the pressed button stays busy
+  /// until then.
+  bool _shownReady(Booking booking) => switch (_savingReadyTo) {
+        final saving? => !saving,
+        null => booking.photosReady,
+      };
 
   FocusNode _focusFor(StoredPhoto photo) =>
       _photoFocus.putIfAbsent(photo.fullPath, () => FocusNode(debugLabel: 'Delete ${photo.name}'));
@@ -346,7 +412,10 @@ class _SessionBodyState extends State<_SessionBody> {
   /// to the photo now in its place (or the one before, or "Upload photos"),
   /// rather than back to the top of the page.
   void _removePhotos(Set<String> gone) {
-    final photos = _photos!;
+    // Being listed again (after a failed "Delete session"): the new list
+    // won't have them.
+    final photos = _photos;
+    if (photos == null) return;
     final focused = photos.indexWhere((photo) {
       final node = _photoFocus[photo.fullPath];
       return node != null && gone.contains(photo.fullPath) && _focusIsOn(node);
@@ -359,7 +428,13 @@ class _SessionBodyState extends State<_SessionBody> {
       final kept = photos.take(focused).where((photo) => !gone.contains(photo.fullPath)).length;
       (rest.isEmpty ? _uploadFocus : _focusFor(rest[math.min(kept, rest.length - 1)])).requestFocus();
     }
-    setState(() => _photos = rest);
+    setState(() {
+      _photos = rest;
+      _addedWhileReady.removeAll([
+        for (final photo in photos)
+          if (gone.contains(photo.fullPath)) photo.name,
+      ]);
+    });
     // Their buttons go with the next frame.
     final nodes = [
       for (final path in gone)
@@ -399,10 +474,16 @@ class _SessionBodyState extends State<_SessionBody> {
   Future<void> _deleteAll() async {
     final photos = List.of(_photos ?? const <StoredPhoto>[]);
     if (photos.isEmpty || _deletingAll != null) return;
+    // Like deleting the session: nobody downloads a half-deleted gallery,
+    // or is left with a download of nothing.
+    final hideFirst = _lastFound?.booking.photosReady ?? false;
     final confirmed = await showBrookieConfirm(
       context,
       title: 'Delete all photos?',
-      message: 'All ${_photoCount(photos.length)} in this session will be deleted for good.',
+      message: [
+        'All ${_photoCount(photos.length)} in this session will be deleted for good.',
+        if (hideFirst) 'They’ll be hidden from the family first.',
+      ].join(' '),
       confirmLabel: 'Delete all photos',
       destructive: true,
     );
@@ -411,6 +492,19 @@ class _SessionBodyState extends State<_SessionBody> {
       _deletingAll = (done: 0, total: photos.length);
       _deleteError = null;
     });
+    if (hideFirst) {
+      try {
+        await _admin.setPhotosReady(widget.sessionId, false);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _deletingAll = null;
+          _deleteError = 'The photos weren’t hidden, so none were deleted. ${_messageFor(e, 'Try again.')}';
+        });
+        return;
+      }
+      if (!mounted) return;
+    }
     // A few at a time, like the uploads; the first failure stops the rest.
     var next = 0;
     Object? failure;
@@ -492,7 +586,8 @@ class _SessionBodyState extends State<_SessionBody> {
       await _admin.deleteSession(widget.sessionId);
       if (!mounted) return;
       // Still deleting as far as the page shows, while it fades out.
-      AdminPage.returnWithNotice(context, 'Deleted ${_inSentence(name)}’s session.');
+      // No possessive: "the Novaks’s" and "Brooke’s cousins’s" don't read.
+      AdminPage.returnWithNotice(context, 'Deleted the session for ${_inSentence(name)}.');
       // With nothing below it to go back to, it stays, and says it's gone.
       if (ModalRoute.isCurrentOf(context) ?? false) {
         setState(() => _deletingSession = false);
@@ -500,12 +595,21 @@ class _SessionBodyState extends State<_SessionBody> {
       }
     } catch (e) {
       if (!mounted) return;
+      final why = _messageFor(e, 'The session wasn’t deleted. Try again.');
+      final hadPhotos = photos != null && photos.isNotEmpty;
       setState(() {
         _deletingSession = false;
-        _sessionError = _messageFor(e, 'The session wasn’t deleted. Try again.');
+        _sessionError =
+            hadPhotos ? '$why Some of its photos may already be deleted: the list shows what’s left.' : why;
       });
-      // It may have gone part way: the document is deleted last.
-      if (_lookup is SessionMissing) widget.onTitle(null);
+      // It may have gone part way: the document is deleted last, after the
+      // photos, so the list is checked again.
+      if (_lookup is SessionMissing) {
+        widget.onTitle(null);
+      } else if (!_listing) {
+        setState(() => _photos = null);
+        _listPhotos();
+      }
     }
   }
 
@@ -559,8 +663,10 @@ class _SessionBodyState extends State<_SessionBody> {
   /// changes it.
   Widget _readiness(BuildContext context, Booking booking) {
     final c = BrookieColors.of(context);
-    final ready = booking.photosReady;
-    final reason = ready ? null : _notReadyReason();
+    final ready = _shownReady(booking);
+    // Nothing to offer: the download would always be refused.
+    final badId = !_downloadableId.hasMatch(booking.id);
+    final reason = ready || badId ? null : _notReadyReason();
     // Failed uploads are the only thing holding it back, and the admin may
     // choose to go ahead without them.
     final failuresInTheWay = reason != null &&
@@ -581,15 +687,25 @@ class _SessionBodyState extends State<_SessionBody> {
       children: [
         const AdminHeading('Downloads'),
         const SizedBox(height: BrookieSpace.s3),
-        PhotosReadyTag(ready: ready),
-        const SizedBox(height: BrookieSpace.s2),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
-          child: Text(ready
-              ? 'The family can download every photo below as one zip.'
-              : 'The family can’t download the photos until you make them available.'),
-        ),
-        const SizedBox(height: BrookieSpace.s4),
+        if (badId)
+          InlineMessage(
+            message: 'Families can’t download this session’s photos: its document ID, “${booking.id}”, may '
+                'only use letters, numbers, - and _. Recreate it in the Firestore console with an Auto-ID.',
+          )
+        else ...[
+          PhotosReadyTag(ready: ready, status: booking.status),
+          const SizedBox(height: BrookieSpace.s2),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
+            child: Text(switch ((ready, _photos?.isEmpty ?? false)) {
+              // Their download would fail: there's nothing in it.
+              (true, true) => 'There are no photos to download. Upload them, or hide the photos until you do.',
+              (true, false) => 'The family can download every photo below as one zip.',
+              (false, _) => 'The family can’t download the photos until you make them available.',
+            }),
+          ),
+        ],
+        if (ready || !badId) const SizedBox(height: BrookieSpace.s4),
         if (ready)
           // Never disabled: hiding them is always possible.
           BusyButton(
@@ -599,7 +715,7 @@ class _SessionBodyState extends State<_SessionBody> {
             focusNode: _readyFocus,
             onPressed: () => _setReady(false),
           )
-        else
+        else if (!badId)
           BusyButton(
             label: 'Make photos available',
             busyLabel: 'Making photos available…',
@@ -612,9 +728,10 @@ class _SessionBodyState extends State<_SessionBody> {
         if (reason != null) ...[
           const SizedBox(height: BrookieSpace.s2),
           Text(reason, style: BrookieType.small.copyWith(color: c.inkSoft)),
-          if (failuresInTheWay) TextButton(onPressed: _queue.clearFinished, child: const Text('Clear upload list')),
+          if (failuresInTheWay)
+            TextButton(onPressed: _clearUploads, focusNode: _clearFocus, child: const Text('Clear upload list')),
         ],
-        if (ready && _queue.countOf(UploadStatus.done) > 0) ...[
+        if (ready && _addedWhileReady.isNotEmpty) ...[
           const SizedBox(height: BrookieSpace.s4),
           const InlineMessage(
             message: 'Families who already downloaded need to download again to get these.',
@@ -639,7 +756,7 @@ class _SessionBodyState extends State<_SessionBody> {
     final deletingAll = _deletingAll;
     final error = _deleteError;
     // Primary until the photos can be made available; then that is.
-    final primary = !booking.photosReady && _notReadyReason() != null;
+    final primary = !_shownReady(booking) && _notReadyReason() != null;
     final canUpload = photos != null && deletingAll == null && !_deletingSession;
     final upload = primary
         ? FilledButton.icon(
@@ -669,7 +786,9 @@ class _SessionBodyState extends State<_SessionBody> {
         ),
         const SizedBox(height: BrookieSpace.s4),
         Align(alignment: AlignmentDirectional.centerStart, child: upload),
-        if (_queue.items.isNotEmpty) ...[
+        // Not while the session is being deleted: "Retry failed" would put
+        // photos in its folder after it's emptied.
+        if (_queue.items.isNotEmpty && !_deletingSession) ...[
           const SizedBox(height: BrookieSpace.s5),
           UploadProgressList(queue: _queue),
         ],
@@ -696,6 +815,8 @@ class _SessionBodyState extends State<_SessionBody> {
                 BusyButton(
                   label: 'Delete all photos',
                   busyLabel: 'Deleting ${deletingAll?.done ?? 0} of ${deletingAll?.total ?? 0}…',
+                  // Heard once, not at every photo.
+                  busySemanticsLabel: 'Deleting ${_photoCount(deletingAll?.total ?? 0)}…',
                   busy: deletingAll != null,
                   kind: BusyButtonKind.text,
                   icon: Icons.delete_outline,

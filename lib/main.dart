@@ -48,7 +48,12 @@ Future<void> main() async {
     // The functions are deployed to us-central1 (functions/src/index.ts).
     gallery: FunctionsGalleryService(FirebaseFunctions.instanceFor(region: 'us-central1')),
     // The photos an admin chose, in order; until then, the gallery by name.
-    portfolio: StoragePortfolioService(FirebaseStorage.instance, homePhotoNames: admin.homePhotoNames),
+    // A choice read too late shows once it's in.
+    portfolio: StoragePortfolioService(
+      FirebaseStorage.instance,
+      homePhotoNames: admin.homePhotoNames,
+      onLateChoice: HomePage.reloadPhotos,
+    ),
     admin: admin,
     pickPhotos: web_photo_picker.pickPhotos,
     isEmbeddedBrowser: isEmbeddedBrowser(web.window.navigator.userAgent),

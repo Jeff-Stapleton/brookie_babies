@@ -258,6 +258,59 @@ void main() {
     expect(urls(tester, featured()), [photos(9)[1], photos(9)[3], photos(9)[4], photos(9)[5]]);
   });
 
+  group('reloadPhotos', () {
+    homeTest('shows the photos as they are now', (tester) async {
+      // The fake hands back this list, so changing it changes the photos.
+      final shown = photos(9);
+      final portfolio = FakePortfolioService(shown);
+      await pumpHome(tester, portfolio: portfolio);
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).first);
+
+      shown.setAll(0, photos(9).reversed);
+      HomePage.reloadPhotos();
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).last);
+      expect(urls(tester, featured()), photos(9).reversed.toList().sublist(1, 7));
+      expect(portfolio.requestedLimit, 1 + FeaturedPhotos.maxCount);
+    });
+
+    homeTest('gives photos that couldn’t be loaded another try', (tester) async {
+      server.broken.add(photos(9).first);
+      await pumpHome(tester);
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9)[1]);
+
+      server.broken.clear();
+      HomePage.reloadPhotos();
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).first);
+      expect(urls(tester, featured()), photos(9).sublist(1, 7));
+    });
+
+    homeTest('keeps the photos shown if the new list can’t be had', (tester) async {
+      final portfolio = FakePortfolioService(photos(9));
+      await pumpHome(tester, portfolio: portfolio);
+
+      portfolio.error = Exception('offline');
+      HomePage.reloadPhotos();
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).first);
+      expect(featured(), findsNWidgets(6));
+    });
+
+    homeTest('a home page that has closed doesn’t listen any more', (tester) async {
+      await pumpHome(tester);
+      await tester.pumpWidget(const SizedBox());
+
+      HomePage.reloadPhotos();
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   homeTest('the butter button is for the photograph; it gives way if no photo loads', (tester) async {
     server.broken.add(photos(1).single);
     tester.view.physicalSize = const Size(1440, 900);

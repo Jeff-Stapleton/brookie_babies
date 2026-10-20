@@ -27,16 +27,29 @@ class FeaturedPhotos extends StatelessWidget {
   /// window only decodes them again now and then.
   static const _decodeStep = 256;
 
-  @override
-  Widget build(BuildContext context) {
-    var columns = MediaQuery.sizeOf(context).width >= BrookieBreakpoint.gutter ? 3 : 2;
-    var count = math.min(photos.length, maxCount);
+  /// Three columns on [wide] screens (from [BrookieBreakpoint.gutter]), two
+  /// on phones.
+  static int _columns({required bool wide}) => wide ? 3 : 2;
+
+  /// How many of [n] photos the grid shows on [wide] screens or phones: at
+  /// most [maxCount], in full rows only. The admin's home page photos page
+  /// says so as photos are chosen.
+  static int shownCount(int n, {required bool wide}) {
+    final count = math.min(n, maxCount);
     // Two photos on a wide screen make a pair; a single one would fill the
     // whole column, so it is left out.
-    columns = math.min(columns, count);
-    if (columns < 2) return const SizedBox.shrink();
+    final columns = math.min(_columns(wide: wide), count);
+    if (columns < 2) return 0;
     // Only full rows: a lone print on the last row looks like a mistake.
-    count -= count % columns;
+    return count - count % columns;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= BrookieBreakpoint.gutter;
+    final count = shownCount(photos.length, wide: wide);
+    if (count == 0) return const SizedBox.shrink();
+    final columns = math.min(_columns(wide: wide), count);
 
     final shadow = BrookieColors.of(context).shadowPrint;
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);

@@ -166,9 +166,13 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
       ].take(PhotoRules.homeMaxPhotos).toList();
 
   /// Until photos are chosen, the site's photos follow the library's names,
-  /// so the page does too (unless the admin has changed them).
+  /// so the page's saved ones do too, and its chosen ones unless the admin
+  /// has changed them or is saving them.
   void _followFirstPhotos() {
-    if (_neverChosen && !_changed) _saved = _chosen = _firstPhotos();
+    if (!_neverChosen) return;
+    final first = _firstPhotos();
+    if (!_changed && !_saving) _chosen = first;
+    _saved = first;
   }
 
   void _toggle(String name) {

@@ -309,6 +309,48 @@ void main() {
       expect(chosen(tester), ['IMG_00.jpg', ..._photos(6)]);
       expect(LeaveWarning.active.value, isFalse);
     });
+
+    photoTest('a photo that lands during the first save leaves what’s being saved alone', (tester) async {
+      admin
+        ..homeNames = null
+        ..writeDelay = const Duration(seconds: 1);
+      picker.next = [testPhoto('IMG_00.jpg')];
+      await pumpPage(tester);
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+
+      await reveal(tester, save());
+      await tester.tap(save());
+      await tester.pump();
+      admin.uploads.single.complete();
+      await tester.pump();
+      expect(chosen(tester), _photos(7));
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(admin.homeNames, _photos(7));
+      expect(chosen(tester), _photos(7));
+      expect(discard(), findsNothing);
+      expect(find.text('Saved. The home page shows these photos now.'), findsOneWidget);
+      expect(LeaveWarning.active.value, isFalse);
+    });
+
+    photoTest('with changes, a new photo still moves what the site shows, so discarding goes back to it',
+        (tester) async {
+      admin
+        ..homeNames = null
+        ..autoCompleteUploads = true;
+      picker.next = [testPhoto('IMG_00.jpg')];
+      await pumpPage(tester);
+      await tapAndSettle(tester, rowButton('IMG_07.jpg', Icons.close));
+
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+
+      // The admin's choice stays as she left it.
+      expect(chosen(tester), _photos(6));
+      await tapAndSettle(tester, discard());
+      expect(chosen(tester), ['IMG_00.jpg', ..._photos(6)]);
+      expect(LeaveWarning.active.value, isFalse);
+    });
   });
 
   group('choosing', () {

@@ -285,6 +285,9 @@ class _SessionBodyState extends State<_SessionBody> {
       (photos) {
         final existing = _photos;
         if (!mounted || photos.isEmpty || existing == null) return;
+        // Too late: they're being deleted (or are gone), and what lands now
+        // would outlive them.
+        if (_deletingSession || _deletingAll != null || _lookup is! SessionFound) return;
         _queue.add(photos, existing: existing.map((photo) => photo.name));
       },
       onError: (Object e) => log('Picking photos failed: $e'),
@@ -722,7 +725,9 @@ class _SessionBodyState extends State<_SessionBody> {
         ),
         const SizedBox(height: BrookieSpace.s4),
         Align(alignment: AlignmentDirectional.centerStart, child: upload),
-        if (_queue.items.isNotEmpty) ...[
+        // Not while the session is being deleted: "Retry failed" would put
+        // photos in its folder after it's emptied.
+        if (_queue.items.isNotEmpty && !_deletingSession) ...[
           const SizedBox(height: BrookieSpace.s5),
           UploadProgressList(queue: _queue),
         ],

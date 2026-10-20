@@ -2,7 +2,10 @@
 // for them, making the photos available, uploading, the photo list, and
 // deleting photos or the whole (ad hoc) session.
 
+import 'dart:async';
+
 import 'package:brookie_babies/models/booking.dart';
+import 'package:brookie_babies/models/picked_photo.dart';
 import 'package:brookie_babies/models/session_lookup.dart';
 import 'package:brookie_babies/pages/admin_page.dart';
 import 'package:brookie_babies/pages/admin_session_page.dart';
@@ -836,6 +839,49 @@ void main() {
       expect(admin.calls.last, 'deleteSession(s1)');
     });
 
+    testWidgets('failed uploads can’t be retried into it while it’s being deleted', (tester) async {
+      final admin = _service()..writeDelay = const Duration(seconds: 1);
+      final picker = FakePhotoPicker();
+      await _pumpSession(tester, admin: admin, picker: picker);
+      await _upload(tester, picker, ['IMG_4.jpg', 'IMG_5.jpg']);
+      for (final upload in admin.pendingUploads) {
+        upload.fail(AdminErrorKind.offline);
+      }
+      await _settleUploads(tester);
+      expect(find.text('Retry failed'), findsOneWidget);
+
+      await tapInView(tester, find.text('Delete session'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete session'));
+      await tester.pump();
+
+      expect(find.text('Deleting session…'), findsOneWidget);
+      expect(find.text('Retry failed'), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(admin.uploads, hasLength(2));
+    });
+
+    testWidgets('photos picked before it started deleting aren’t uploaded into it', (tester) async {
+      final admin = _service()..writeDelay = const Duration(seconds: 1);
+      final picker = _LatePicker();
+      await _pumpSession(tester, admin: admin, picker: picker);
+      await tapInView(tester, find.text('Upload photos'));
+      await tester.pumpAndSettle();
+
+      await tapInView(tester, find.text('Delete session'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete session'));
+      await tester.pump();
+      picker.answer.complete([testPhoto('IMG_9.jpg')]);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(admin.calls, contains('deleteSession(s1)'));
+      expect(admin.uploads, isEmpty);
+    });
+
     testWidgets('says why when it isn’t deleted, and stays', (tester) async {
       final admin = _service()..errors['deleteSession'] = adminError(AdminErrorKind.denied);
       await _pumpSession(tester, admin: admin);
@@ -959,5 +1005,17 @@ void main() {
         expect(filledButtons(), 0);
       });
     }
+  }
+}
+
+/// A file picker that answers only when the test completes [answer], as a
+/// person still choosing files does.
+class _LatePicker extends FakePhotoPicker {
+  final answer = Completer<List<PickedPhoto>>();
+
+  @override
+  Future<List<PickedPhoto>> call({required String accept}) {
+    accepts.add(accept);
+    return answer.future;
   }
 }

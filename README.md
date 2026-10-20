@@ -319,7 +319,7 @@ the security note in [AGENT.md](AGENT.md).
 
 ### Deploying the backend
 
-`functions/` holds the Cloud Functions, and `firestore.rules` and `storage.rules` hold the security rules. They were first deployed by hand on 2026-10-17. CI now deploys them on every push to `main`. Do the one-time setup below **before** the change that added this reaches `main`.
+`functions/` holds the Cloud Functions, and `firestore.rules` and `storage.rules` hold the security rules. They were first deployed by hand on 2026-10-17. CI deploys them on pushes to `main` once the repository variable `BACKEND_DEPLOY_LIVE` is `true` (see "Automatic backend deploys"); until then its backend job is a dry run, so deploy them by hand before merging a site that needs them (see "Deploy order"). Do the one-time setup below **before** the change that added this reaches `main`.
 
 These files are the source of truth: each deploy **replaces the Firestore and Storage rules set in the Firebase console**, so change rules here, not in the console. Only `_admin/gallery/` (the home page photo library) and `site/home` (which of its photos the home page shows) are publicly readable, families can read only their own bookings and the ad hoc sessions shared with them, and only admins can write from the app.
 

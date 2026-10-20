@@ -1,6 +1,6 @@
 # TODO
 
-Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-19 (admin portal).
+Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-20 (admin portal).
 
 ## 1. Ship the admin portal
 
@@ -13,6 +13,8 @@ version of the download function. Do these in order.
       date:
       ```bash
       npm ci --prefix functions
+      firebase deploy --only firestore:rules,storage --dry-run   # compiles the rules; changes nothing
+      bash scripts/test-rules.sh   # read-only: expect "149 of 149" and "65 of 65" cases to pass
       firebase deploy --only functions,firestore:rules,storage
       ```
       The site that's live now keeps working with them. Without them, the new
@@ -27,6 +29,10 @@ version of the download function. Do these in order.
       ```
       Refresh the site: the account menu now has **Admin**. `--revoke` takes
       it away (a sign-in already open keeps access for up to an hour).
+- [ ] **Let the download function read bookings and photos**, if you
+      haven't yet (section 2's first item):
+      `bash scripts/setup-functions-runtime.sh`. Without it, the download
+      step below fails.
 - [ ] **Test it** in Chrome, then in Safari, on the live site once merged.
       (To test before merging, deploy the backend by hand as above, then
       `flutter run -d chrome`: it uses the real project.)
@@ -48,7 +54,8 @@ version of the download function. Do these in order.
         Storage → `galleries` no longer has its folder.
   - [ ] **Edit home page photos**: upload 2 or 3 JPEGs, and an iPhone HEIC if
         the picker lets you choose one (it should be refused: "Export it as
-        JPEG"). Tick **On the home page** for a new photo, move it to the top
+        JPEG"). If seven photos are already on the home page, **Remove** one first.
+        Tick **On the home page** for a new photo, move it to the top
         with **Move up**, **Save home page**, then check the home page's
         full-screen photo and the ones below it.
   - [ ] Delete a library photo that isn't on the home page. Make a change

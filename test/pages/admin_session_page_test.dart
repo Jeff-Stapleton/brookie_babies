@@ -726,20 +726,37 @@ void main() {
 
     testWidgets('keyboard: a deleted photo hands focus to the next one, and the last to the one before',
         (tester) async {
-      await _pumpSession(tester);
+      // As slow as the real thing, so the page draws the delete running.
+      final admin = _service()..writeDelay = const Duration(milliseconds: 300);
+      await _pumpSession(tester, admin: admin);
 
       tester.widget<IconButton>(_deleteButton('IMG_2.jpg')).focusNode!.requestFocus();
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       await tester.tap(_inDialog('Delete photo'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // While it works, its button keeps focus: enabled, with a spinner.
+      final deleting = tester.widget<IconButton>(_deleteButton('IMG_2.jpg'));
+      expect(find.descendant(of: _deleteButton('IMG_2.jpg'), matching: find.byType(CircularProgressIndicator)),
+          findsOneWidget);
+      expect(deleting.onPressed, isNotNull);
+      expect(deleting.focusNode!.hasPrimaryFocus, isTrue);
+      await tester.pump(const Duration(milliseconds: 100));
       await tester.pumpAndSettle();
 
+      expect(_listed(tester), ['IMG_1.jpg', 'edits/IMG_3.jpg']);
       expect(tester.widget<IconButton>(_deleteButton('edits/IMG_3.jpg')).focusNode!.hasPrimaryFocus, isTrue);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       await tester.tap(_inDialog('Delete photo'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(tester.widget<IconButton>(_deleteButton('edits/IMG_3.jpg')).focusNode!.hasPrimaryFocus, isTrue);
+      await tester.pump(const Duration(milliseconds: 100));
       await tester.pumpAndSettle();
 
       expect(tester.widget<IconButton>(_deleteButton('IMG_1.jpg')).focusNode!.hasPrimaryFocus, isTrue);

@@ -118,6 +118,19 @@ void main() {
       expect(tester.widget<SessionFormPage>(find.byType(SessionFormPage)).session?.id, 's1');
     });
 
+    testWidgets('the account menu has no way off the page but back and "Sign out"', (tester) async {
+      await _pumpSession(tester);
+
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+
+      // "Your sessions" leads to "Admin" and "See packages", which would
+      // close this page without asking, stopping its uploads.
+      expect(find.text('Your sessions'), findsNothing);
+      expect(find.text('Admin'), findsNothing);
+      expect(find.text('Sign out'), findsOneWidget);
+    });
+
     testWidgets('changes made elsewhere show at once', (tester) async {
       final admin = _service();
       await _pumpSession(tester, admin: admin);

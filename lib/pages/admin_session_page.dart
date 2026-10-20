@@ -75,7 +75,9 @@ class _AdminSessionPageState extends State<AdminSessionPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: BrookieTopBar(title: _title ?? 'Session', showAdminLink: false),
+      // No "Your sessions" either: its "Admin" and "See packages" would
+      // close this page without asking, stopping any uploads.
+      appBar: BrookieTopBar(title: _title ?? 'Session', showSessionsLink: false, showAdminLink: false),
       body: AdminGate(child: _SessionBody(sessionId: widget.sessionId, onTitle: _setTitle)),
     );
   }

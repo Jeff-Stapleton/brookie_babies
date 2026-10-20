@@ -77,6 +77,11 @@ void main() {
       expect(PhotoRules.sessionPhotoProblem(testPhoto('notes.txt', contentType: 'text/plain')),
           'notes.txt isn’t a photo.');
       expect(PhotoRules.sessionPhotoProblem(testPhoto('notes', contentType: '')), 'notes isn’t a photo.');
+      // A Mac's metadata beside each photo on a memory card, typed by its
+      // ending: the listing and the zip leave it out.
+      expect(PhotoRules.sessionPhotoProblem(testPhoto('._DSC_0001.JPG', size: 4096)),
+          '._DSC_0001.JPG isn’t a photo.');
+      expect(PhotoRules.sessionPhotoProblem(testPhoto('.hidden.jpg')), '.hidden.jpg isn’t a photo.');
       expect(PhotoRules.sessionPhotoProblem(testPhoto('IMG_3.jpg', size: 0)), 'IMG_3.jpg is empty.');
       expect(PhotoRules.sessionPhotoProblem(testPhoto('raw.jpg', size: PhotoRules.sessionMaxBytes)),
           'raw.jpg is 100 MB. Session photos must be under 100 MB.');

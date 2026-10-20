@@ -68,10 +68,14 @@ abstract final class PhotoRules {
     return safe.isEmpty ? 'photo' : safe;
   }
 
-  /// Why [photo] can't be uploaded to a session, or null if it can.
+  /// Why [photo] can't be uploaded to a session, or null if it can. A name
+  /// starting with "." (a Mac's "._IMG_1.JPG" on a memory card, say) isn't
+  /// a photo: the session's listing and the family's zip leave those out.
   static String? sessionPhotoProblem(PickedPhoto photo) {
     final type = contentTypeFor(photo);
-    if (type == null || !type.startsWith('image/')) return '${photo.name} isn’t a photo.';
+    if (type == null || !type.startsWith('image/') || photo.name.startsWith('.')) {
+      return '${photo.name} isn’t a photo.';
+    }
     return _sizeProblem(photo, sessionMaxBytes, 'Session photos');
   }
 

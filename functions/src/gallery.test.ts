@@ -450,8 +450,10 @@ describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000
     bucket.put("galleries/b1/a.jpg", "photo");
     addAdHocSession(BOOKING_ID);
     assert.equal((await callAsGuest(GUEST_TOKEN)).photoCount, 1);
-    // Its uid, if one was typed in, opens it too; like " Paid ", a hand-typed
-    // " Adhoc " is forgiven there, as in the app.
+    // Its uid, if one was typed in, opens it too, and the status check
+    // forgives a hand-typed " Adhoc " as it does " Paid ". The app doesn't:
+    // Booking.fromMap reads only an exact "adhoc", so it never offers this
+    // download, and access by email needs the exact value (canDownload).
     for (const status of ["adhoc", " Adhoc "]) {
       addAdHocSession(BOOKING_ID, {uid: UID, status});
       assert.equal((await call()).photoCount, 1);

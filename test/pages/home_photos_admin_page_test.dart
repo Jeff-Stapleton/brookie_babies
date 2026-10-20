@@ -707,6 +707,23 @@ void main() {
       expect(chosen(tester).last, 'IMG_99.jpg');
     });
 
+    photoTest('a name passed on twice joins the library once', (tester) async {
+      picker.next = [testPhoto('IMG_99.jpg')];
+      await pumpPage(tester);
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+      admin.uploads.single.complete();
+      await tester.pumpAndSettle();
+
+      // As the queue does for a name it finds already stored.
+      final queue = _queueOf(tester);
+      queue.onUploaded!(queue.items.single);
+      await tester.pumpAndSettle();
+
+      expect(tile('IMG_99.jpg'), findsOneWidget);
+      expect(find.text('11 photos'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
     photoTest('a cancelled picker changes nothing, and the page never waits on it', (tester) async {
       picker.neverAnswers = true;
       await pumpPage(tester);
@@ -776,6 +793,16 @@ void main() {
       expect(find.byType(HomePhotosAdminPage), findsNothing);
       expect(admin.uploads.single.cancelled, isTrue);
       expect(LeaveWarning.active.value, isFalse);
+    });
+
+    photoTest('the account menu has no "Your sessions", whose pages could leave without asking', (tester) async {
+      await pumpPage(tester);
+
+      await tapAndSettle(tester, find.byType(CircleAvatar));
+
+      expect(find.text('Sign out'), findsOneWidget);
+      expect(find.text('Your sessions'), findsNothing);
+      expect(find.text('Admin'), findsNothing);
     });
 
     photoTest('with nothing to lose, back just goes back', (tester) async {

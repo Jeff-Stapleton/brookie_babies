@@ -31,7 +31,9 @@ class HomePhotosAdminPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      appBar: BrookieTopBar(title: 'Home page photos', showAdminLink: false),
+      // No "Your sessions" either: the pages it leads to can leave this one
+      // without asking, losing uploads and changes.
+      appBar: BrookieTopBar(title: 'Home page photos', showSessionsLink: false, showAdminLink: false),
       body: AdminGate(child: _HomePhotosEditor()),
     );
   }
@@ -277,10 +279,11 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   }
 
   /// A photo just stored joins the library at once, for now without a
-  /// link to show it by (they come with the next listing).
+  /// link to show it by (they come with the next listing). Once: the queue
+  /// also passes on a name it found already stored.
   void _onUploaded(UploadItem item) {
     final library = _library;
-    if (!mounted || library == null) return;
+    if (!mounted || library == null || library.any((file) => file.name == item.name)) return;
     _set(() {
       _library = [
         ...library,

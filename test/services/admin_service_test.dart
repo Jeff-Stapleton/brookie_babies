@@ -144,7 +144,7 @@ void main() {
       expect(
         sessionDetailsProblem(_details(
           name: 'x' * 100,
-          email: ' Pat.Parent+photos@Gmail.COM ',
+          email: ' Pat.Parent+photos@Example.COM ',
           packageName: 'Ultimate',
           date: DateTime(9999, 12, 31),
           time: (hour: 23, minute: 59),
@@ -153,6 +153,23 @@ void main() {
         isNull,
       );
       expect(sessionDetailsProblem(_details(name: '  The Harper family  ', email: 'a@b.co')), isNull);
+      expect(sessionDetailsProblem(_details(email: ' Pat.Parent@GoogleMail.com ')), isNull);
+    });
+
+    test('refuses an email no Google sign-in could match, though the rules would take it', () {
+      for (final (email, says) in [
+        ('<harper@example.com>', 'An email address has no < or >. Enter just the address, like name@gmail.com.'),
+        ('mailto:harper@example.com', '“mailto:” isn’t part of the address. Enter just the address'),
+        ('Pat <pat@example.com>', 'no < or >'),
+        ('har per@example.com', 'That has a space in it. Take it out: an email address has none.'),
+        (
+          ' Pat.Parent+Photos@Gmail.com',
+          '“+photos” isn’t part of a Gmail address: Google signs them in without it. Take it out.',
+        ),
+        ('pat+@googlemail.com', '“+” isn’t part of a Gmail address'),
+      ]) {
+        expect(sessionDetailsProblem(_details(email: email)), contains(says), reason: email);
+      }
     });
 
     test('refuses what the rules refuse, saying how to fix it', () {
@@ -162,7 +179,6 @@ void main() {
         (_details(email: ''), 'Google email'),
         (_details(email: 'harper'), 'Google email'),
         (_details(email: 'harper@example'), 'Google email'),
-        (_details(email: 'har per@example.com'), 'Google email'),
         (_details(email: 'harper@@example.com'), 'Google email'),
         (_details(packageName: 'Gold'), 'Choose Basic, Premium, Ultimate or no package'),
         (_details(date: DateTime(10000)), 'Choose a date'),
@@ -320,6 +336,18 @@ void main() {
 
     test('refuses what the rules would refuse, before writing', () async {
       await expectLater(admin.createSession(_details(email: 'harper')), throwsA(_adminError(AdminErrorKind.invalid)));
+      expect(log, isEmpty);
+    });
+
+    test('refuses an email no guest could sign in with, before writing', () async {
+      await expectLater(
+        admin.createSession(_details(email: 'pat+photos@gmail.com')),
+        throwsA(_adminError(AdminErrorKind.invalid, message: contains('“+photos”'))),
+      );
+      await expectLater(
+        admin.updateSession(testSession('s1'), _details(email: '<pat@example.com>')),
+        throwsA(_adminError(AdminErrorKind.invalid, message: contains('no < or >'))),
+      );
       expect(log, isEmpty);
     });
 

@@ -55,6 +55,8 @@ String? _nameProblem(String? name) {
 String? _emailProblem(String? email) {
   final normalized = SessionRules.normalizeEmail(email ?? '');
   if (normalized.isEmpty) return 'Enter the email they use to sign in to Google.';
+  final googleProblem = SessionRules.googleEmailProblem(normalized);
+  if (googleProblem != null) return googleProblem;
   if (!SessionRules.emailPattern.hasMatch(normalized)) {
     return 'That isn’t a whole email address. Check it, like name@gmail.com.';
   }
@@ -289,7 +291,15 @@ class _SessionFormState extends State<_SessionForm> {
               controller: _email,
               focusNode: _emailFocus,
               style: _inputStyle(context),
-              decoration: _decoration(context, label: 'Email', helper: 'The email they use to sign in to Google.'),
+              decoration: _decoration(
+                context,
+                label: 'Email',
+                // The guest is matched by exact address. Google signs in a
+                // Gmail address typed without its dots, but tells the app
+                // the account's own, dots and all.
+                helper: 'The email they use to sign in to Google. For Gmail, copy it exactly as it appears in '
+                    'their Google account, dots included.',
+              ),
               keyboardType: TextInputType.emailAddress,
               autocorrect: false,
               textInputAction: TextInputAction.next,

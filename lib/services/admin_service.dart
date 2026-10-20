@@ -500,8 +500,9 @@ AdminException adminExceptionFrom(
 const _cancelledMessage = 'Cancelled before it finished. Try again.';
 
 /// Why firestore.rules would refuse an ad hoc session with [details] (its
-/// validName, validEmail, validDate, ... functions), written for the admin;
-/// null if it wouldn't. Change the two together.
+/// validName, validEmail, validDate, ... functions), or why no guest could
+/// ever sign in to it (SessionRules.googleEmailProblem), written for the
+/// admin; null if neither. Change the rules and this together.
 @visibleForTesting
 String? sessionDetailsProblem(SessionDetails details) {
   final name = details.name.trim();
@@ -509,6 +510,8 @@ String? sessionDetailsProblem(SessionDetails details) {
   if (name.length > SessionRules.nameMaxLength) {
     return 'The name is too long. Shorten it to ${SessionRules.nameMaxLength} characters or fewer.';
   }
+  final googleEmailProblem = SessionRules.googleEmailProblem(details.email);
+  if (googleEmailProblem != null) return googleEmailProblem;
   if (!SessionRules.emailPattern.hasMatch(SessionRules.normalizeEmail(details.email))) {
     return 'That email doesn’t look right. Enter the Google email they sign in with, like name@gmail.com.';
   }

@@ -70,7 +70,11 @@ void main() {
       expect(find.text('Add a session'), findsNWidgets(2));
       expect(find.text('For family, friends and anyone not booked on the site. No payment needed.'), findsOneWidget);
       expect(find.text('Who it’s for, such as “The Harper family”.'), findsOneWidget);
-      expect(find.text('The email they use to sign in to Google.'), findsOneWidget);
+      expect(
+        find.text('The email they use to sign in to Google. For Gmail, copy it exactly as it appears in '
+            'their Google account, dots included.'),
+        findsOneWidget,
+      );
       expect(find.text('No package'), findsOneWidget);
       expect(find.text('Date'), findsOneWidget);
       expect(find.text('No time'), findsOneWidget);
@@ -147,6 +151,37 @@ void main() {
       expect(find.textContaining('whole email address'), findsNothing);
       await _chooseDay(tester, 1);
       expect(find.text('Choose the day of the session.'), findsNothing);
+    });
+
+    testWidgets('refuses an email no Google sign-in could match, saying how to fix it', (tester) async {
+      final admin = FakeAdminService();
+      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await _fillIn(tester);
+
+      for (final (email, says) in [
+        ('<novak@example.com>', 'An email address has no < or >. Enter just the address, like name@gmail.com.'),
+        (
+          'mailto:novak@example.com',
+          '“mailto:” isn’t part of the address. Enter just the address, like name@gmail.com.',
+        ),
+        ('no vak@example.com', 'That has a space in it. Take it out: an email address has none.'),
+        (
+          'novak+photos@gmail.com',
+          '“+photos” isn’t part of a Gmail address: Google signs them in without it. Take it out.',
+        ),
+      ]) {
+        await tester.enterText(_field('Email'), email);
+        await tapInView(tester, find.text('Add session'));
+        await tester.pumpAndSettle();
+        expect(find.text(says), findsOneWidget, reason: email);
+      }
+      expect(admin.calls, isEmpty);
+
+      // A tag on another domain may be how their Google account is named.
+      await tester.enterText(_field('Email'), 'novak+photos@example.com');
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+      expect(admin.sessions.values.single.email, 'novak+photos@example.com');
     });
 
     testWidgets('saves the session and goes straight on to it; back from there skips the form', (tester) async {

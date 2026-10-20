@@ -27,17 +27,21 @@ typedef _Time = ({int hour, int minute});
 /// Every field is checked against what firestore.rules accept
 /// ([SessionRules]) before anything is saved.
 class SessionFormPage extends StatelessWidget {
-  const SessionFormPage({super.key, this.session});
+  const SessionFormPage({super.key, this.session, this.now});
 
   /// The ad hoc session to edit; null to add one.
   final Booking? session;
+
+  /// The current time, which decides the calendar's today and range and how
+  /// the chosen day reads. Defaults to the clock; tests pin it.
+  final DateTime? now;
 
   @override
   Widget build(BuildContext context) {
     final adding = session == null;
     return Scaffold(
       appBar: BrookieTopBar(title: adding ? 'Add a session' : 'Edit session', showAdminLink: false),
-      body: AdminGate(child: _SessionForm(session: session)),
+      body: AdminGate(child: _SessionForm(session: session, now: now)),
     );
   }
 }
@@ -99,9 +103,10 @@ InputDecoration _decoration(
 TextStyle? _inputStyle(BuildContext context) => Theme.of(context).textTheme.bodyMedium;
 
 class _SessionForm extends StatefulWidget {
-  const _SessionForm({required this.session});
+  const _SessionForm({required this.session, required this.now});
 
   final Booking? session;
+  final DateTime? now;
 
   @override
   State<_SessionForm> createState() => _SessionFormState();
@@ -161,10 +166,14 @@ class _SessionFormState extends State<_SessionForm> {
     super.dispose();
   }
 
+  /// Read as it's needed: the form may stay open past midnight.
+  DateTime get _now => widget.now ?? DateTime.now();
+
   Future<void> _chooseDate(FormFieldState<DateTime> field) async {
+    final now = _now;
     final chosen = await showBrookieDialog<DateTime>(
       context,
-      builder: (context) => _DateDialog(initial: _date, now: DateTime.now()),
+      builder: (context) => _DateDialog(initial: _date, now: now),
     );
     if (chosen == null || !mounted) return;
     setState(() => _date = chosen);
@@ -327,6 +336,7 @@ class _SessionFormState extends State<_SessionForm> {
               validator: _dateProblem,
               builder: (field) => _DateField(
                 value: field.value,
+                now: _now,
                 errorText: field.errorText,
                 focusNode: _dateFocus,
                 onPressed: () => _chooseDate(field),
@@ -394,9 +404,18 @@ class _SessionFormState extends State<_SessionForm> {
 /// The session's day, shown like the form's other fields; pressing it (or
 /// Enter or Space) opens the calendar.
 class _DateField extends StatefulWidget {
-  const _DateField({required this.value, required this.errorText, required this.focusNode, required this.onPressed});
+  const _DateField({
+    required this.value,
+    required this.now,
+    required this.errorText,
+    required this.focusNode,
+    required this.onPressed,
+  });
 
   final DateTime? value;
+
+  /// For how [value] reads (the year shows only when it isn't this one's).
+  final DateTime now;
   final String? errorText;
   final FocusNode focusNode;
   final VoidCallback onPressed;
@@ -447,7 +466,7 @@ class _DateFieldState extends State<_DateField> {
               isFocused: widget.focusNode.hasFocus,
               isHovering: _hovered,
               isEmpty: value == null,
-              child: Text(value == null ? '' : formatDayShort(value, now: DateTime.now()), style: _inputStyle(context)),
+              child: Text(value == null ? '' : formatDayShort(value, now: widget.now), style: _inputStyle(context)),
             ),
           ),
         ),

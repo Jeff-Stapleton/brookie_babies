@@ -61,11 +61,13 @@ Future<NavigatorState> _pumpOver(WidgetTester tester, FakeAdminService admin, Se
 }
 
 void main() {
-  final now = DateTime.now();
+  // Pinned, so a run that crosses midnight or a month reads the same day
+  // everywhere. Late in the day, as the clock might be.
+  final now = DateTime(2031, 2, 10, 23, 59);
 
   group('adding', () {
     testWidgets('the fields, what each is for, and the one primary button', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       expect(find.text('Add a session'), findsNWidgets(2));
       expect(find.text('For family, friends and anyone not booked on the site. No payment needed.'), findsOneWidget);
@@ -85,7 +87,7 @@ void main() {
     });
 
     testWidgets('typed text is set in Jost, like the site’s other controls', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage());
+      await pumpAdminPage(tester, SessionFormPage(now: now));
 
       final style =
           tester.widget<EditableText>(find.descendant(of: _field('Name'), matching: find.byType(EditableText))).style;
@@ -94,7 +96,7 @@ void main() {
     });
 
     testWidgets('packages: none, or one of the three', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       await tapInView(tester, find.text('No package'));
       await tester.pumpAndSettle();
@@ -104,7 +106,7 @@ void main() {
     });
 
     testWidgets('times: none, or every quarter hour from 6:00 am to 9:00 pm', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       final dropdown = tester.widget<DropdownButton<({int hour, int minute})?>>(
           find.byType(DropdownButton<({int hour, int minute})?>));
@@ -119,7 +121,7 @@ void main() {
 
     testWidgets('empty: says what each required field needs, and focuses the first', (tester) async {
       final admin = FakeAdminService();
-      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
 
       await tester.tap(find.text('Add session'));
       await tester.pumpAndSettle();
@@ -133,7 +135,7 @@ void main() {
     });
 
     testWidgets('checks each field against what the rules accept, and clears as it’s fixed', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       await tester.enterText(_field('Name'), 'x' * 101);
       await tester.enterText(_field('Email'), 'harper@example');
@@ -155,7 +157,7 @@ void main() {
 
     testWidgets('refuses an email no Google sign-in could match, saying how to fix it', (tester) async {
       final admin = FakeAdminService();
-      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
       await _fillIn(tester);
 
       for (final (email, says) in [
@@ -186,7 +188,7 @@ void main() {
 
     testWidgets('saves the session and goes straight on to it; back from there skips the form', (tester) async {
       final admin = FakeAdminService();
-      await _pumpOver(tester, admin, const SessionFormPage());
+      await _pumpOver(tester, admin, SessionFormPage(now: now));
 
       await _fillIn(tester);
       await _choose(tester, 'No package', 'Premium');
@@ -213,7 +215,7 @@ void main() {
 
     testWidgets('leaves out what isn’t given', (tester) async {
       final admin = FakeAdminService();
-      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
 
       await _fillIn(tester);
       await tester.enterText(_field('Location (optional)'), '   ');
@@ -228,7 +230,7 @@ void main() {
 
     testWidgets('while saving, the button keeps focus and says so; another press does nothing', (tester) async {
       final admin = FakeAdminService()..writeDelay = const Duration(seconds: 1);
-      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
       await _fillIn(tester);
       Focus.of(tester.element(find.text('Add session'))).requestFocus();
       await tester.pump();
@@ -249,7 +251,7 @@ void main() {
 
     testWidgets('says why when it isn’t saved, and stays', (tester) async {
       final admin = FakeAdminService()..errors['createSession'] = adminError(AdminErrorKind.offline);
-      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
 
       await _fillIn(tester);
       await tapInView(tester, find.text('Add session'));
@@ -263,7 +265,7 @@ void main() {
     testWidgets('trying again after no answer adds the same session, never a second', (tester) async {
       final admin = FakeAdminService()
         ..errors['createSession'] = adminError(AdminErrorKind.offline, kAdminTimedOutMessage);
-      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
 
       await _fillIn(tester);
       await tapInView(tester, find.text('Add session'));
@@ -281,7 +283,7 @@ void main() {
 
     testWidgets('Cancel goes back without saving', (tester) async {
       final admin = FakeAdminService();
-      await _pumpOver(tester, admin, const SessionFormPage());
+      await _pumpOver(tester, admin, SessionFormPage(now: now));
 
       await tester.enterText(_field('Name'), 'The Novak family');
       await tester.tap(find.text('Cancel'));
@@ -295,7 +297,7 @@ void main() {
   group('the date', () {
     testWidgets('a calendar in a dialog, without openings, from 2020 to a year ahead, opening on today',
         (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       await tapInView(tester, _dateField());
       await tester.pumpAndSettle();
@@ -311,8 +313,24 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('today is the page’s clock, in the calendar and the field', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: DateTime(2033, 7, 1, 0, 0, 1)), size: const Size(1440, 1200));
+
+      await tapInView(tester, _dateField());
+      await tester.pumpAndSettle();
+      final calendar = tester.widget<BookingCalendar>(find.byType(BookingCalendar));
+      expect(calendar.today, DateTime(2033, 7, 1, 0, 0, 1));
+      expect(calendar.lastDay, DateTime(2034, 7, 1));
+      expect(find.text('July 2033'), findsOneWidget);
+      await tester.tap(_inDialog('Use this date'));
+      await tester.pumpAndSettle();
+
+      // This year's day, so without the year.
+      expect(find.text('Fri, Jul 1'), findsOneWidget);
+    });
+
     testWidgets('Cancel keeps the field as it was', (tester) async {
-      await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 
       await tapInView(tester, _dateField());
       await tester.pumpAndSettle();
@@ -324,7 +342,7 @@ void main() {
     });
 
     testWidgets('a session from before 2020 can keep its day', (tester) async {
-      await pumpAdminPage(tester, SessionFormPage(session: testSession('s1', date: DateTime(2018, 5, 6))),
+      await pumpAdminPage(tester, SessionFormPage(now: now, session: testSession('s1', date: DateTime(2018, 5, 6))),
           size: const Size(1440, 1200));
 
       expect(find.text('Sun, May 6, 2018'), findsOneWidget);
@@ -338,7 +356,7 @@ void main() {
 
     for (final key in [LogicalKeyboardKey.enter, LogicalKeyboardKey.space]) {
       testWidgets('by keyboard: ${key.keyLabel} opens it, and focus comes back to the field', (tester) async {
-        await pumpAdminPage(tester, const SessionFormPage(), size: const Size(1440, 1200));
+        await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
         final field = Focus.of(tester.element(find.text('Date')));
         field.requestFocus();
         await tester.pump();
@@ -370,7 +388,7 @@ void main() {
         );
 
     testWidgets('starts from the session as it is', (tester) async {
-      await pumpAdminPage(tester, SessionFormPage(session: harpers()), size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now, session: harpers()), size: const Size(1440, 1200));
 
       expect(find.text('Edit session'), findsNWidgets(2));
       expect(find.text('The Harper family'), findsOneWidget);
@@ -383,7 +401,7 @@ void main() {
     });
 
     testWidgets('a time off the quarter hours is kept on offer', (tester) async {
-      await pumpAdminPage(tester, SessionFormPage(session: harpers(time: (hour: 9, minute: 5))),
+      await pumpAdminPage(tester, SessionFormPage(now: now, session: harpers(time: (hour: 9, minute: 5))),
           size: const Size(1440, 1200));
 
       expect(find.text('9:05 am'), findsOneWidget);
@@ -391,7 +409,7 @@ void main() {
 
     testWidgets('saves the changes and goes back', (tester) async {
       final admin = FakeAdminService(sessions: [harpers()]);
-      await _pumpOver(tester, admin, SessionFormPage(session: harpers()));
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: harpers()));
 
       await tester.enterText(_field('Name'), 'The Harpers');
       await _choose(tester, '6:15 am', 'No time');
@@ -407,7 +425,7 @@ void main() {
 
     testWidgets('a new email, with the photos available, asks first', (tester) async {
       final admin = FakeAdminService(sessions: [harpers(ready: true)]);
-      await _pumpOver(tester, admin, SessionFormPage(session: harpers(ready: true)));
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: harpers(ready: true)));
 
       await tester.enterText(_field('Email'), 'Grandma@Example.com');
       await tapInView(tester, find.text('Save changes'));
@@ -432,7 +450,7 @@ void main() {
 
     testWidgets('the same email in other letters, or photos not available yet, needs no asking', (tester) async {
       final admin = FakeAdminService(sessions: [harpers(ready: true)]);
-      await _pumpOver(tester, admin, SessionFormPage(session: harpers(ready: true)));
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: harpers(ready: true)));
 
       await tester.enterText(_field('Email'), ' Harper@Example.com ');
       await tapInView(tester, find.text('Save changes'));
@@ -445,7 +463,8 @@ void main() {
     testWidgets('says why when the changes aren’t saved', (tester) async {
       final admin = FakeAdminService(sessions: [harpers()])
         ..errors['updateSession'] = adminError(AdminErrorKind.denied);
-      await pumpAdminPage(tester, SessionFormPage(session: harpers()), admin: admin, size: const Size(1440, 1200));
+      await pumpAdminPage(tester, SessionFormPage(now: now, session: harpers()),
+          admin: admin, size: const Size(1440, 1200));
 
       await tapInView(tester, find.text('Save changes'));
       await tester.pumpAndSettle();
@@ -458,7 +477,7 @@ void main() {
     for (final width in adminTestWidths) {
       testWidgets('fits ${width.toInt()}px in ${brightness.name}, errors and calendar too, with one primary button',
           (tester) async {
-        await pumpAdminPage(tester, const SessionFormPage(), brightness: brightness, size: Size(width, 800));
+        await pumpAdminPage(tester, SessionFormPage(now: now), brightness: brightness, size: Size(width, 800));
         expect(filledButtons(), 1);
 
         await tester.enterText(_field('Email'), 'not an email');

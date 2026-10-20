@@ -29,12 +29,24 @@ abstract class AuthService {
   Future<AppUser?> signInWithGoogle();
 
   Future<void> signOut();
+
+  /// Whether the signed-in user is an admin: their ID token carries the
+  /// custom claim `admin: true` (granted with scripts/grant-admin.sh). False
+  /// when signed out.
+  ///
+  /// [refresh] fetches a new token first, so a claim granted or revoked
+  /// since the token was issued counts. The rules decide what an admin can
+  /// do; this only decides what the app shows.
+  Future<bool> isAdmin({bool refresh = false});
 }
 
 class FirebaseAuthService implements AuthService {
   FirebaseAuthService(this._auth);
 
   final FirebaseAuth _auth;
+
+  /// Users whose token was refreshed since the app loaded.
+  final _refreshed = <String>{};
 
   // A new stream per call: FirebaseAuth's stream stops working for good once
   // its last listener cancels, so it can't be cached.
@@ -75,6 +87,19 @@ class FirebaseAuthService implements AuthService {
 
   @override
   Future<void> signOut() => _auth.signOut();
+
+  // Tokens last an hour, so a claim granted since sign-in wouldn't show until
+  // then: the first check for each user after a page load fetches a new one,
+  // and "refresh the page" is all a new admin needs to do.
+  @override
+  Future<bool> isAdmin({bool refresh = false}) async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    final force = refresh || !_refreshed.contains(user.uid);
+    final token = await user.getIdTokenResult(force);
+    if (force) _refreshed.add(user.uid);
+    return token.claims?['admin'] == true;
+  }
 
   static AppUser? _toAppUser(User? user) {
     if (user == null) return null;

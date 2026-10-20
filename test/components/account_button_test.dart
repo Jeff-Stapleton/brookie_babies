@@ -1,8 +1,11 @@
 import 'package:brookie_babies/components/account_button.dart';
 import 'package:brookie_babies/components/sign_in_dialog.dart';
 import 'package:brookie_babies/models/app_user.dart';
+import 'package:brookie_babies/pages/admin_page.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/leave_warning.dart';
+import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -17,13 +20,16 @@ void main() {
     FakeAuthService auth, {
     bool onPhoto = false,
     bool showSessionsLink = true,
+    bool showAdminLink = true,
     Brightness brightness = Brightness.light,
   }) =>
       testApp(
         auth: auth,
         brightness: brightness,
         home: Scaffold(
-          body: Center(child: AccountButton(onPhoto: onPhoto, showSessionsLink: showSessionsLink)),
+          body: Center(
+            child: AccountButton(onPhoto: onPhoto, showSessionsLink: showSessionsLink, showAdminLink: showAdminLink),
+          ),
         ),
       );
 
@@ -537,5 +543,212 @@ void main() {
     expect(tester.takeException(), isNull);
     final panel = tester.getRect(find.ancestor(of: find.text(user.email!), matching: find.byType(Material)).first);
     expect(panel.left, greaterThanOrEqualTo(BrookieSpace.s4));
+  });
+
+  group('for admins', () {
+    const admin = AppUser(uid: 'studio', email: 'studio@example.com', displayName: 'Brooke');
+
+    List<String> itemLabels(WidgetTester tester) => [
+          for (final item in tester.widgetList<MenuItemButton>(find.byType(MenuItemButton)))
+            (item.child! as Text).data!,
+        ];
+
+    testWidgets('"Admin" sits between "Your sessions" and "Sign out"', (tester) async {
+      final auth = FakeAuthService(signedInAs: admin, admin: true);
+      await tester.pumpWidget(app(auth));
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+
+      expect(itemLabels(tester), ['Your sessions', 'Admin', 'Sign out']);
+      // The token was checked fresh, once, for this user.
+      expect(auth.isAdminCalls, [false]);
+    });
+
+    testWidgets('anyone else gets no "Admin"', (tester) async {
+      await tester.pumpWidget(app(FakeAuthService(signedInAs: testUser)));
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+
+      expect(itemLabels(tester), ['Your sessions', 'Sign out']);
+    });
+
+    testWidgets('a failed check leaves "Admin" out, and nothing else changes', (tester) async {
+      final auth = FakeAuthService(signedInAs: admin, admin: true)..isAdminError = Exception('offline');
+      await tester.pumpWidget(app(auth));
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+
+      expect(itemLabels(tester), ['Your sessions', 'Sign out']);
+    });
+
+    testWidgets('keyboard: the arrows go through "Admin" and wrap, Home and End jump', (tester) async {
+      await tester.pumpWidget(app(FakeAuthService(signedInAs: admin, admin: true)));
+      await key(tester, LogicalKeyboardKey.tab);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(hasFocus(tester, find.text('Your sessions')), isTrue);
+
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(hasFocus(tester, find.text('Admin')), isTrue);
+      expect(itemSide(tester, 'Admin'), focusRing);
+
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(hasFocus(tester, find.text('Sign out')), isTrue);
+
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(hasFocus(tester, find.text('Your sessions')), isTrue);
+
+      await key(tester, LogicalKeyboardKey.arrowUp);
+      expect(hasFocus(tester, find.text('Sign out')), isTrue);
+
+      await key(tester, LogicalKeyboardKey.arrowUp);
+      expect(hasFocus(tester, find.text('Admin')), isTrue);
+
+      await key(tester, LogicalKeyboardKey.home);
+      expect(hasFocus(tester, find.text('Your sessions')), isTrue);
+
+      await key(tester, LogicalKeyboardKey.end);
+      expect(hasFocus(tester, find.text('Sign out')), isTrue);
+    });
+
+    testWidgets('on "Your sessions": "Admin", then "Sign out"', (tester) async {
+      await tester.pumpWidget(app(FakeAuthService(signedInAs: admin, admin: true), showSessionsLink: false));
+      await key(tester, LogicalKeyboardKey.tab);
+      await key(tester, LogicalKeyboardKey.enter);
+
+      expect(itemLabels(tester), ['Admin', 'Sign out']);
+      expect(hasFocus(tester, find.text('Admin')), isTrue);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(hasFocus(tester, find.text('Sign out')), isTrue);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(hasFocus(tester, find.text('Admin')), isTrue);
+    });
+
+    testWidgets('on the admin pages: no "Admin", and no check (the page’s gate has its own)', (tester) async {
+      final auth = FakeAuthService(signedInAs: admin, admin: true);
+      await tester.pumpWidget(app(auth, showAdminLink: false));
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+
+      expect(itemLabels(tester), ['Your sessions', 'Sign out']);
+      expect(auth.isAdminCalls, isEmpty);
+    });
+
+    testWidgets('on the admin pages signed out, no chip: the gate has its own "Sign in"', (tester) async {
+      await tester.pumpWidget(app(FakeAuthService(), showAdminLink: false));
+
+      expect(find.text('Sign in'), findsNothing);
+      expect(tester.getSize(find.byType(AccountButton)), Size.zero);
+    });
+
+    testWidgets('"Admin" opens the admin page over the home page', (tester) async {
+      await tester.pumpWidget(app(FakeAuthService(signedInAs: admin, admin: true)));
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Admin'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AdminPage), findsOneWidget);
+      final route = ModalRoute.of(tester.element(find.byType(AdminPage)))!;
+      expect(route.settings.name, AdminPage.routeName);
+      // Back goes home: the page with the menu.
+      expect(route.impliesAppBarDismissal, isTrue);
+    });
+
+    testWidgets('checked again for each user who signs in', (tester) async {
+      final auth = FakeAuthService(signedInAs: testUser)..nextSignIn = admin;
+      await tester.pumpWidget(app(auth));
+      await tester.pumpAndSettle();
+      expect(auth.isAdminCalls, hasLength(1));
+
+      await auth.signOut();
+      await tester.pumpAndSettle();
+      auth.admin = true;
+      await auth.signInWithGoogle();
+      await tester.pumpAndSettle();
+
+      expect(auth.isAdminCalls, hasLength(2));
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+      expect(itemLabels(tester), ['Your sessions', 'Admin', 'Sign out']);
+    });
+
+    testWidgets('an answer that comes after another account signed in is ignored', (tester) async {
+      final auth = FakeAuthService(signedInAs: admin, admin: true)
+        ..holdIsAdmin = true
+        ..nextSignIn = testUser;
+      await tester.pumpWidget(app(auth));
+      await tester.pumpAndSettle();
+
+      // Another account takes over before the studio's answer comes.
+      await auth.signInWithGoogle();
+      await tester.pumpAndSettle();
+      expect(auth.isAdminCalls, hasLength(2));
+      auth.answerIsAdmin(); // "yes", but for the studio's account
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+      expect(itemLabels(tester), ['Your sessions', 'Sign out']);
+    });
+  });
+
+  group('"Sign out" while work would be lost', () {
+    tearDown(LeaveWarning.reset);
+
+    Future<FakeAuthService> openSignOut(WidgetTester tester) async {
+      final auth = FakeAuthService(signedInAs: testUser);
+      await tester.pumpWidget(app(auth));
+      LeaveWarning.set(tester, true);
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sign out'));
+      await tester.pumpAndSettle();
+      return auth;
+    }
+
+    testWidgets('asks first', (tester) async {
+      final auth = await openSignOut(tester);
+
+      expect(find.text('Sign out now?'), findsOneWidget);
+      expect(
+        find.text('Uploads still running will stop, and changes you haven’t saved will be lost.'),
+        findsOneWidget,
+      );
+      expect(auth.currentUser, isNotNull);
+    });
+
+    testWidgets('Cancel stays signed in', (tester) async {
+      final auth = await openSignOut(tester);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(auth.currentUser, isNotNull);
+      expect(find.byType(BrookieDialog), findsNothing);
+    });
+
+    testWidgets('"Sign out" in the dialog signs out', (tester) async {
+      final auth = await openSignOut(tester);
+
+      await tester.tap(find.descendant(of: find.byType(BrookieDialog), matching: find.text('Sign out')));
+      await tester.pumpAndSettle();
+
+      expect(auth.currentUser, isNull);
+      expect(find.text('Sign in'), findsOneWidget);
+    });
+
+    testWidgets('without work to lose, signs out at once', (tester) async {
+      final auth = FakeAuthService(signedInAs: testUser);
+      await tester.pumpWidget(app(auth));
+      LeaveWarning.set(tester, false);
+      await tester.tap(find.byType(CircleAvatar));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sign out'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BrookieDialog), findsNothing);
+      expect(auth.currentUser, isNull);
+    });
   });
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:brookie_babies/components/featured_photos.dart';
 import 'package:brookie_babies/components/home_hero.dart';
 import 'package:brookie_babies/components/page_footer.dart';
@@ -12,6 +14,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fake_photos.dart';
 import '../support/fakes.dart';
+
+/// Holds each photoUrls answer until the test gives it: [loads] in order.
+class _HeldPortfolio extends FakePortfolioService {
+  final loads = <Completer<List<Uri>>>[];
+
+  @override
+  Future<List<Uri>> photoUrls({int? limit}) => (loads..add(Completer())).last.future;
+}
 
 void main() {
   List<Uri> photos(int count) => [
@@ -256,6 +266,106 @@ void main() {
 
     expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).first);
     expect(urls(tester, featured()), [photos(9)[1], photos(9)[3], photos(9)[4], photos(9)[5]]);
+  });
+
+  group('reloadPhotos', () {
+    homeTest('shows the photos as they are now', (tester) async {
+      // The fake hands back this list, so changing it changes the photos.
+      final shown = photos(9);
+      final portfolio = FakePortfolioService(shown);
+      await pumpHome(tester, portfolio: portfolio);
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).first);
+
+      shown.setAll(0, photos(9).reversed);
+      HomePage.reloadPhotos();
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).last);
+      expect(urls(tester, featured()), photos(9).reversed.toList().sublist(1, 7));
+      expect(portfolio.requestedLimit, 1 + FeaturedPhotos.maxCount);
+    });
+
+    homeTest('gives photos that couldn’t be loaded another try', (tester) async {
+      server.broken.add(photos(9).first);
+      await pumpHome(tester);
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9)[1]);
+
+      server.broken.clear();
+      HomePage.reloadPhotos();
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).first);
+      expect(urls(tester, featured()), photos(9).sublist(1, 7));
+    });
+
+    homeTest('keeps the photos shown if the new list can’t be had', (tester) async {
+      final portfolio = FakePortfolioService(photos(9));
+      await pumpHome(tester, portfolio: portfolio);
+
+      portfolio.error = Exception('offline');
+      HomePage.reloadPhotos();
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).first);
+      expect(featured(), findsNWidgets(6));
+    });
+
+    homeTest('an older load that answers late doesn’t replace a newer one’s photos', (tester) async {
+      final portfolio = _HeldPortfolio();
+      await pumpHome(tester, portfolio: portfolio);
+      portfolio.loads.single.complete(photos(9));
+      await tester.pumpAndSettle();
+
+      HomePage.reloadPhotos();
+      HomePage.reloadPhotos();
+      portfolio.loads.last.complete(photos(9).reversed.toList());
+      await tester.pumpAndSettle();
+      portfolio.loads[1].complete(photos(3));
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).last);
+    });
+
+    homeTest('a newer load that fails doesn’t throw away an older one that works', (tester) async {
+      final portfolio = _HeldPortfolio();
+      await pumpHome(tester, portfolio: portfolio);
+      portfolio.loads.single.complete(photos(9));
+      await tester.pumpAndSettle();
+
+      HomePage.reloadPhotos();
+      HomePage.reloadPhotos();
+      portfolio.loads.last.completeError(Exception('offline'));
+      await tester.pumpAndSettle();
+      portfolio.loads[1].complete(photos(9).reversed.toList());
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).last);
+    });
+
+    homeTest('a reload that fails during the first load waits for it', (tester) async {
+      final portfolio = _HeldPortfolio();
+      await pumpHome(tester, portfolio: portfolio);
+
+      HomePage.reloadPhotos();
+      portfolio.loads.last.completeError(Exception('offline'));
+      await tester.pumpAndSettle();
+      // Still loading, not "no photos".
+      expect(tester.widget<HomeHero>(find.byType(HomeHero)).loading, isTrue);
+      portfolio.loads.first.complete(photos(9));
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).first);
+    });
+
+    homeTest('a home page that has closed doesn’t listen any more', (tester) async {
+      await pumpHome(tester);
+      await tester.pumpWidget(const SizedBox());
+
+      HomePage.reloadPhotos();
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+    });
   });
 
   homeTest('the butter button is for the photograph; it gives way if no photo loads', (tester) async {

@@ -5,10 +5,13 @@ import 'package:brookie_babies/pages/home_page.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/leave_warning.dart';
+import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/empty_state.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -24,7 +27,7 @@ Booking _booking(String id, {
   String? location,
   String status = 'paid',
   bool photosReady = true,
-  String packageName = 'Premium',
+  String? packageName = 'Premium',
 }) {
   return Booking.fromMap(id, {
     'packageName': packageName,
@@ -35,6 +38,10 @@ Booking _booking(String id, {
     'photosReady': photosReady,
   })!;
 }
+
+/// A session the photographer added and shared with the family's email.
+Booking _adHoc(String id, {String date = _past, bool photosReady = true, String? packageName}) =>
+    _booking(id, date: date, status: 'adhoc', photosReady: photosReady, packageName: packageName);
 
 /// The [StatusTag] labelled [label].
 StatusTag _tag(WidgetTester tester, String label) =>
@@ -94,8 +101,49 @@ void main() {
     expect(find.text('Pat Parent'), findsOneWidget);
     expect(find.text('parent@example.com'), findsOneWidget);
     expect(bookings.watchedUids, [testUser.uid]);
+    // With the email, for the sessions shared with it.
+    expect(bookings.watchedUsers.single.email, testUser.email);
     expect(find.textContaining('No sessions yet.'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, 'See packages'), findsOneWidget);
+  });
+
+  group('with no sessions, names the email they’re signed in as', () {
+    const note = 'You’re signed in as parent@example.com. To see a session shared with a different email, sign '
+        'out and sign in with that one.';
+
+    for (final brightness in Brightness.values) {
+      testWidgets('beneath the band, quieter than it (${brightness.name})', (tester) async {
+        await pumpProfile(tester, brightness: brightness, size: const Size(1440, 900));
+
+        final shown = find.text(note);
+        expect(shown, findsOneWidget);
+        final colors = brightness == Brightness.dark ? BrookieColors.dark : BrookieColors.light;
+        expect(tester.renderObject<RenderParagraph>(shown).text.style!.color, colors.inkSoft);
+        final band = tester.getRect(find.byType(EmptyState));
+        expect(tester.getTopLeft(shown), Offset(band.left, band.bottom + BrookieSpace.s4));
+        expect(tester.getSize(shown).width, lessThanOrEqualTo(BrookieSize.readingWidth));
+      });
+    }
+
+    testWidgets('a long email fits a 320px phone', (tester) async {
+      await pumpProfile(
+        tester,
+        user: const AppUser(uid: 'u2', email: 'a.very.long.address.for.a.family.of.five@example.com'),
+        size: const Size(320, 800),
+      );
+
+      expect(find.textContaining('You’re signed in as a.very.long.address'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('not without an email, nor once there are sessions', (tester) async {
+      await pumpProfile(tester, user: const AppUser(uid: 'u3'));
+      expect(find.textContaining('No sessions yet.'), findsOneWidget);
+      expect(find.textContaining('signed in as'), findsNothing);
+
+      await pumpProfile(tester, bookings: FakeBookingService([_adHoc('s1')]));
+      expect(find.textContaining('signed in as'), findsNothing);
+    });
   });
 
   testWidgets('a long name and email fit a narrow phone', (tester) async {
@@ -128,6 +176,21 @@ void main() {
 
     expect(auth.currentUser, isNull);
     expect(find.text('Sign in to see your sessions and download your photos.'), findsOneWidget);
+  });
+
+  testWidgets('Sign out asks first while an admin page below has work to lose', (tester) async {
+    addTearDown(LeaveWarning.reset);
+    final auth = await pumpProfile(tester);
+    LeaveWarning.set(tester, true);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Sign out'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign out now?'), findsOneWidget);
+    expect(auth.currentUser, isNotNull);
+
+    await tester.tap(find.descendant(of: find.byType(BrookieDialog), matching: find.text('Sign out')));
+    await tester.pumpAndSettle();
+    expect(auth.currentUser, isNull);
   });
 
   testWidgets('splits upcoming and past sessions, nearest first', (tester) async {
@@ -476,5 +539,61 @@ void main() {
     expect(shape.side, BorderSide(color: BrookieColors.light.line, width: 1.5));
     gallery.complete(GalleryDownload(url: Uri.parse('https://example.com/b1.zip'), photoCount: 3));
     await tester.pumpAndSettle();
+  });
+
+  group('a session the photographer added (ad hoc)', () {
+    testWidgets('with photos ready: titled "Photo session", no payment tag, and the download', (tester) async {
+      await pumpProfile(tester, bookings: FakeBookingService([_adHoc('a1')]));
+
+      expect(find.text('Photo session'), findsOneWidget);
+      // Nothing was bought, so neither "Paid" nor the admin's "Ad hoc".
+      expect(find.byType(StatusTag), findsOneWidget);
+      expect(_tag(tester, 'Ready to download').tone, StatusTone.success);
+      expect(find.text('Ad hoc'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Download all photos'), findsOneWidget);
+
+      await tester.tap(find.text('Download all photos'));
+      await tester.pump();
+      expect(gallery.requested, ['a1']);
+      gallery.complete(GalleryDownload(url: Uri.parse('https://example.com/a1.zip'), photoCount: 12));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('names its package when it has one', (tester) async {
+      await pumpProfile(tester, bookings: FakeBookingService([_adHoc('a1', packageName: 'Ultimate')]));
+
+      expect(find.text('Ultimate session'), findsOneWidget);
+    });
+
+    testWidgets('past, photos not ready yet: they are being edited', (tester) async {
+      await pumpProfile(tester, bookings: FakeBookingService([_adHoc('a1', photosReady: false)]));
+
+      expect(find.text('Download all photos'), findsNothing);
+      expect(find.textContaining('Your photos are being edited'), findsOneWidget);
+    });
+
+    testWidgets('can hold the page’s one primary download', (tester) async {
+      await pumpProfile(tester, bookings: FakeBookingService([
+        _booking('older', date: '1999-01-01', packageName: 'Basic'),
+        _adHoc('newest'),
+      ]));
+
+      final primary = find.widgetWithText(FilledButton, 'Download all photos');
+      expect(primary, findsOneWidget);
+      expect(find.ancestor(of: primary, matching: find.widgetWithText(Card, 'Photo session')), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Download all photos'), findsOneWidget);
+    });
+
+    testWidgets('fits a narrow phone in both themes', (tester) async {
+      for (final brightness in Brightness.values) {
+        await pumpProfile(
+          tester,
+          size: const Size(320, 640),
+          brightness: brightness,
+          bookings: FakeBookingService([_adHoc('a1', packageName: 'Premium'), _booking('b1')]),
+        );
+        expect(tester.takeException(), isNull, reason: brightness.name);
+      }
+    });
   });
 }

@@ -2,18 +2,61 @@ rules_version = '2';
 
 // Cloud Storage security rules. Deploy with `firebase deploy --only storage`.
 //
-// Only what is matched below is allowed; everything else is denied,
-// including customers' photos (galleries/**) and their zips
-// (gallery-zips/**), which are only handed out through short-lived signed
-// URLs from the getGalleryDownloadUrl function. Uploads in the Firebase
-// console and the Admin SDK bypass these rules.
+// Only what is matched below is allowed; everything else is denied. Customers
+// never read their photos (galleries/**) or their zips (gallery-zips/**)
+// directly: they get short-lived signed URLs from the getGalleryDownloadUrl
+// function. Uploads in the Firebase console and the Admin SDK bypass these
+// rules.
+//
+// Admins are accounts with the custom claim `admin: true` (granted with
+// scripts/grant-admin.sh); the admin pages upload and delete photos straight
+// from the app. Nothing is ever overwritten (no update): to replace a photo,
+// delete it and upload it again. The size and type limits are mirrored in
+// lib/services/photo_rules.dart, which checks every photo before uploading:
+// change both together.
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Home page photos (hero and featured). Anyone may read (get and list:
-    // the app uses listAll); nobody may write from the app.
+    // The same check as in firestore.rules. A missing claim reads as false.
+    function isAdmin() {
+      return request.auth != null && request.auth.token.get('admin', false) == true;
+    }
+
+    // Home page photos (hero and featured) and the library they are chosen
+    // from. Anyone may read (get and list: the app uses listAll); nobody may
+    // write from the app except as below.
     match /_admin/gallery/{allPaths=**} {
       allow read: if true;
+    }
+
+    // Admins add photos directly in _admin/gallery/ (never in a subfolder):
+    // JPEG, PNG or WebP, which every browser shows, named .jpg, .jpeg, .png
+    // or .webp (any case) so the home page lists them, under 20 MiB.
+    match /_admin/gallery/{name} {
+      allow create: if isAdmin()
+                    && request.resource.contentType.matches('image/(jpeg|png|webp)')
+                    && name.matches('(?i).*\\.(jpe?g|png|webp)')
+                    && request.resource.size > 0
+                    && request.resource.size < 20 * 1024 * 1024;
+      allow delete: if isAdmin();
+    }
+
+    // A session's photos, galleries/<bookingId>/ (subfolders allowed): only
+    // admins read, add and delete them. Any image type under 100 MiB, since
+    // they only reach families inside the zip.
+    match /galleries/{bookingId}/{allPaths=**} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+                    && request.resource.contentType.matches('image/.*')
+                    && request.resource.size > 0
+                    && request.resource.size < 100 * 1024 * 1024;
+      allow delete: if isAdmin();
+    }
+
+    // The function's cached zips. Admins delete one with its session; the
+    // function rebuilds any zip whose photos changed.
+    match /gallery-zips/{zip} {
+      allow delete: if isAdmin();
     }
   }
 }

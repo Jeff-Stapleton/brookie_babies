@@ -90,4 +90,91 @@ void main() {
 
     expect(sorted.map((b) => (b.date.day, b.time?.hour)), [(14, 9), (14, 13), (15, 9)]);
   });
+
+  test('reads who the session is for', () {
+    final booking = Booking.fromMap('b1', {...valid, 'email': ' Parent@Example.com ', 'name': ' The Harper family '})!;
+
+    expect(booking.uid, 'uid123');
+    expect(booking.email, 'Parent@Example.com');
+    expect(booking.name, 'The Harper family');
+    expect(Booking.fromMap('b1', {...valid}..remove('uid'))!.uid, isNull);
+    expect(Booking.fromMap('b1', {...valid, 'email': ' ', 'name': 7})!.email, isNull);
+  });
+
+  group('ad hoc sessions', () {
+    const adHoc = {
+      'status': 'adhoc',
+      'name': 'The Harper family',
+      'email': 'harper@example.com',
+      'date': '2026-11-14',
+      'photosReady': false,
+    };
+
+    test('need no package or uid', () {
+      final booking = Booking.fromMap('a1', adHoc)!;
+
+      expect(booking.status, BookingStatus.adhoc);
+      expect(booking.isAdHoc, isTrue);
+      expect(booking.packageName, isNull);
+      expect(booking.uid, isNull);
+      expect(booking.title, 'Photo session');
+      expect(booking.name, 'The Harper family');
+      expect(booking.email, 'harper@example.com');
+    });
+
+    test('may name a package', () {
+      final booking = Booking.fromMap('a1', {...adHoc, 'packageName': 'Ultimate'})!;
+
+      expect(booking.packageName, 'Ultimate');
+      expect(booking.title, 'Ultimate session');
+    });
+
+    test('only as "adhoc": the rules and the download function match it exactly', () {
+      for (final status in ['Adhoc', 'ADHOC', 'ad hoc', ' adhoc', 'adhoc ']) {
+        expect(Booking.fromMap('a1', {...adHoc, 'status': status}), isNull, reason: status);
+      }
+    });
+  });
+
+  test('title names the package', () {
+    expect(Booking.fromMap('b1', valid)!.title, 'Premium session');
+  });
+
+  test('photos can be delivered for paid and ad hoc sessions only', () {
+    for (final (status, deliverable) in [
+      ('paid', true),
+      ('adhoc', true),
+      ('pending', false),
+      ('cancelled', false),
+      ('refunded', false),
+    ]) {
+      final booking = Booking.fromMap('b1', {...valid, 'status': status})!;
+      expect(booking.canDeliverPhotos, deliverable, reason: status);
+      expect(booking.isAdHoc, status == 'adhoc', reason: status);
+    }
+  });
+
+  test('problemWith names what keeps a document from being read', () {
+    for (final (data, problem) in [
+      ({...valid}..remove('packageName'), 'packageName is missing'),
+      ({...valid, 'packageName': '  '}, 'packageName is missing'),
+      ({...valid}..remove('date'), 'date isn’t YYYY-MM-DD'),
+      ({...valid, 'date': '11/14/2026'}, 'date isn’t YYYY-MM-DD'),
+      ({...valid, 'date': 20261114}, 'date isn’t YYYY-MM-DD'),
+      ({...valid, 'date': '2026-02-30'}, 'date isn’t a real day'),
+      ({...valid}..remove('status'), 'status isn’t paid, pending, cancelled, refunded or adhoc'),
+      ({...valid, 'status': 'booked'}, 'status isn’t paid, pending, cancelled, refunded or adhoc'),
+      ({...valid, 'status': 'AdHoc'}, 'status isn’t paid, pending, cancelled, refunded or adhoc'),
+    ]) {
+      expect(Booking.problemWith(data), problem, reason: '$data');
+      expect(Booking.fromMap('b1', data), isNull, reason: '$data');
+    }
+    expect(Booking.problemWith(valid), isNull);
+    expect(Booking.problemWith({'status': 'adhoc', 'date': '2026-11-14'}), isNull);
+  });
+
+  test('only ad hoc sessions may be made without a package', () {
+    expect(() => Booking(id: 'b1', date: DateTime(2026, 11, 14)), throwsAssertionError);
+    expect(Booking(id: 'a1', date: DateTime(2026, 11, 14), status: BookingStatus.adhoc).packageName, isNull);
+  });
 }

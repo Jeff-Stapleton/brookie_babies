@@ -361,21 +361,36 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
 
   Future<void> _confirmLeave() async {
     final uploading = _queue.isBusy;
+    // Leaving doesn't stop a save: it finishes, and the home page under
+    // this one shows it. Only a failure would go unseen.
+    final saving = _saving && !uploading;
     final String message;
-    if (!uploading) {
+    if (saving) {
+      message = 'Your changes are still saving. If you leave now, they’ll still be saved, but you won’t see it if '
+          'saving fails.';
+    } else if (!uploading) {
       message = 'The changes you made to the home page photos will be lost.';
-    } else if (_changed) {
+    } else if (_changed && !_saving) {
       message = 'Photos still uploading will stop, and changes you haven’t saved will be lost.';
     } else {
       message = 'Photos still uploading will stop. The ones already uploaded stay in the library.';
     }
+    final String title, confirmLabel, cancelLabel;
+    if (uploading) {
+      (title, confirmLabel, cancelLabel) = ('Stop uploading?', 'Stop and leave', 'Keep uploading');
+    } else if (saving) {
+      (title, confirmLabel, cancelLabel) = ('Leave while saving?', 'Leave', 'Stay');
+    } else {
+      (title, confirmLabel, cancelLabel) = ('Leave without saving?', 'Leave without saving', 'Keep editing');
+    }
     final leave = await showBrookieConfirm(
       context,
-      title: uploading ? 'Stop uploading?' : 'Leave without saving?',
+      title: title,
       message: message,
-      confirmLabel: uploading ? 'Stop and leave' : 'Leave without saving',
-      cancelLabel: uploading ? 'Keep uploading' : 'Keep editing',
-      destructive: true,
+      confirmLabel: confirmLabel,
+      cancelLabel: cancelLabel,
+      // Leaving while saving loses nothing.
+      destructive: !saving,
     );
     if (!leave || !mounted) return;
     // Navigator.pop leaves whatever PopScope says.

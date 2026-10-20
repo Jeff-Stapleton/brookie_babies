@@ -902,6 +902,32 @@ void main() {
       expect(LeaveWarning.active.value, isFalse);
     });
 
+    photoTest('while saving: "Leave while saving?", and leaving still saves', (tester) async {
+      admin.writeDelay = const Duration(seconds: 1);
+      await pumpPage(tester);
+      final loads = portfolio.loads;
+      await tapAndSettle(tester, check('IMG_09.jpg'));
+      await reveal(tester, save());
+      await tester.tap(save());
+      await tester.pump();
+
+      await tapAndSettle(tester, back());
+      expect(find.text('Leave while saving?'), findsOneWidget);
+      expect(
+        find.text('Your changes are still saving. If you leave now, they’ll still be saved, but you won’t see it if '
+            'saving fails.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('will be lost'), findsNothing);
+      await tapAndSettle(tester, find.widgetWithText(FilledButton, 'Leave'));
+      expect(find.byType(HomePhotosAdminPage), findsNothing);
+
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(admin.homeNames, ['IMG_03.jpg', 'IMG_01.jpg', 'IMG_05.jpg', 'IMG_09.jpg']);
+      expect(portfolio.loads, loads + 1);
+    });
+
     photoTest('with uploads running: "Stop uploading?", and leaving stops them', (tester) async {
       picker.next = [testPhoto('IMG_99.jpg')];
       await pumpPage(tester);

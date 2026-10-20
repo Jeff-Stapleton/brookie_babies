@@ -563,6 +563,10 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
           'Don’t upload clients’ photos without their permission.',
           icon: Icons.public,
         ),
+        if (_neverChosen) ...[
+          const SizedBox(height: BrookieSpace.s4),
+          const _Note(kHomeUploadsGoLiveNote),
+        ],
         const SizedBox(height: BrookieSpace.s4),
         Align(
           alignment: AlignmentDirectional.centerStart,
@@ -612,6 +616,12 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
         mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.progress),
       );
 }
+
+/// Said by "Upload photos" until the home page is first saved.
+@visibleForTesting
+const kHomeUploadsGoLiveNote = 'Until the home page is saved, the site shows the library’s first photos by name, so a '
+    'new photo whose name comes first goes on the site as soon as it’s uploaded. Save the home page first to keep '
+    'the photos it shows now.';
 
 /// What the home page does with [count] chosen photos: how many of the ones
 /// after the hero wide screens and phones show (FeaturedPhotos.shownCount).

@@ -289,11 +289,14 @@ void main() {
       // That's what the site shows already: nothing to lose.
       expect(discard(), findsNothing);
       expect(LeaveWarning.active.value, isFalse);
+      // And uploading changes it.
+      expect(find.text(kHomeUploadsGoLiveNote), findsOneWidget);
 
       await tapAndSettle(tester, save());
 
       expect(admin.calls.last, 'saveHomePhotos(${_photos(7).join(', ')})');
       expect(find.textContaining('No photos have been chosen yet'), findsNothing);
+      expect(find.text(kHomeUploadsGoLiveNote), findsNothing);
       expect(find.text('Saved. The home page shows these photos now.'), findsOneWidget);
     });
 
@@ -775,6 +778,8 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('JPEG, PNG or WebP, each under 20 MB.'), findsOneWidget);
+      // Photos are chosen, so new ones wait to be.
+      expect(find.text(kHomeUploadsGoLiveNote), findsNothing);
     });
 
     photoTest('picks JPEG, PNG or WebP; checks each; skips names already here; adds new ones to the library',

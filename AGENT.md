@@ -204,8 +204,9 @@ scripts/
    user's `bookings`, split into upcoming and past: `watchBookings(user)` merges
    `where('uid', isEqualTo: uid)` with, when the user has an email,
    `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <lowercased email>)`
-   (ad hoc sessions shared with them; that query failing counts as none). A
-   paid or ad hoc session with
+   (ad hoc sessions shared with them; that query failing counts as none). With
+   none, the empty state names the email they're signed in as, for a guest on
+   the wrong Google account. A paid or ad hoc session with
    `photosReady: true` has "Download all photos" (past ones without it
    say the photos are being edited; ad hoc ones have no payment tag): `getGalleryDownloadUrl`
    checks the booking belongs to the caller (its uid, or an ad hoc session's

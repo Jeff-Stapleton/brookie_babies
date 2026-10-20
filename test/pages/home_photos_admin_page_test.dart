@@ -518,6 +518,20 @@ void main() {
       expect(focusOf(tester, rowButton('IMG_01.jpg', Icons.arrow_downward)).hasPrimaryFocus, isTrue);
     });
 
+    photoTest('with two rows, focus still goes to the other button at the top and the bottom', (tester) async {
+      admin.homeNames = ['IMG_01.jpg', 'IMG_02.jpg'];
+      await pumpPage(tester);
+
+      await pressWithKeyboard(tester, rowButton('IMG_02.jpg', Icons.arrow_upward));
+      expect(chosen(tester), ['IMG_02.jpg', 'IMG_01.jpg']);
+      expect(focusOf(tester, rowButton('IMG_02.jpg', Icons.arrow_downward)).hasPrimaryFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(chosen(tester), ['IMG_01.jpg', 'IMG_02.jpg']);
+      expect(focusOf(tester, rowButton('IMG_02.jpg', Icons.arrow_upward)).hasPrimaryFocus, isTrue);
+    });
+
     photoTest('removing a row hands focus to the row that takes its place, then to Save', (tester) async {
       admin.homeNames = ['IMG_01.jpg', 'IMG_02.jpg'];
       await pumpPage(tester);

@@ -92,10 +92,24 @@ class _HomePhotoOrderState extends State<HomePhotoOrder> {
     final to = index + by;
     names.insert(to, name);
     // At the top "Move up" is disabled (at the bottom, "Move down"), which
-    // would drop focus: it goes to the other one first.
+    // would drop focus: it goes to the other one first. With two rows that
+    // one is disabled where the row was, so it's asked again once the row
+    // is in its new place.
     final focus = _focusFor(name);
-    if (focus.up.hasFocus && to == 0) focus.down.requestFocus();
-    if (focus.down.hasFocus && to == names.length - 1) focus.up.requestFocus();
+    final FocusNode? other;
+    if (focus.up.hasFocus && to == 0) {
+      other = focus.down;
+    } else if (focus.down.hasFocus && to == names.length - 1) {
+      other = focus.up;
+    } else {
+      other = null;
+    }
+    if (other case final other?) {
+      other.requestFocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !other.hasFocus) other.requestFocus();
+      });
+    }
     widget.onChanged(names);
     // Focus stays on the button, so nothing else says where the photo went.
     final hero = to == 0 ? ', the full-screen photo' : '';

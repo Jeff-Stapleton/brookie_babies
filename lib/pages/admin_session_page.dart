@@ -430,10 +430,16 @@ class _SessionBodyState extends State<_SessionBody> {
   Future<void> _deleteAll() async {
     final photos = List.of(_photos ?? const <StoredPhoto>[]);
     if (photos.isEmpty || _deletingAll != null) return;
+    // Like deleting the session: nobody downloads a half-deleted gallery,
+    // or is left with a download of nothing.
+    final hideFirst = _lastFound?.booking.photosReady ?? false;
     final confirmed = await showBrookieConfirm(
       context,
       title: 'Delete all photos?',
-      message: 'All ${_photoCount(photos.length)} in this session will be deleted for good.',
+      message: [
+        'All ${_photoCount(photos.length)} in this session will be deleted for good.',
+        if (hideFirst) 'They’ll be hidden from the family first.',
+      ].join(' '),
       confirmLabel: 'Delete all photos',
       destructive: true,
     );
@@ -442,6 +448,19 @@ class _SessionBodyState extends State<_SessionBody> {
       _deletingAll = (done: 0, total: photos.length);
       _deleteError = null;
     });
+    if (hideFirst) {
+      try {
+        await _admin.setPhotosReady(widget.sessionId, false);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _deletingAll = null;
+          _deleteError = 'The photos weren’t hidden, so none were deleted. ${_messageFor(e, 'Try again.')}';
+        });
+        return;
+      }
+      if (!mounted) return;
+    }
     // A few at a time, like the uploads; the first failure stops the rest.
     var next = 0;
     Object? failure;
@@ -616,9 +635,12 @@ class _SessionBodyState extends State<_SessionBody> {
         const SizedBox(height: BrookieSpace.s2),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
-          child: Text(ready
-              ? 'The family can download every photo below as one zip.'
-              : 'The family can’t download the photos until you make them available.'),
+          child: Text(switch ((ready, _photos?.isEmpty ?? false)) {
+            // Their download would fail: there's nothing in it.
+            (true, true) => 'There are no photos to download. Upload them, or hide the photos until you do.',
+            (true, false) => 'The family can download every photo below as one zip.',
+            (false, _) => 'The family can’t download the photos until you make them available.',
+          }),
         ),
         const SizedBox(height: BrookieSpace.s4),
         if (ready)

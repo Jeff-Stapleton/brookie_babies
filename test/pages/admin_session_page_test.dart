@@ -705,6 +705,52 @@ void main() {
       expect(find.text('Delete all photos'), findsOneWidget);
     });
 
+    testWidgets('"Delete all photos" hides available photos from the family first, and says so', (tester) async {
+      final admin = _service(ready: true);
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.text('Delete all photos'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('All 3 photos in this session will be deleted for good. They’ll be hidden from the family first.'),
+        findsOneWidget,
+      );
+      await tester.tap(_inDialog('Delete all photos'));
+      await tester.pumpAndSettle();
+
+      final hidden = admin.calls.indexOf('setPhotosReady(s1, false)');
+      expect(hidden, isNonNegative);
+      expect(admin.calls.indexWhere((call) => call.startsWith('deletePhoto')), greaterThan(hidden));
+      expect(admin.sessionPhotos['s1'], isEmpty);
+      expect(find.text('Not ready'), findsOneWidget);
+    });
+
+    testWidgets('"Delete all photos" deletes nothing if the photos can’t be hidden first', (tester) async {
+      final admin = _service(ready: true)..errors['setPhotosReady'] = adminError(AdminErrorKind.offline);
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.text('Delete all photos'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete all photos'));
+      await tester.pumpAndSettle();
+
+      expect(admin.calls.where((call) => call.startsWith('deletePhoto')), isEmpty);
+      expect(
+        find.widgetWithText(InlineMessage, 'The photos weren’t hidden, so none were deleted. $kAdminOfflineMessage'),
+        findsOneWidget,
+      );
+      expect(_listed(tester), _photos);
+      expect(find.text('Ready to download'), findsOneWidget);
+    });
+
+    testWidgets('available with no photos: says the family’s download has nothing in it', (tester) async {
+      await _pumpSession(tester, admin: _service(ready: true, photos: const []));
+
+      expect(find.text('There are no photos to download. Upload them, or hide the photos until you do.'),
+          findsOneWidget);
+      expect(find.textContaining('every photo below'), findsNothing);
+    });
+
     testWidgets('keyboard: after "Delete all photos", focus goes to "Upload photos"', (tester) async {
       await _pumpSession(tester);
       Focus.of(tester.element(find.text('Delete all photos'))).requestFocus();

@@ -116,14 +116,14 @@ class _SessionsState extends State<_Sessions> {
   @override
   void initState() {
     super.initState();
-    _bookings = AppServices.of(context).bookings.watchBookings(widget.user.uid);
+    _bookings = AppServices.of(context).bookings.watchBookings(widget.user);
   }
 
   @override
   void didUpdateWidget(_Sessions oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.user.uid != widget.user.uid) {
-      _bookings = AppServices.of(context).bookings.watchBookings(widget.user.uid);
+    if (oldWidget.user.uid != widget.user.uid || oldWidget.user.email != widget.user.email) {
+      _bookings = AppServices.of(context).bookings.watchBookings(widget.user);
     }
   }
 
@@ -219,7 +219,7 @@ class _BookingSections extends StatelessWidget {
     final sectionGap = BrookieLayout.sectionGap(context);
     // One primary button per view: the newest session with photos ready gets
     // the ink "Download all photos"; any others get the outlined one.
-    final ready = bookings.where((b) => b.status == BookingStatus.paid && b.photosReady);
+    final ready = bookings.where((b) => b.canDeliverPhotos && b.photosReady);
     final primaryDownload = ready.isEmpty ? null : ready.reduce((a, b) => b.compareTo(a) > 0 ? b : a).id;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

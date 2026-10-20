@@ -25,7 +25,9 @@ void main() {
       bookings: FakeBookingService(),
       gallery: FakeGalleryService(),
       portfolio: FakePortfolioService(),
+      admin: FakeAdminService(),
       openUrl: FakeUrlOpener().call,
+      pickPhotos: FakePhotoPicker().call,
       isEmbeddedBrowser: false,
       child: MaterialApp(
         theme: brookieTheme(Brightness.light),

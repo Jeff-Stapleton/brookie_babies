@@ -4,12 +4,15 @@ import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/utils.dart';
+import 'package:brookie_babies/widgets/booking_status_tag.dart';
+import 'package:brookie_babies/widgets/detail_line.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:flutter/material.dart';
 
 /// One session on the "Your sessions" page: package, payment status, date,
-/// time and place, and for paid sessions, the photo download (or, once past,
-/// a note that the photos are being edited).
+/// time and place, and for sessions whose photos can be delivered (paid or
+/// ad hoc), the photo download (or, once past, a note that the photos are
+/// being edited).
 class BookingCard extends StatelessWidget {
   const BookingCard({super.key, required this.booking, required this.isPast, this.primaryDownload = true});
 
@@ -42,25 +45,26 @@ class BookingCard extends StatelessWidget {
                 spacing: BrookieSpace.s3,
                 runSpacing: BrookieSpace.s2,
                 children: [
-                  Text('${booking.packageName} session', style: Theme.of(context).textTheme.titleLarge),
-                  _PaymentTag(status: booking.status),
+                  Text(booking.title, style: Theme.of(context).textTheme.titleLarge),
+                  // Nothing was bought, so there's no payment to report.
+                  if (!booking.isAdHoc) BookingStatusTag(status: booking.status),
                 ],
               ),
             ),
             const SizedBox(height: BrookieSpace.s3),
-            _Detail(icon: Icons.event_outlined, text: formatDayShort(booking.date, now: DateTime.now())),
+            DetailLine(icon: Icons.event_outlined, text: formatDayShort(booking.date, now: DateTime.now())),
             // The start time only: a booking doesn't record how long it runs.
             if (time != null) ...[
               const SizedBox(height: BrookieSpace.s2),
-              _Detail(icon: Icons.schedule_outlined, text: SessionTime.clockLabel(time.hour, time.minute)),
+              DetailLine(icon: Icons.schedule_outlined, text: SessionTime.clockLabel(time.hour, time.minute)),
             ],
             if (location != null) ...[
               const SizedBox(height: BrookieSpace.s2),
-              _Detail(icon: Icons.place_outlined, text: location),
+              DetailLine(icon: Icons.place_outlined, text: location),
             ],
             // The photographer decides when photos are ready, so a ready
             // download shows even before the session date (e.g. a sneak peek).
-            if (booking.status == BookingStatus.paid && (booking.photosReady || isPast)) ...[
+            if (booking.canDeliverPhotos && (booking.photosReady || isPast)) ...[
               const SizedBox(height: BrookieSpace.s5),
               const Divider(),
               const SizedBox(height: BrookieSpace.s5),
@@ -69,46 +73,6 @@ class BookingCard extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _PaymentTag extends StatelessWidget {
-  const _PaymentTag({required this.status});
-
-  final BookingStatus status;
-
-  @override
-  Widget build(BuildContext context) {
-    return switch (status) {
-      BookingStatus.paid => const StatusTag(label: 'Paid', tone: StatusTone.success, icon: Icons.check),
-      BookingStatus.pending => const StatusTag(label: 'Payment pending'),
-      BookingStatus.cancelled => const StatusTag(label: 'Cancelled'),
-      BookingStatus.refunded => const StatusTag(label: 'Refunded'),
-    };
-  }
-}
-
-/// One line of the session's details, labelled by an icon.
-class _Detail extends StatelessWidget {
-  const _Detail({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Centers the 20px icon on the text's 22px first line.
-        Padding(
-          padding: const EdgeInsets.only(top: 1),
-          child: Icon(icon, size: 20, color: BrookieColors.of(context).inkSoft),
-        ),
-        const SizedBox(width: BrookieSpace.s2),
-        Expanded(child: Text(text)),
-      ],
     );
   }
 }

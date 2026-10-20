@@ -2,6 +2,7 @@ import 'package:brookie_babies/pages/home_page.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/pages/scheduling_page.dart';
 import 'package:brookie_babies/firebase_options.dart';
+import 'package:brookie_babies/services/admin_service.dart';
 import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/auth_service.dart';
 import 'package:brookie_babies/services/booking_service.dart';
@@ -9,6 +10,7 @@ import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/services/portfolio_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/embedded_browser.dart';
+import 'package:brookie_babies/utilities/web_photo_picker.dart' as web_photo_picker;
 import 'package:brookie_babies/widgets/focus_ring.dart';
 
 import 'package:flutter/material.dart';
@@ -33,12 +35,16 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  final admin = FirebaseAdminService(FirebaseFirestore.instance, FirebaseStorage.instance, FirebaseAuth.instance);
   runApp(MyApp(
     auth: FirebaseAuthService(FirebaseAuth.instance),
     bookings: FirestoreBookingService(FirebaseFirestore.instance),
     // The functions are deployed to us-central1 (functions/src/index.ts).
     gallery: FunctionsGalleryService(FirebaseFunctions.instanceFor(region: 'us-central1')),
-    portfolio: StoragePortfolioService(FirebaseStorage.instance),
+    // The photos an admin chose, in order; until then, the gallery by name.
+    portfolio: StoragePortfolioService(FirebaseStorage.instance, homePhotoNames: admin.homePhotoNames),
+    admin: admin,
+    pickPhotos: web_photo_picker.pickPhotos,
     isEmbeddedBrowser: isEmbeddedBrowser(web.window.navigator.userAgent),
   ));
 }
@@ -50,6 +56,8 @@ class MyApp extends StatelessWidget {
     required this.bookings,
     required this.gallery,
     required this.portfolio,
+    required this.admin,
+    required this.pickPhotos,
     required this.isEmbeddedBrowser,
   });
 
@@ -57,6 +65,8 @@ class MyApp extends StatelessWidget {
   final BookingService bookings;
   final GalleryService gallery;
   final PortfolioService portfolio;
+  final AdminService admin;
+  final PickPhotos pickPhotos;
   final bool isEmbeddedBrowser;
 
   // This widget is the root of your application.
@@ -67,7 +77,9 @@ class MyApp extends StatelessWidget {
       bookings: bookings,
       gallery: gallery,
       portfolio: portfolio,
+      admin: admin,
       openUrl: launchUrl,
+      pickPhotos: pickPhotos,
       isEmbeddedBrowser: isEmbeddedBrowser,
       child: MaterialApp(
         title: 'Brooke Stapleton Photography',

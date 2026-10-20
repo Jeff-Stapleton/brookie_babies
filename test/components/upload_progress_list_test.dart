@@ -3,8 +3,10 @@ import 'package:brookie_babies/services/admin_service.dart';
 import 'package:brookie_babies/services/photo_rules.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/upload_queue.dart';
+import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
@@ -220,6 +222,92 @@ void main() {
     expect(find.byType(OutlinedButton), findsNothing);
     expect(find.byType(TextButton), findsNothing);
     await finish(tester);
+  });
+
+  group('a focused button that goes hands keyboard focus on', () {
+    String? focused() => FocusManager.instance.primaryFocus?.debugLabel;
+
+    Future<void> pressWithKeyboard(WidgetTester tester, String label) async {
+      final button = find.ancestor(of: find.text(label), matching: find.bySubtype<ButtonStyleButton>());
+      tester.widget<ButtonStyleButton>(button).focusNode!.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await settle(tester);
+    }
+
+    testWidgets('"Retry failed" to "Cancel uploads", as the retries run', (tester) async {
+      await pumpList(tester);
+      queue.add([testPhoto('IMG_1.jpg'), testPhoto('IMG_2.jpg')]);
+      admin.uploads[0].fail(AdminErrorKind.offline);
+      admin.uploads[1].complete();
+      await settle(tester);
+
+      await pressWithKeyboard(tester, 'Retry failed');
+
+      expect(find.text('Retry failed'), findsNothing);
+      expect(focused(), 'Cancel uploads');
+      await finish(tester);
+    });
+
+    testWidgets('"Cancel uploads" to "Retry failed", once the cancel is through', (tester) async {
+      await pumpList(tester);
+      queue.add([testPhoto('IMG_1.jpg'), testPhoto('IMG_2.jpg')]);
+      admin.uploads[0].fail(AdminErrorKind.offline);
+      await settle(tester);
+
+      await pressWithKeyboard(tester, 'Cancel uploads');
+
+      expect(find.text('Cancel uploads'), findsNothing);
+      expect(focused(), 'Retry failed');
+      await finish(tester);
+    });
+
+    testWidgets('with neither left, to the summary, in a focus ring', (tester) async {
+      await pumpList(tester);
+      queue.add([testPhoto('IMG_1.jpg')]);
+      await settle(tester);
+
+      await pressWithKeyboard(tester, 'Cancel uploads');
+
+      expect(find.byType(ButtonStyleButton), findsNothing);
+      expect(focused(), 'Upload summary');
+      final ring = find.descendant(of: find.byType(UploadProgressList), matching: find.byType(FocusRing));
+      expect(tester.widget<FocusRing>(ring).visible, isTrue);
+      await finish(tester);
+    });
+
+    testWidgets('or to the page’s control, when the page names one', (tester) async {
+      final upload = FocusNode(debugLabel: 'Upload photos');
+      addTearDown(upload.dispose);
+      await tester.pumpWidget(MaterialApp(
+        theme: brookieTheme(Brightness.light),
+        home: Scaffold(
+          body: Column(children: [
+            OutlinedButton(focusNode: upload, onPressed: () {}, child: const Text('Upload photos')),
+            UploadProgressList(queue: queue, focusWhenDone: upload),
+          ]),
+        ),
+      ));
+      queue.add([testPhoto('IMG_1.jpg')]);
+      await settle(tester);
+
+      await pressWithKeyboard(tester, 'Cancel uploads');
+
+      expect(focused(), 'Upload photos');
+      await finish(tester);
+    });
+
+    testWidgets('a tap moves no focus', (tester) async {
+      await pumpList(tester);
+      queue.add([testPhoto('IMG_1.jpg')]);
+      await settle(tester);
+
+      await tester.tap(find.text('Cancel uploads'));
+      await settle(tester);
+
+      expect(focused(), isNot(anyOf('Upload summary', 'Cancel uploads', 'Retry failed')));
+      await finish(tester);
+    });
   });
 
   testWidgets('only photos the rules refuse failed: nothing to retry', (tester) async {

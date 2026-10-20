@@ -14,12 +14,16 @@ const _decodeStep = 128;
 /// decoded at about that size (not the camera's). Until it has a link (a
 /// photo just uploaded), its placeholder.
 ///
-/// A print: nothing is ever laid over it, so its state is said beside it.
+/// A print: nothing is ever laid over it, so its state is said beside it
+/// (HomePhotoLibrary.cantShowLabel, after [onFailed]).
 class HomeLibraryPhoto extends StatelessWidget {
-  const HomeLibraryPhoto({super.key, required this.photo, required this.width});
+  const HomeLibraryPhoto({super.key, required this.photo, required this.width, this.onFailed});
 
   final StoredPhoto photo;
   final double width;
+
+  /// Called if the photo can't be loaded: its placeholder stays.
+  final VoidCallback? onFailed;
 
   @override
   Widget build(BuildContext context) {
@@ -36,6 +40,7 @@ class HomeLibraryPhoto extends StatelessWidget {
               key: ValueKey(url),
               url: url,
               decodeSize: Size(decodeWidth, decodeWidth / _aspectRatio),
+              onFailed: onFailed,
             ),
     );
   }
@@ -70,7 +75,7 @@ void _focusNear(
 
 /// The home page library's photos as a grid of prints, built a row at a
 /// time as they scroll into view: a library can hold hundreds. Under each,
-/// its name, "Delete photo", and whether it's on the home page.
+/// its name, "Delete", and whether it's on the home page.
 ///
 /// A sliver, for the admin page's scroll view. Each row of the grid is one
 /// item rather than a SliverGrid's fixed-height tiles, so the captions can
@@ -84,8 +89,10 @@ class HomePhotoLibrary extends StatefulWidget {
     required this.canAdd,
     required this.locked,
     required this.deleting,
+    required this.cantShow,
     required this.onToggle,
     required this.onDelete,
+    required this.onPhotoFailed,
   });
 
   /// The photos the site can show (StoragePortfolioService.isPhoto), in
@@ -99,16 +106,27 @@ class HomePhotoLibrary extends StatefulWidget {
   /// PhotoRules.homeMaxPhotos are).
   final bool canAdd;
 
-  /// Names that can't be deleted: on the home page, saved or not.
+  /// Names that can't be deleted: on the home page, saved or not, or taken
+  /// off it but still on the site until it's saved.
   final Set<String> locked;
 
   /// Names being deleted.
   final Set<String> deleting;
 
+  /// Names that can't be shown: no link to them, or they wouldn't load.
+  /// Each says so, and can't be put on the home page (only taken off).
+  final Set<String> cantShow;
+
   /// Puts the photo named on the home page, or takes it off.
   final ValueChanged<String> onToggle;
 
   final ValueChanged<StoredPhoto> onDelete;
+
+  /// Called with a photo's name when it can't be loaded.
+  final ValueChanged<String> onPhotoFailed;
+
+  /// Said beside a photo that can't be shown, here or in the order list.
+  static const cantShowLabel = 'Can’t be shown. Reload the page, or delete it and upload it again.';
 
   /// The narrowest a tile gets at normal text size: wide enough for "On the
   /// home page" on one line, and two columns on most phones.
@@ -148,6 +166,11 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
 
   _TileFocus _focusFor(String name) => _focus.putIfAbsent(name, () => _TileFocus(name));
 
+  /// Each tile's key by photo name. Global, so a tile moving to another
+  /// slot or row (a photo added or deleted before it) keeps its photo as it
+  /// is, rather than showing its placeholder and fading in again.
+  final _keys = <String, GlobalKey>{};
+
   List<String> _names() => [for (final photo in widget.photos) photo.name];
 
   @override
@@ -156,6 +179,7 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
     final names = _names().toSet();
     for (final (i, photo) in oldWidget.photos.indexed) {
       if (names.contains(photo.name)) continue;
+      _keys.remove(photo.name);
       final gone = _focus.remove(photo.name);
       if (gone == null) continue;
       if (gone.hasFocus) {
@@ -166,7 +190,7 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
           (name) => [_focusFor(name).delete, _focusFor(name).toggle],
           (name, node) => node == _focusFor(name).delete
               ? !widget.locked.contains(name)
-              : widget.chosen.contains(name) || widget.canAdd,
+              : widget.chosen.contains(name) || (widget.canAdd && !widget.cantShow.contains(name)),
         );
       }
       // Its tile's buttons hold them until this frame is built.
@@ -220,16 +244,31 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
     final name = photo.name;
     final selected = widget.chosen.contains(name);
     final deleting = widget.deleting.contains(name);
-    return _LibraryTile(
-      key: ValueKey(name),
-      photo: photo,
-      width: width,
-      focus: _focusFor(name),
-      selected: selected,
-      onToggle: !deleting && (selected || widget.canAdd) ? () => widget.onToggle(name) : null,
-      locked: widget.locked.contains(name),
-      deleting: deleting,
-      onDelete: () => widget.onDelete(photo),
+    final cantShow = widget.cantShow.contains(name);
+    final String? lockedReason;
+    if (!widget.locked.contains(name)) {
+      lockedReason = null;
+    } else if (selected) {
+      lockedReason = 'Can’t delete $name: remove it from the home page first';
+    } else {
+      // Taken off already: saving is what's left.
+      lockedReason = 'Can’t delete $name: the site shows it until you save the home page';
+    }
+    return KeyedSubtree(
+      key: _keys.putIfAbsent(name, () => GlobalKey(debugLabel: name)),
+      child: _LibraryTile(
+        key: ValueKey(name),
+        photo: photo,
+        width: width,
+        focus: _focusFor(name),
+        selected: selected,
+        onToggle: !deleting && (selected || (widget.canAdd && !cantShow)) ? () => widget.onToggle(name) : null,
+        lockedReason: lockedReason,
+        deleting: deleting,
+        onDelete: () => widget.onDelete(photo),
+        cantShow: cantShow,
+        onPhotoFailed: () => widget.onPhotoFailed(name),
+      ),
     );
   }
 }
@@ -242,9 +281,11 @@ class _LibraryTile extends StatelessWidget {
     required this.focus,
     required this.selected,
     required this.onToggle,
-    required this.locked,
+    required this.lockedReason,
     required this.deleting,
     required this.onDelete,
+    required this.cantShow,
+    required this.onPhotoFailed,
   });
 
   final StoredPhoto photo;
@@ -252,13 +293,17 @@ class _LibraryTile extends StatelessWidget {
   final _TileFocus focus;
   final bool selected;
 
-  /// Null while the home page is full and this photo isn't on it, or while
-  /// it's being deleted.
+  /// Null while the home page is full and this photo isn't on it, while
+  /// it's being deleted, or while it can't be shown and isn't on it.
   final VoidCallback? onToggle;
 
-  final bool locked;
+  /// Why it can't be deleted, if it can't.
+  final String? lockedReason;
+
   final bool deleting;
   final VoidCallback onDelete;
+  final bool cantShow;
+  final VoidCallback onPhotoFailed;
 
   @override
   Widget build(BuildContext context) {
@@ -269,7 +314,7 @@ class _LibraryTile extends StatelessWidget {
         // Laid on paper as a print, like the home page's.
         DecoratedBox(
           decoration: BoxDecoration(boxShadow: c.shadowPrint),
-          child: HomeLibraryPhoto(photo: photo, width: width),
+          child: HomeLibraryPhoto(photo: photo, width: width, onFailed: onPhotoFailed),
         ),
         const SizedBox(height: BrookieSpace.s1),
         Row(
@@ -284,14 +329,18 @@ class _LibraryTile extends StatelessWidget {
             ),
             _DeleteButton(
               focusNode: focus.delete,
-              tooltip: 'Delete photo',
-              lockedReason: locked ? 'Remove it from the home page first' : null,
+              tooltip: 'Delete ${photo.name}',
+              lockedReason: lockedReason,
               deleting: deleting,
               onDelete: onDelete,
             ),
           ],
         ),
-        _OnHomePageCheck(focusNode: focus.toggle, selected: selected, onToggle: onToggle),
+        if (cantShow) ...[
+          Text(HomePhotoLibrary.cantShowLabel, style: BrookieType.small.copyWith(color: c.inkSoft)),
+          const SizedBox(height: BrookieSpace.s2),
+        ],
+        _OnHomePageCheck(name: photo.name, focusNode: focus.toggle, selected: selected, onToggle: onToggle),
       ],
     );
   }
@@ -301,7 +350,15 @@ class _LibraryTile extends StatelessWidget {
 /// button under the photo. Checked, it turns butter with the 1.5px ink edge
 /// of every selected state; disabled, it's quiet.
 class _OnHomePageCheck extends StatelessWidget {
-  const _OnHomePageCheck({required this.focusNode, required this.selected, required this.onToggle});
+  const _OnHomePageCheck({
+    required this.name,
+    required this.focusNode,
+    required this.selected,
+    required this.onToggle,
+  });
+
+  /// The photo's, for screen readers: every tile has one of these.
+  final String name;
 
   final FocusNode focusNode;
   final bool selected;
@@ -319,7 +376,7 @@ class _OnHomePageCheck extends StatelessWidget {
     } else {
       foreground = enabled ? c.ink : c.inkSoft;
     }
-    // One node: "On the home page", checked or not.
+    // One node: "IMG_1.jpg on the home page", checked or not.
     return MergeSemantics(
       child: Semantics(
         checked: selected,
@@ -358,7 +415,7 @@ class _OnHomePageCheck extends StatelessWidget {
               // Grows with the words beside it at large text sizes.
               Icon(selected ? Icons.check_box : Icons.check_box_outline_blank, size: 20, applyTextScaling: true),
               const SizedBox(width: BrookieSpace.s2),
-              const Expanded(child: Text('On the home page')),
+              Expanded(child: Text('On the home page', semanticsLabel: '$name on the home page')),
             ],
           ),
         ),
@@ -381,12 +438,12 @@ class _DeleteButton extends StatelessWidget {
 
   final FocusNode focusNode;
 
-  /// "Delete photo", or "Delete file".
+  /// "Delete IMG_1.jpg": a screen reader lists every file's together.
   final String tooltip;
 
   final VoidCallback onDelete;
 
-  /// Why it can't be deleted, if it can't.
+  /// Why it can't be deleted, if it can't, naming it as [tooltip] does.
   final String? lockedReason;
 
   final bool deleting;
@@ -416,7 +473,7 @@ class _DeleteButton extends StatelessWidget {
 }
 
 /// Files in the library the site can't show (not a JPEG, PNG or WebP by
-/// name, or hidden), each with why and "Delete file". Shows nothing when
+/// name, or hidden), each with why and "Delete". Shows nothing when
 /// there are none.
 class HomeLibraryOtherFiles extends StatefulWidget {
   const HomeLibraryOtherFiles({super.key, required this.files, required this.deleting, required this.onDelete});
@@ -439,7 +496,7 @@ class HomeLibraryOtherFiles extends StatefulWidget {
 }
 
 class _HomeLibraryOtherFilesState extends State<HomeLibraryOtherFiles> {
-  /// Each file's "Delete file" by name.
+  /// Each file's "Delete" by name.
   final _focus = <String, FocusNode>{};
 
   FocusNode _focusFor(String name) => _focus.putIfAbsent(name, () => FocusNode(debugLabel: 'Delete $name'));
@@ -507,7 +564,7 @@ class _HomeLibraryOtherFilesState extends State<HomeLibraryOtherFiles> {
                   const SizedBox(width: BrookieSpace.s2),
                   _DeleteButton(
                     focusNode: _focusFor(file.name),
-                    tooltip: 'Delete file',
+                    tooltip: 'Delete ${file.name}',
                     deleting: widget.deleting.contains(file.name),
                     onDelete: () => widget.onDelete(file),
                   ),

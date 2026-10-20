@@ -327,6 +327,9 @@ class FakeAdminService implements AdminService {
   /// File names in `_admin/gallery`.
   final library = <String>[];
 
+  /// Photos in [library] listed without a link, as when fetching one fails.
+  final unlinked = <String>{};
+
   /// `site/home.photos`; null if never saved.
   List<String>? homeNames;
 
@@ -540,7 +543,9 @@ class FakeAdminService implements AdminService {
         StoredPhoto(
           name: name,
           fullPath: '${StoragePortfolioService.folder}/$name',
-          url: StoragePortfolioService.isPhoto(name) ? Uri.parse('https://storage.example.com/$name') : null,
+          url: StoragePortfolioService.isPhoto(name) && !unlinked.contains(name)
+              ? Uri.parse('https://storage.example.com/$name')
+              : null,
         ),
     ];
   }

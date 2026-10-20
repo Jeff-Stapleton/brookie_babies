@@ -112,12 +112,12 @@ void main() {
   });
 
   group('chosen on the admin page', () {
-    test('keeps the chosen order, without listing the folder', () async {
+    test('keeps the chosen order, fetching only their links', () async {
       final storage = _FakeStorage(['a.jpg', 'b.jpg', 'c.jpg']);
       final service = StoragePortfolioService(storage, homePhotoNames: () async => ['c.jpg', 'a.jpg']);
 
       expect(names(await service.photoUrls()), ['c.jpg', 'a.jpg']);
-      expect(storage.listed, isFalse);
+      expect(storage.linksFetched, ['c.jpg', 'a.jpg']);
     });
 
     test('skips names that aren’t photos, aren’t in the folder itself, or come twice', () async {
@@ -154,7 +154,7 @@ void main() {
       final service = StoragePortfolioService(storage, homePhotoNames: () async => []);
 
       expect(await service.photoUrls(), isEmpty);
-      expect(storage.listed, isFalse);
+      expect(storage.linksFetched, isEmpty);
     });
   });
 
@@ -197,6 +197,108 @@ void main() {
       final service = StoragePortfolioService(_FakeStorage([]), homePhotoNames: () async => null);
 
       expect(service.homePhotoNamesTimeLimit, const Duration(seconds: 3));
+    });
+
+    test('lists the folder while it waits, so falling back takes no longer than the wait', () async {
+      final storage = _FakeStorage(['b.jpg', 'a.jpg']);
+      final read = Completer<List<String>?>();
+      final urls = StoragePortfolioService(storage, homePhotoNames: () => read.future).photoUrls();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(storage.listed, isTrue);
+      read.complete(['b.jpg']);
+      expect(names(await urls), ['b.jpg']);
+    });
+  });
+
+  group('a choice that answers too late', () {
+    /// The service with a short wait, reading [reads] in turn, and counting
+    /// its onLateChoice calls in [lateChoices].
+    late List<Completer<List<String>?>> reads;
+    late int lateChoices;
+    StoragePortfolioService slow(_FakeStorage storage) {
+      reads = [];
+      lateChoices = 0;
+      return StoragePortfolioService(
+        storage,
+        homePhotoNames: () => (reads..add(Completer())).last.future,
+        homePhotoNamesTimeLimit: const Duration(milliseconds: 10),
+        onLateChoice: () => lateChoices++,
+      );
+    }
+
+    /// Lets the late answer be handled.
+    Future<void> settle() => Future<void>.delayed(Duration.zero);
+
+    test('asks to be shown, and is what a read that is slow again shows', () async {
+      final storage = _FakeStorage(['b.jpg', 'a.jpg', 'c.jpg']);
+      final service = slow(storage);
+
+      expect(names(await service.photoUrls()), ['a.jpg', 'b.jpg', 'c.jpg']);
+      reads.last.complete(['c.jpg', 'a.jpg']);
+      await settle();
+      expect(lateChoices, 1);
+
+      // The home page asks again, and this read is slow too.
+      expect(names(await service.photoUrls()), ['c.jpg', 'a.jpg']);
+      reads.last.complete(['c.jpg', 'a.jpg']);
+      await settle();
+      expect(lateChoices, 1, reason: 'already shown');
+    });
+
+    test('changes nothing when it is what was shown anyway', () async {
+      final storage = _FakeStorage(['b.jpg', 'a.jpg', 'c.jpg']);
+      final service = slow(storage);
+
+      // None chosen: the folder by name, as shown.
+      await service.photoUrls(limit: 2);
+      reads.last.complete(null);
+      await settle();
+      // Chosen, but the same photos the folder gave, once skipped and cut.
+      await service.photoUrls(limit: 2);
+      reads.last.complete(['a.jpg', 'notes.txt', 'a.jpg', 'b.jpg', 'c.jpg']);
+      await settle();
+
+      expect(lateChoices, 0);
+    });
+
+    test('a read that fails late changes nothing', () async {
+      final service = slow(_FakeStorage(['a.jpg']));
+
+      expect(names(await service.photoUrls()), ['a.jpg']);
+      reads.last.completeError(Exception('permission-denied'));
+      await settle();
+
+      expect(lateChoices, 0);
+    });
+
+    test('only the newest read’s answer counts', () async {
+      final storage = _FakeStorage(['a.jpg', 'b.jpg']);
+      final service = slow(storage);
+
+      await service.photoUrls();
+      final first = reads.last;
+      // The next read answers in time.
+      final urls = service.photoUrls();
+      reads.last.complete(['b.jpg']);
+      expect(names(await urls), ['b.jpg']);
+      first.complete(['a.jpg']);
+      await settle();
+
+      expect(lateChoices, 0);
+      expect(names(await service.photoUrls()), ['b.jpg']);
+    });
+
+    test('a read that fails in time shows the last one read', () async {
+      var fail = false;
+      final service = StoragePortfolioService(
+        _FakeStorage(['a.jpg', 'b.jpg']),
+        homePhotoNames: () async => fail ? throw Exception('unavailable') : ['b.jpg'],
+      );
+      expect(names(await service.photoUrls()), ['b.jpg']);
+
+      fail = true;
+      expect(names(await service.photoUrls()), ['b.jpg']);
     });
   });
 

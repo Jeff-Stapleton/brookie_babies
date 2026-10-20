@@ -31,7 +31,9 @@ class HomePhotosAdminPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      appBar: BrookieTopBar(title: 'Home page photos', showAdminLink: false),
+      // No "Your sessions" either: the pages it leads to can leave this one
+      // without asking, losing uploads and changes.
+      appBar: BrookieTopBar(title: 'Home page photos', showSessionsLink: false, showAdminLink: false),
       body: AdminGate(child: _HomePhotosEditor()),
     );
   }
@@ -63,8 +65,16 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   /// library's first photos by name, and [_saved] follows them.
   bool _neverChosen = false;
 
+  /// The home page photos as `site/home` lists them, [_missing] ones
+  /// included.
+  List<String> _savedChoice = const [];
+
   /// Chosen photos the library no longer has, which the site leaves out.
   List<String> _missing = const [];
+
+  /// An upload changed what the site shows, and the home page under this
+  /// one hasn't looked again yet: it does once the uploads stop.
+  bool _homeOutOfDate = false;
 
   bool _saving = false;
   bool _justSaved = false;
@@ -73,6 +83,12 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   /// Why the last delete failed.
   String? _deleteError;
   final _deleting = <String>{};
+
+  /// Library photos the site can't show: listed without a link to them, or
+  /// they wouldn't load. Each says so, and can only come off the home page.
+  /// A photo just uploaded waits for its link instead, from the next
+  /// listing.
+  Set<String> _cantShow = {};
 
   bool _wasUploading = false;
 
@@ -96,6 +112,7 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   @override
   void dispose() {
     LeaveWarning.set(this, false);
+    if (_homeOutOfDate) HomePage.reloadPhotos();
     _queue
       ..removeListener(_onQueueChanged)
       ..dispose();
@@ -130,14 +147,17 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
       if (!mounted) return;
       _set(() {
         _library = [...library]..sort((a, b) => a.name.compareTo(b.name));
+        _cantShow = {
+          for (final file in library)
+            if (file.url == null && StoragePortfolioService.isPhoto(file.name)) file.name,
+        };
         _neverChosen = chosen == null;
         if (chosen == null) {
           _saved = _firstPhotos();
         } else {
-          // As the site does: the photos still in the library, once each,
-          // up to the most it shows.
+          _savedChoice = chosen;
+          _saved = _shownOf(chosen);
           final photos = _photoNames();
-          _saved = chosen.where(photos.contains).toSet().take(PhotoRules.homeMaxPhotos).toList();
           _missing = chosen.where((name) => !photos.contains(name)).toSet().toList();
         }
         _chosen = _saved;
@@ -158,6 +178,13 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
           if (StoragePortfolioService.isPhoto(file.name)) file.name,
       };
 
+  /// What the site shows of [choice], as it does: the photos still in the
+  /// library, once each, up to the most it shows.
+  List<String> _shownOf(List<String> choice) {
+    final photos = _photoNames();
+    return choice.where(photos.contains).toSet().take(PhotoRules.homeMaxPhotos).toList();
+  }
+
   /// What the site shows while nothing has been chosen: the library's first
   /// photos by name.
   List<String> _firstPhotos() => [
@@ -166,9 +193,18 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
       ].take(PhotoRules.homeMaxPhotos).toList();
 
   /// Until photos are chosen, the site's photos follow the library's names,
-  /// so the page does too (unless the admin has changed them).
+  /// so the page's saved ones do too, and its chosen ones unless the admin
+  /// has changed them or is saving them.
   void _followFirstPhotos() {
-    if (_neverChosen && !_changed) _saved = _chosen = _firstPhotos();
+    if (!_neverChosen) return;
+    final first = _firstPhotos();
+    if (!_changed && !_saving) _chosen = first;
+    _saved = first;
+  }
+
+  void _onPhotoFailed(String name) {
+    if (!mounted || _cantShow.contains(name)) return;
+    _set(() => _cantShow.add(name));
   }
 
   void _toggle(String name) {
@@ -201,7 +237,7 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
       HomePage.reloadPhotos();
       if (!mounted) return;
       _set(() {
-        _saved = names;
+        _saved = _savedChoice = names;
         _neverChosen = false;
         _missing = const [];
         _justSaved = true;
@@ -273,17 +309,32 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   }
 
   /// A photo just stored joins the library at once, for now without a
-  /// link to show it by (they come with the next listing).
+  /// link to show it by (they come with the next listing). Once: the queue
+  /// also passes on a name it found already stored.
   void _onUploaded(UploadItem item) {
     final library = _library;
-    if (!mounted || library == null) return;
+    if (!mounted || library == null || library.any((file) => file.name == item.name)) return;
+    final shown = _saved;
     _set(() {
       _library = [
         ...library,
         StoredPhoto(name: item.name, fullPath: '${StoragePortfolioService.folder}/${item.name}'),
       ]..sort((a, b) => a.name.compareTo(b.name));
+      // A new file: one deleted under this name couldn't be shown.
+      _cantShow.remove(item.name);
       _followFirstPhotos();
+      // Chosen, deleted, and back again: the site shows it again.
+      if (_missing.contains(item.name)) {
+        _missing = [
+          for (final name in _missing)
+            if (name != item.name) name,
+        ];
+        final saved = _shownOf(_savedChoice);
+        if (!_changed && !_saving) _chosen = saved;
+        _saved = saved;
+      }
     });
+    if (!listEquals(shown, _saved)) _homeOutOfDate = true;
   }
 
   void _onQueueChanged() {
@@ -291,12 +342,18 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
     if (uploading == _wasUploading) return;
     _wasUploading = uploading;
     _set(() {});
-    if (!uploading) _fetchLinks();
+    if (uploading) return;
+    _fetchLinks();
+    if (_homeOutOfDate) {
+      _homeOutOfDate = false;
+      HomePage.reloadPhotos();
+    }
   }
 
   /// Lists the library once the uploads are done, for the links to show
   /// the new photos by: once per batch, not once per photo. Only the links
-  /// are taken from it; the page's own list stays as it is.
+  /// are taken from it, for photos without one or that can't be shown; the
+  /// page's own list stays as it is.
   Future<void> _fetchLinks() async {
     bool unlinked(StoredPhoto file) => file.url == null && StoragePortfolioService.isPhoto(file.name);
     if (!(_library?.any(unlinked) ?? false)) return;
@@ -307,8 +364,8 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
       _set(() {
         _library = [
           for (final file in _library!)
-            if (unlinked(file) && listed[file.name] != null)
-              StoredPhoto(name: file.name, fullPath: file.fullPath, url: listed[file.name])
+            if ((unlinked(file) || _cantShow.contains(file.name)) && listed.containsKey(file.name))
+              _relisted(file, listed[file.name])
             else
               file,
         ];
@@ -320,23 +377,50 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
     }
   }
 
+  /// [file], unlinked or not shown, as a listing gives it again with [url].
+  /// A new link is tried again; none, or the same one that wouldn't load,
+  /// still can't be shown.
+  StoredPhoto _relisted(StoredPhoto file, Uri? url) {
+    if (url == null || url == file.url) {
+      _cantShow.add(file.name);
+      return file;
+    }
+    _cantShow.remove(file.name);
+    return StoredPhoto(name: file.name, fullPath: file.fullPath, url: url);
+  }
+
   Future<void> _confirmLeave() async {
     final uploading = _queue.isBusy;
+    // Leaving doesn't stop a save: it finishes, and the home page under
+    // this one shows it. Only a failure would go unseen.
+    final saving = _saving && !uploading;
     final String message;
-    if (!uploading) {
+    if (saving) {
+      message = 'Your changes are still saving. If you leave now, they’ll still be saved, but you won’t see it if '
+          'saving fails.';
+    } else if (!uploading) {
       message = 'The changes you made to the home page photos will be lost.';
-    } else if (_changed) {
+    } else if (_changed && !_saving) {
       message = 'Photos still uploading will stop, and changes you haven’t saved will be lost.';
     } else {
       message = 'Photos still uploading will stop. The ones already uploaded stay in the library.';
     }
+    final String title, confirmLabel, cancelLabel;
+    if (uploading) {
+      (title, confirmLabel, cancelLabel) = ('Stop uploading?', 'Stop and leave', 'Keep uploading');
+    } else if (saving) {
+      (title, confirmLabel, cancelLabel) = ('Leave while saving?', 'Leave', 'Stay');
+    } else {
+      (title, confirmLabel, cancelLabel) = ('Leave without saving?', 'Leave without saving', 'Keep editing');
+    }
     final leave = await showBrookieConfirm(
       context,
-      title: uploading ? 'Stop uploading?' : 'Leave without saving?',
+      title: title,
       message: message,
-      confirmLabel: uploading ? 'Stop and leave' : 'Leave without saving',
-      cancelLabel: uploading ? 'Keep uploading' : 'Keep editing',
-      destructive: true,
+      confirmLabel: confirmLabel,
+      cancelLabel: cancelLabel,
+      // Leaving while saving loses nothing.
+      destructive: !saving,
     );
     if (!leave || !mounted) return;
     // Navigator.pop leaves whatever PopScope says.
@@ -390,8 +474,10 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
             canAdd: _chosen.length < PhotoRules.homeMaxPhotos,
             locked: {..._chosen, ..._saved},
             deleting: _deleting,
+            cantShow: _cantShow,
             onToggle: _toggle,
             onDelete: _delete,
+            onPhotoFailed: _onPhotoFailed,
           ),
         ),
         SliverPadding(
@@ -465,6 +551,8 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
               ],
               onChanged: _choose,
               focusWhenEmptied: _saveFocus,
+              cantShow: _cantShow,
+              onPhotoFailed: _onPhotoFailed,
             ),
           ),
         const SizedBox(height: BrookieSpace.s3),
@@ -503,10 +591,15 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   Widget _librarySection(List<StoredPhoto> library) {
     final c = BrookieColors.of(context);
     final photoCount = library.where((file) => StoragePortfolioService.isPhoto(file.name)).length;
+    // Taken off the home page, but on the site until it's saved.
+    final removed = _saved.any((name) => !_chosen.contains(name));
     final notes = [
       if (_chosen.length >= PhotoRules.homeMaxPhotos)
         'The home page has ${PhotoRules.homeMaxPhotos} photos, the most it shows. Remove one to add another.',
-      if (_chosen.isNotEmpty || _saved.isNotEmpty)
+      if (removed)
+        'Photos on the home page can’t be deleted. Remove them from the home page and save first: until you '
+            'save, the site still shows the ones you removed.'
+      else if (_chosen.isNotEmpty)
         'Photos on the home page can’t be deleted. Remove them from the home page first.',
     ];
     return Column(
@@ -519,6 +612,10 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
           'Don’t upload clients’ photos without their permission.',
           icon: Icons.public,
         ),
+        if (_neverChosen) ...[
+          const SizedBox(height: BrookieSpace.s4),
+          const _Note(kHomeUploadsGoLiveNote),
+        ],
         const SizedBox(height: BrookieSpace.s4),
         Align(
           alignment: AlignmentDirectional.centerStart,
@@ -568,6 +665,12 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
         mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.progress),
       );
 }
+
+/// Said by "Upload photos" until the home page is first saved.
+@visibleForTesting
+const kHomeUploadsGoLiveNote = 'Until the home page is saved, the site shows the library’s first photos by name, so a '
+    'new photo whose name comes first goes on the site as soon as it’s uploaded. Save the home page first to keep '
+    'the photos it shows now.';
 
 /// What the home page does with [count] chosen photos: how many of the ones
 /// after the hero wide screens and phones show (FeaturedPhotos.shownCount).

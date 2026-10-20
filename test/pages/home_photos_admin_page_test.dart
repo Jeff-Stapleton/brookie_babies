@@ -51,6 +51,7 @@ void main() {
         await body(tester);
       } finally {
         server.stop();
+        server.broken.clear();
       }
     });
   }
@@ -177,6 +178,29 @@ void main() {
       expect(tester.widget<NetworkPhoto>(tiles.first).url, Uri.parse('https://storage.example.com/IMG_01.jpg'));
     });
 
+    photoTest('photos shown stay as they are when one is added or deleted before them', (tester) async {
+      admin.autoCompleteUploads = true;
+      picker.next = [testPhoto('IMG_00.jpg')];
+      await pumpPage(tester);
+      State photo(String name) =>
+          tester.state(find.descendant(of: tile(name), matching: find.byType(NetworkPhoto)));
+      // Five a row: the next slot along, the next row, and the row after.
+      const names = ['IMG_01.jpg', 'IMG_05.jpg', 'IMG_10.jpg'];
+      final before = {for (final name in names) name: photo(name)};
+
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+      await reveal(tester, tile('IMG_10.jpg'));
+      for (final name in names) {
+        expect(photo(name), same(before[name]), reason: '$name after an upload');
+      }
+
+      await tapAndSettle(tester, deleteButton(tile('IMG_00.jpg')));
+      await tapAndSettle(tester, find.widgetWithText(FilledButton, 'Delete photo'));
+      for (final name in names) {
+        expect(photo(name), same(before[name]), reason: '$name after a delete');
+      }
+    });
+
     photoTest('decode sizes follow the device’s pixel ratio', (tester) async {
       tester.view.physicalSize = const Size(1440 * 2, 900 * 2);
       tester.view.devicePixelRatio = 2;
@@ -289,11 +313,14 @@ void main() {
       // That's what the site shows already: nothing to lose.
       expect(discard(), findsNothing);
       expect(LeaveWarning.active.value, isFalse);
+      // And uploading changes it.
+      expect(find.text(kHomeUploadsGoLiveNote), findsOneWidget);
 
       await tapAndSettle(tester, save());
 
       expect(admin.calls.last, 'saveHomePhotos(${_photos(7).join(', ')})');
       expect(find.textContaining('No photos have been chosen yet'), findsNothing);
+      expect(find.text(kHomeUploadsGoLiveNote), findsNothing);
       expect(find.text('Saved. The home page shows these photos now.'), findsOneWidget);
     });
 
@@ -306,6 +333,96 @@ void main() {
 
       await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
 
+      expect(chosen(tester), ['IMG_00.jpg', ..._photos(6)]);
+      expect(LeaveWarning.active.value, isFalse);
+    });
+
+    photoTest('an upload that changes the site’s photos has the home page look again, once the uploads stop',
+        (tester) async {
+      admin.homeNames = null;
+      picker.next = [testPhoto('IMG_00.jpg'), testPhoto('IMG_99.jpg')];
+      await pumpPage(tester);
+      final loads = portfolio.loads;
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+
+      admin.uploads.first.complete();
+      await tester.pumpAndSettle();
+      expect(portfolio.loads, loads, reason: 'still uploading');
+      admin.uploads.last.complete();
+      await tester.pumpAndSettle();
+
+      expect(portfolio.loads, loads + 1);
+    });
+
+    photoTest('leaving with uploads still running, the home page looks again for the ones that landed',
+        (tester) async {
+      admin.homeNames = null;
+      picker.next = [testPhoto('IMG_00.jpg'), testPhoto('IMG_99.jpg')];
+      await pumpPage(tester);
+      final loads = portfolio.loads;
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+      admin.uploads.first.complete();
+      await tester.pumpAndSettle();
+
+      await tapAndSettle(tester, find.byTooltip('Back'));
+      await tapAndSettle(tester, find.widgetWithText(FilledButton, 'Stop and leave'));
+
+      expect(find.byType(HomePhotosAdminPage), findsNothing);
+      expect(portfolio.loads, loads + 1);
+    });
+
+    photoTest('an upload that sorts after the site’s photos leaves the home page alone', (tester) async {
+      admin
+        ..homeNames = null
+        ..autoCompleteUploads = true;
+      picker.next = [testPhoto('IMG_99.jpg')];
+      await pumpPage(tester);
+      final loads = portfolio.loads;
+
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+
+      expect(chosen(tester), _photos(7));
+      expect(portfolio.loads, loads);
+    });
+
+    photoTest('a photo that lands during the first save leaves what’s being saved alone', (tester) async {
+      admin
+        ..homeNames = null
+        ..writeDelay = const Duration(seconds: 1);
+      picker.next = [testPhoto('IMG_00.jpg')];
+      await pumpPage(tester);
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+
+      await reveal(tester, save());
+      await tester.tap(save());
+      await tester.pump();
+      admin.uploads.single.complete();
+      await tester.pump();
+      expect(chosen(tester), _photos(7));
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(admin.homeNames, _photos(7));
+      expect(chosen(tester), _photos(7));
+      expect(discard(), findsNothing);
+      expect(find.text('Saved. The home page shows these photos now.'), findsOneWidget);
+      expect(LeaveWarning.active.value, isFalse);
+    });
+
+    photoTest('with changes, a new photo still moves what the site shows, so discarding goes back to it',
+        (tester) async {
+      admin
+        ..homeNames = null
+        ..autoCompleteUploads = true;
+      picker.next = [testPhoto('IMG_00.jpg')];
+      await pumpPage(tester);
+      await tapAndSettle(tester, rowButton('IMG_07.jpg', Icons.close));
+
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+
+      // The admin's choice stays as she left it.
+      expect(chosen(tester), _photos(6));
+      await tapAndSettle(tester, discard());
       expect(chosen(tester), ['IMG_00.jpg', ..._photos(6)]);
       expect(LeaveWarning.active.value, isFalse);
     });
@@ -396,6 +513,62 @@ void main() {
     });
   });
 
+  group('photos that can’t be shown', () {
+    Uri link(String name) => Uri.parse('https://storage.example.com/$name');
+    Finder cantShow(Finder within) =>
+        find.descendant(of: within, matching: find.text(HomePhotoLibrary.cantShowLabel));
+
+    photoTest('a library photo that won’t load says so, and can’t be put on the home page', (tester) async {
+      server.broken.add(link('IMG_08.jpg'));
+      await pumpPage(tester);
+      await reveal(tester, check('IMG_08.jpg'));
+
+      expect(cantShow(tile('IMG_08.jpg')), findsOneWidget);
+      expect(find.text(HomePhotoLibrary.cantShowLabel), findsOneWidget);
+      expect(isEnabled(tester, check('IMG_08.jpg')), isFalse);
+      expect(isEnabled(tester, check('IMG_09.jpg')), isTrue);
+      expect(tester.takeException(), isNull);
+    });
+
+    photoTest('one on the home page says so in its row too, and can still come off', (tester) async {
+      server.broken.add(link('IMG_01.jpg'));
+      await pumpPage(tester);
+
+      expect(cantShow(row('IMG_01.jpg')), findsOneWidget);
+      expect(cantShow(row('IMG_03.jpg')), findsNothing);
+      await reveal(tester, check('IMG_01.jpg'));
+      expect(cantShow(tile('IMG_01.jpg')), findsOneWidget);
+      expect(isEnabled(tester, check('IMG_01.jpg')), isTrue);
+
+      await tapAndSettle(tester, check('IMG_01.jpg'));
+
+      expect(chosen(tester), ['IMG_03.jpg', 'IMG_05.jpg']);
+      // Off, it can't go back on.
+      expect(isEnabled(tester, check('IMG_01.jpg')), isFalse);
+    });
+
+    photoTest('a photo listed without a link says so until a listing gives it one', (tester) async {
+      admin.unlinked.add('IMG_08.jpg');
+      picker.next = [testPhoto('IMG_99.jpg')];
+      await pumpPage(tester);
+      await reveal(tester, check('IMG_08.jpg'));
+      expect(cantShow(tile('IMG_08.jpg')), findsOneWidget);
+      expect(isEnabled(tester, check('IMG_08.jpg')), isFalse);
+
+      // The upload batch's listing has its link now.
+      admin.unlinked.clear();
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+      admin.uploads.single.complete();
+      await tester.pumpAndSettle();
+
+      await reveal(tester, check('IMG_08.jpg'));
+      expect(find.text(HomePhotoLibrary.cantShowLabel), findsNothing);
+      expect(isEnabled(tester, check('IMG_08.jpg')), isTrue);
+      final photo = find.descendant(of: tile('IMG_08.jpg'), matching: find.byType(NetworkPhoto));
+      expect(tester.widget<NetworkPhoto>(photo).url, link('IMG_08.jpg'));
+    });
+  });
+
   group('keyboard', () {
     photoTest('focus stays on the button that moved a row, in its new place', (tester) async {
       await pumpPage(tester);
@@ -425,6 +598,20 @@ void main() {
       expect(focusOf(tester, rowButton('IMG_01.jpg', Icons.arrow_downward)).hasPrimaryFocus, isTrue);
     });
 
+    photoTest('with two rows, focus still goes to the other button at the top and the bottom', (tester) async {
+      admin.homeNames = ['IMG_01.jpg', 'IMG_02.jpg'];
+      await pumpPage(tester);
+
+      await pressWithKeyboard(tester, rowButton('IMG_02.jpg', Icons.arrow_upward));
+      expect(chosen(tester), ['IMG_02.jpg', 'IMG_01.jpg']);
+      expect(focusOf(tester, rowButton('IMG_02.jpg', Icons.arrow_downward)).hasPrimaryFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(chosen(tester), ['IMG_01.jpg', 'IMG_02.jpg']);
+      expect(focusOf(tester, rowButton('IMG_02.jpg', Icons.arrow_upward)).hasPrimaryFocus, isTrue);
+    });
+
     photoTest('removing a row hands focus to the row that takes its place, then to Save', (tester) async {
       admin.homeNames = ['IMG_01.jpg', 'IMG_02.jpg'];
       await pumpPage(tester);
@@ -437,6 +624,48 @@ void main() {
       await tester.pumpAndSettle();
       expect(chosen(tester), isEmpty);
       expect(Focus.of(tester.element(find.text('Save home page'))).hasPrimaryFocus, isTrue);
+    });
+
+    photoTest('every control names its photo, for screen readers', (tester) async {
+      admin.library.add('IMG_50.HEIC');
+      await pumpPage(tester);
+
+      expect(
+        tester.getSemantics(rowButton('IMG_01.jpg', Icons.arrow_upward)),
+        isSemantics(tooltip: 'Move IMG_01.jpg up'),
+      );
+      expect(
+        tester.getSemantics(rowButton('IMG_01.jpg', Icons.arrow_downward)),
+        isSemantics(tooltip: 'Move IMG_01.jpg down'),
+      );
+      expect(tester.getSemantics(rowButton('IMG_01.jpg', Icons.close)), isSemantics(tooltip: 'Remove IMG_01.jpg'));
+      expect(tester.getSemantics(deleteButton(tile('IMG_02.jpg'))), isSemantics(tooltip: 'Delete IMG_02.jpg'));
+      expect(
+        tester.getSemantics(deleteButton(tile('IMG_01.jpg'))),
+        isSemantics(tooltip: 'Can’t delete IMG_01.jpg: remove it from the home page first'),
+      );
+      expect(
+        tester.getSemantics(check('IMG_02.jpg')),
+        isSemantics(label: 'IMG_02.jpg on the home page', hasCheckedState: true, isChecked: false),
+      );
+      final heic = find.ancestor(of: find.text('IMG_50.HEIC'), matching: find.byKey(const ValueKey('IMG_50.HEIC')));
+      await reveal(tester, heic);
+      expect(tester.getSemantics(deleteButton(heic)), isSemantics(tooltip: 'Delete IMG_50.HEIC'));
+    });
+
+    photoTest('a move says where the photo went', (tester) async {
+      await pumpPage(tester);
+      tester.takeAnnouncements();
+
+      await pressWithKeyboard(tester, rowButton('IMG_05.jpg', Icons.arrow_upward));
+      await pressWithKeyboard(tester, rowButton('IMG_05.jpg', Icons.arrow_upward));
+      await pressWithKeyboard(tester, rowButton('IMG_05.jpg', Icons.arrow_downward));
+
+      expect([for (final announcement in tester.takeAnnouncements()) announcement.message], [
+        'IMG_05.jpg is now photo 2 of 3',
+        'IMG_05.jpg is now photo 1 of 3, the full-screen photo',
+        'IMG_05.jpg is now photo 2 of 3',
+      ]);
     });
 
     photoTest('"Discard changes" hands focus to Save as it goes', (tester) async {
@@ -562,18 +791,33 @@ void main() {
 
     photoTest('photos on the home page, saved or not, can’t be deleted, and the page says why', (tester) async {
       await pumpPage(tester);
+      expect(find.text('Photos on the home page can’t be deleted. Remove them from the home page first.'),
+          findsOneWidget);
       // Saved, then taken off but not saved: still on the site.
       await tapAndSettle(tester, rowButton('IMG_05.jpg', Icons.close));
       // Not saved yet.
       await tapAndSettle(tester, check('IMG_08.jpg'));
 
-      for (final name in ['IMG_01.jpg', 'IMG_05.jpg', 'IMG_08.jpg']) {
+      for (final name in ['IMG_01.jpg', 'IMG_08.jpg']) {
         await reveal(tester, tile(name));
         final delete = tester.widget<IconButton>(deleteButton(tile(name)));
         expect(delete.onPressed, isNull, reason: name);
-        expect(delete.tooltip, 'Remove it from the home page first', reason: name);
+        expect(delete.tooltip, 'Can’t delete $name: remove it from the home page first', reason: name);
       }
+      // Already taken off: saving is what's left.
+      final removed = tester.widget<IconButton>(deleteButton(tile('IMG_05.jpg')));
+      expect(removed.onPressed, isNull);
+      expect(removed.tooltip, 'Can’t delete IMG_05.jpg: the site shows it until you save the home page');
       expect(iconEnabled(tester, deleteButton(tile('IMG_02.jpg'))), isTrue);
+      expect(
+        find.text('Photos on the home page can’t be deleted. Remove them from the home page and save first: until '
+            'you save, the site still shows the ones you removed.'),
+        findsOneWidget,
+      );
+
+      await tapAndSettle(tester, save());
+
+      expect(iconEnabled(tester, deleteButton(tile('IMG_05.jpg'))), isTrue);
       expect(find.text('Photos on the home page can’t be deleted. Remove them from the home page first.'),
           findsOneWidget);
     });
@@ -628,6 +872,8 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('JPEG, PNG or WebP, each under 20 MB.'), findsOneWidget);
+      // Photos are chosen, so new ones wait to be.
+      expect(find.text(kHomeUploadsGoLiveNote), findsNothing);
     });
 
     photoTest('picks JPEG, PNG or WebP; checks each; skips names already here; adds new ones to the library',
@@ -665,6 +911,42 @@ void main() {
       expect(chosen(tester).last, 'IMG_99.jpg');
     });
 
+    photoTest('a chosen photo uploaded again after it was deleted is back on the home page', (tester) async {
+      admin
+        ..homeNames = ['IMG_03.jpg', 'gone.jpg', 'IMG_01.jpg']
+        ..autoCompleteUploads = true;
+      picker.next = [testPhoto('gone.jpg')];
+      await pumpPage(tester);
+      final loads = portfolio.loads;
+      expect(chosen(tester), ['IMG_03.jpg', 'IMG_01.jpg']);
+
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+
+      // As the site shows it again: in its place, and not to be deleted.
+      expect(chosen(tester), ['IMG_03.jpg', 'gone.jpg', 'IMG_01.jpg']);
+      expect(find.textContaining('isn’t in the library any more'), findsNothing);
+      expect(discard(), findsNothing);
+      expect(iconEnabled(tester, deleteButton(tile('gone.jpg'))), isFalse);
+      expect(portfolio.loads, loads + 1);
+    });
+
+    photoTest('a name passed on twice joins the library once', (tester) async {
+      picker.next = [testPhoto('IMG_99.jpg')];
+      await pumpPage(tester);
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+      admin.uploads.single.complete();
+      await tester.pumpAndSettle();
+
+      // As the queue does for a name it finds already stored.
+      final queue = _queueOf(tester);
+      queue.onUploaded!(queue.items.single);
+      await tester.pumpAndSettle();
+
+      expect(tile('IMG_99.jpg'), findsOneWidget);
+      expect(find.text('11 photos'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
     photoTest('a cancelled picker changes nothing, and the page never waits on it', (tester) async {
       picker.neverAnswers = true;
       await pumpPage(tester);
@@ -689,6 +971,9 @@ void main() {
 
       expect(tile('IMG_99.jpg'), findsOneWidget);
       expect(find.descendant(of: tile('IMG_99.jpg'), matching: find.byType(NetworkPhoto)), findsNothing);
+      // Just uploaded, not broken: it can still go on the home page.
+      expect(find.text(HomePhotoLibrary.cantShowLabel), findsNothing);
+      expect(isEnabled(tester, check('IMG_99.jpg')), isTrue);
       expect(tester.takeException(), isNull);
     });
   });
@@ -714,6 +999,32 @@ void main() {
       expect(LeaveWarning.active.value, isFalse);
     });
 
+    photoTest('while saving: "Leave while saving?", and leaving still saves', (tester) async {
+      admin.writeDelay = const Duration(seconds: 1);
+      await pumpPage(tester);
+      final loads = portfolio.loads;
+      await tapAndSettle(tester, check('IMG_09.jpg'));
+      await reveal(tester, save());
+      await tester.tap(save());
+      await tester.pump();
+
+      await tapAndSettle(tester, back());
+      expect(find.text('Leave while saving?'), findsOneWidget);
+      expect(
+        find.text('Your changes are still saving. If you leave now, they’ll still be saved, but you won’t see it if '
+            'saving fails.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('will be lost'), findsNothing);
+      await tapAndSettle(tester, find.widgetWithText(FilledButton, 'Leave'));
+      expect(find.byType(HomePhotosAdminPage), findsNothing);
+
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(admin.homeNames, ['IMG_03.jpg', 'IMG_01.jpg', 'IMG_05.jpg', 'IMG_09.jpg']);
+      expect(portfolio.loads, loads + 1);
+    });
+
     photoTest('with uploads running: "Stop uploading?", and leaving stops them', (tester) async {
       picker.next = [testPhoto('IMG_99.jpg')];
       await pumpPage(tester);
@@ -734,6 +1045,16 @@ void main() {
       expect(find.byType(HomePhotosAdminPage), findsNothing);
       expect(admin.uploads.single.cancelled, isTrue);
       expect(LeaveWarning.active.value, isFalse);
+    });
+
+    photoTest('the account menu has no "Your sessions", whose pages could leave without asking', (tester) async {
+      await pumpPage(tester);
+
+      await tapAndSettle(tester, find.byType(CircleAvatar));
+
+      expect(find.text('Sign out'), findsOneWidget);
+      expect(find.text('Your sessions'), findsNothing);
+      expect(find.text('Admin'), findsNothing);
     });
 
     photoTest('with nothing to lose, back just goes back', (tester) async {

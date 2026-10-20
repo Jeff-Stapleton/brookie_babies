@@ -4,6 +4,7 @@ import 'package:brookie_babies/components/home_photo_library.dart';
 import 'package:brookie_babies/models/stored_photo.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 /// The home page photos in their order, one row each: a thumbnail, where
 /// the photo goes on the home page, its name, and "Move up", "Move down"
@@ -15,7 +16,14 @@ import 'package:flutter/material.dart';
 /// that takes its place. No dragging: the buttons work the same for
 /// everyone. Shows nothing for no photos.
 class HomePhotoOrder extends StatefulWidget {
-  const HomePhotoOrder({super.key, required this.photos, required this.onChanged, this.focusWhenEmptied});
+  const HomePhotoOrder({
+    super.key,
+    required this.photos,
+    required this.onChanged,
+    this.focusWhenEmptied,
+    this.cantShow = const {},
+    this.onPhotoFailed,
+  });
 
   /// The home page photos, in order: the first is the hero.
   final List<StoredPhoto> photos;
@@ -26,6 +34,12 @@ class HomePhotoOrder extends StatefulWidget {
   /// Takes focus when the last photo is removed with the keyboard focused
   /// on its row.
   final FocusNode? focusWhenEmptied;
+
+  /// Names that can't be shown (HomePhotoLibrary.cantShow): each says so.
+  final Set<String> cantShow;
+
+  /// Called with a photo's name when it can't be loaded.
+  final ValueChanged<String>? onPhotoFailed;
 
   /// Where the first photo goes, and what to mind when choosing it.
   static const heroLabel = 'Full-screen photo, behind the logo: keep faces clear of the middle';
@@ -91,11 +105,32 @@ class _HomePhotoOrderState extends State<HomePhotoOrder> {
     final to = index + by;
     names.insert(to, name);
     // At the top "Move up" is disabled (at the bottom, "Move down"), which
-    // would drop focus: it goes to the other one first.
+    // would drop focus: it goes to the other one first. With two rows that
+    // one is disabled where the row was, so it's asked again once the row
+    // is in its new place.
     final focus = _focusFor(name);
-    if (focus.up.hasFocus && to == 0) focus.down.requestFocus();
-    if (focus.down.hasFocus && to == names.length - 1) focus.up.requestFocus();
+    final FocusNode? other;
+    if (focus.up.hasFocus && to == 0) {
+      other = focus.down;
+    } else if (focus.down.hasFocus && to == names.length - 1) {
+      other = focus.up;
+    } else {
+      other = null;
+    }
+    if (other case final other?) {
+      other.requestFocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !other.hasFocus) other.requestFocus();
+      });
+    }
     widget.onChanged(names);
+    // Focus stays on the button, so nothing else says where the photo went.
+    final hero = to == 0 ? ', the full-screen photo' : '';
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      '$name is now photo ${to + 1} of ${names.length}$hero',
+      Directionality.of(context),
+    );
   }
 
   void _remove(int index) {
@@ -130,6 +165,8 @@ class _HomePhotoOrderState extends State<HomePhotoOrder> {
             onMoveUp: i > 0 ? () => _move(i, -1) : null,
             onMoveDown: i < photos.length - 1 ? () => _move(i, 1) : null,
             onRemove: () => _remove(i),
+            cantShow: widget.cantShow.contains(photo.name),
+            onPhotoFailed: () => widget.onPhotoFailed?.call(photo.name),
           ),
         ],
       ],
@@ -146,6 +183,8 @@ class _OrderRow extends StatelessWidget {
     required this.onMoveUp,
     required this.onMoveDown,
     required this.onRemove,
+    required this.cantShow,
+    required this.onPhotoFailed,
   });
 
   final StoredPhoto photo;
@@ -157,6 +196,8 @@ class _OrderRow extends StatelessWidget {
   final VoidCallback? onMoveUp;
   final VoidCallback? onMoveDown;
   final VoidCallback onRemove;
+  final bool cantShow;
+  final VoidCallback onPhotoFailed;
 
   static const _thumbnailWidth = 48.0;
 
@@ -180,7 +221,7 @@ class _OrderRow extends StatelessWidget {
             width: textScaler.scale(BrookieSpace.s5),
             child: Text('$position', style: BrookieType.label.copyWith(color: c.inkSoft)),
           ),
-          HomeLibraryPhoto(photo: photo, width: _thumbnailWidth),
+          HomeLibraryPhoto(photo: photo, width: _thumbnailWidth, onFailed: onPhotoFailed),
           const SizedBox(width: BrookieSpace.s4),
           Expanded(
             child: Column(
@@ -192,6 +233,8 @@ class _OrderRow extends StatelessWidget {
                   position == 1 ? HomePhotoOrder.heroLabel : HomePhotoOrder.featuredLabel,
                   style: BrookieType.small.copyWith(color: c.inkSoft),
                 ),
+                if (cantShow)
+                  Text(HomePhotoLibrary.cantShowLabel, style: BrookieType.small.copyWith(color: c.inkSoft)),
               ],
             ),
           ),
@@ -201,23 +244,24 @@ class _OrderRow extends StatelessWidget {
     final buttons = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // Each names its photo: a screen reader lists them all together.
         IconButton(
           focusNode: focus.up,
-          tooltip: 'Move up',
+          tooltip: 'Move ${photo.name} up',
           onPressed: onMoveUp,
           icon: const Icon(Icons.arrow_upward),
         ),
         const SizedBox(width: BrookieSpace.s1),
         IconButton(
           focusNode: focus.down,
-          tooltip: 'Move down',
+          tooltip: 'Move ${photo.name} down',
           onPressed: onMoveDown,
           icon: const Icon(Icons.arrow_downward),
         ),
         const SizedBox(width: BrookieSpace.s1),
         IconButton(
           focusNode: focus.remove,
-          tooltip: 'Remove',
+          tooltip: 'Remove ${photo.name}',
           onPressed: onRemove,
           icon: const Icon(Icons.close),
         ),

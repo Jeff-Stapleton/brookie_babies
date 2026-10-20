@@ -205,7 +205,7 @@ class FirebaseAdminService implements AdminService {
         AdminErrorKind.invalid,
       );
     }
-    _check(sessionDetailsProblem(details));
+    _check(sessionDetailsProblem(details, before: session));
     _signedInUid();
     final changes = sessionChanges(session, details);
     if (changes.isEmpty) return;
@@ -530,32 +530,42 @@ const _cancelledMessage = 'Cancelled before it finished. Try again.';
 /// validName, validEmail, validDate, ... functions), or why no guest could
 /// ever sign in to it (SessionRules.googleEmailProblem), written for the
 /// admin; null if neither. Change the rules and this together.
+///
+/// Editing [before], only the fields that change are checked, as the rules
+/// check them: a session typed into the console may hold odd values in
+/// fields nobody touches.
 @visibleForTesting
-String? sessionDetailsProblem(SessionDetails details) {
+String? sessionDetailsProblem(SessionDetails details, {Booking? before}) {
+  final changed = before == null ? null : sessionChanges(before, details).keys.toSet();
+  bool checks(String field) => changed == null || changed.contains(field);
   final name = details.name.trim();
-  if (name.isEmpty) return 'Enter who the session is for, like “The Harper family”.';
-  if (name.length > SessionRules.nameMaxLength) {
-    return 'The name is too long. Shorten it to ${SessionRules.nameMaxLength} characters or fewer.';
+  if (checks('name')) {
+    if (name.isEmpty) return 'Enter who the session is for, like “The Harper family”.';
+    if (name.length > SessionRules.nameMaxLength) {
+      return 'The name is too long. Shorten it to ${SessionRules.nameMaxLength} characters or fewer.';
+    }
   }
-  final googleEmailProblem = SessionRules.googleEmailProblem(details.email);
-  if (googleEmailProblem != null) return googleEmailProblem;
-  if (!SessionRules.emailPattern.hasMatch(SessionRules.normalizeEmail(details.email))) {
-    return 'That email doesn’t look right. Enter the Google email they sign in with, like name@gmail.com.';
+  if (checks('email')) {
+    final googleEmailProblem = SessionRules.googleEmailProblem(details.email);
+    if (googleEmailProblem != null) return googleEmailProblem;
+    if (!SessionRules.emailPattern.hasMatch(SessionRules.normalizeEmail(details.email))) {
+      return 'That email doesn’t look right. Enter the Google email they sign in with, like name@gmail.com.';
+    }
   }
   final packageName = _optional(details.packageName);
-  if (packageName != null && !SessionRules.packageNames.contains(packageName)) {
+  if (checks('packageName') && packageName != null && !SessionRules.packageNames.contains(packageName)) {
     return 'That package doesn’t exist. Choose ${SessionRules.packageNames.join(', ')} or no package.';
   }
   // YYYY-MM-DD needs a four-digit year.
-  if (details.date.year < 0 || details.date.year > 9999) {
+  if (checks('date') && (details.date.year < 0 || details.date.year > 9999)) {
     return 'That date can’t be saved. Choose a date from the calendar.';
   }
   final time = details.time;
-  if (time != null && (time.hour < 0 || time.hour > 23 || time.minute < 0 || time.minute > 59)) {
+  if (checks('time') && time != null && (time.hour < 0 || time.hour > 23 || time.minute < 0 || time.minute > 59)) {
     return 'That time can’t be saved. Choose a time from the list.';
   }
   final location = _optional(details.location);
-  if (location != null && location.length > SessionRules.locationMaxLength) {
+  if (checks('location') && location != null && location.length > SessionRules.locationMaxLength) {
     return 'The location is too long. Shorten it to ${SessionRules.locationMaxLength} characters or fewer.';
   }
   return null;

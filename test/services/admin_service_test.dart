@@ -156,6 +156,20 @@ void main() {
       expect(sessionDetailsProblem(_details(email: ' Pat.Parent@GoogleMail.com ')), isNull);
     });
 
+    test('editing: checks only the fields that change, as the rules do', () {
+      // Typed into the console, as the app never would.
+      final odd = testSession('s1', date: DateTime(2026, 11, 14), packageName: 'premium', location: 'y' * 201);
+      SessionDetails keeping({String name = 'The Harper family', String? packageName = 'premium'}) =>
+          _details(name: name, packageName: packageName, location: 'y' * 201);
+
+      expect(sessionDetailsProblem(keeping(), before: odd), isNull);
+      expect(sessionDetailsProblem(keeping(name: 'The Harpers'), before: odd), isNull);
+      expect(sessionDetailsProblem(keeping(packageName: 'Gold'), before: odd), contains('Choose Basic'));
+      expect(sessionDetailsProblem(keeping(name: ''), before: odd), contains('Enter who the session is for'));
+      // Adding, everything is checked.
+      expect(sessionDetailsProblem(keeping()), isNotNull);
+    });
+
     test('refuses an email no Google sign-in could match, though the rules would take it', () {
       for (final (email, says) in [
         ('<harper@example.com>', 'An email address has no < or >. Enter just the address, like name@gmail.com.'),
@@ -436,6 +450,17 @@ void main() {
         'location': FieldValue.delete(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
+    });
+
+    test('keeps an odd value typed in the console when other fields change', () async {
+      addAdHoc('s1');
+      db.docs['bookings/s1']!['packageName'] = 'premium';
+      final session = testSession('s1', date: DateTime(2026, 11, 14), packageName: 'premium');
+
+      await admin.updateSession(session, _details(packageName: 'premium', location: 'The studio'));
+
+      expect(db.writes.single.data, {'location': 'The studio', 'updatedAt': FieldValue.serverTimestamp()});
+      expect(db.docs['bookings/s1']!['packageName'], 'premium');
     });
 
     test('nothing changed: nothing written', () async {

@@ -690,6 +690,31 @@ void main() {
       expect(find.widgetWithText(FilledButton, 'Save changes'), findsOneWidget);
     });
 
+    testWidgets('a package typed in the console is kept on offer, and kept on saving', (tester) async {
+      final odd = testSession('s1', packageName: 'premium');
+      final admin = FakeAdminService(sessions: [odd]);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: odd));
+
+      expect(find.text('premium'), findsOneWidget);
+      await tapInView(tester, find.text('premium'));
+      await tester.pumpAndSettle();
+      expect(
+        [for (final item in tester.widgetList<MenuItemButton>(_options())) (item.child! as Text).data],
+        ['No package', 'Basic', 'Premium', 'Ultimate', 'premium'],
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.tapAt(const Offset(1400, 1150));
+      await tester.pumpAndSettle();
+      expect(LeaveWarning.active.value, isFalse);
+
+      await tester.enterText(_field('Location (optional)'), 'The studio');
+      await tapInView(tester, find.text('Save changes'));
+      await tester.pumpAndSettle();
+
+      expect(admin.sessions['s1']!.packageName, 'premium');
+      expect(admin.sessions['s1']!.location, 'The studio');
+    });
+
     testWidgets('a time off the quarter hours is kept on offer', (tester) async {
       await pumpAdminPage(tester, SessionFormPage(now: now, session: harpers(time: (hour: 9, minute: 5))),
           size: const Size(1440, 1200));

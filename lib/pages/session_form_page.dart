@@ -132,11 +132,15 @@ class _SessionFormState extends State<_SessionForm> {
   final _dateFocus = FocusNode(debugLabel: 'Date');
   final _locationFocus = FocusNode(debugLabel: 'Location');
 
-  // Sessions are only ever saved with one of these, but a name the form
-  // doesn't offer would trip the dropdown, so it starts on "No package".
-  late final String? _startPackage =
-      SessionRules.packageNames.contains(widget.session?.packageName) ? widget.session!.packageName : null;
+  late final String? _startPackage = widget.session?.packageName;
   late String? _package = _startPackage;
+
+  /// The packages offered: the three, and the session's own if it's another
+  /// (typed in the console), so saving other changes keeps it.
+  late final List<String> _packages = [
+    ...SessionRules.packageNames,
+    if (_startPackage case final own? when !SessionRules.packageNames.contains(own)) own,
+  ];
   late DateTime? _date = widget.session?.date;
   late _Time? _time = widget.session?.time;
 
@@ -389,7 +393,7 @@ class _SessionFormState extends State<_SessionForm> {
               value: _package,
               options: [
                 (value: null, label: 'No package'),
-                for (final name in SessionRules.packageNames) (value: name, label: name),
+                for (final name in _packages) (value: name, label: name),
               ],
               onChanged: (value) {
                 setState(() => _package = value);

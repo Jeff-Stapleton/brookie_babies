@@ -225,6 +225,25 @@ void main() {
       expect(find.text('Add session'), findsOneWidget);
     });
 
+    testWidgets('trying again after no answer adds the same session, never a second', (tester) async {
+      final admin = FakeAdminService()
+        ..errors['createSession'] = adminError(AdminErrorKind.offline, kAdminTimedOutMessage);
+      await pumpAdminPage(tester, const SessionFormPage(), admin: admin, size: const Size(1440, 1200));
+
+      await _fillIn(tester);
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(InlineMessage, kAdminTimedOutMessage), findsOneWidget);
+
+      admin.errors.remove('createSession');
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(admin.createSessionIds, ['session-1', 'session-1']);
+      expect(admin.sessions.keys, ['session-1']);
+      expect(tester.widget<AdminSessionPage>(find.byType(AdminSessionPage)).sessionId, 'session-1');
+    });
+
     testWidgets('Cancel goes back without saving', (tester) async {
       final admin = FakeAdminService();
       await _pumpOver(tester, admin, const SessionFormPage());

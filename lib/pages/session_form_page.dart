@@ -137,6 +137,11 @@ class _SessionFormState extends State<_SessionForm> {
     return times;
   }();
 
+  /// The new session's id, made on the first try to add it and used for
+  /// every retry: a try that got no answer may still have been saved, and
+  /// the same id never makes a second session.
+  String? _newId;
+
   /// Once the admin has tried to save, each field is checked as it changes.
   bool _triedToSave = false;
   bool _saving = false;
@@ -223,7 +228,7 @@ class _SessionFormState extends State<_SessionForm> {
     try {
       // Once saved, the form stays busy while it fades out.
       if (session == null) {
-        final id = await admin.createSession(details);
+        final id = await admin.createSession(details, id: _newId ??= admin.newSessionId());
         if (!mounted) return;
         // Straight on to its photos; back from there is Admin, not this form.
         Navigator.of(context).pushReplacement(

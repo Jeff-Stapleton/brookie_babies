@@ -338,6 +338,61 @@ void main() {
         throwsA(_adminError(AdminErrorKind.denied, message: kAdminDeniedMessage)),
       );
     });
+
+    test('newSessionId makes an id without writing', () {
+      expect(admin.newSessionId(), 'auto-1');
+      expect(log, ['new id bookings/auto-1']);
+    });
+
+    test('with an id, sets that document', () async {
+      final id = admin.newSessionId();
+
+      expect(await admin.createSession(_details(), id: id), id);
+      expect(log, ['new id bookings/$id', 'set bookings/$id']);
+      expect(db.docs.keys, ['bookings/$id']);
+    });
+
+    test('a retry after a try that got no answer but was saved: the same session, not a second', () async {
+      final hold = db.holdWrites = Completer();
+      await expectLater(
+        admin.createSession(_details(), id: 'a1'),
+        throwsA(_adminError(AdminErrorKind.offline, message: kAdminTimedOutMessage)),
+      );
+      // The first try reaches the server after all ...
+      hold.complete();
+      db.holdWrites = null;
+      await pumpEventQueue();
+      // ... so the rules take the retry's set() as an update, and refuse it.
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+
+      expect(await admin.createSession(_details(), id: 'a1'), 'a1');
+      expect(log, ['set bookings/a1', 'set bookings/a1', 'get bookings/a1']);
+      expect(db.docs.keys, ['bookings/a1']);
+    });
+
+    test('a refused retry with no session there is still refused', () async {
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+
+      await expectLater(admin.createSession(_details(), id: 'a1'), throwsA(_adminError(AdminErrorKind.denied)));
+      expect(log, ['set bookings/a1', 'get bookings/a1']);
+    });
+
+    test('a refused retry that can’t look either is still refused', () async {
+      db.errors['set bookings/a1'] = _firestoreError('permission-denied');
+      db.errors['get bookings/a1'] = _firestoreError('permission-denied');
+
+      await expectLater(
+        admin.createSession(_details(), id: 'a1'),
+        throwsA(_adminError(AdminErrorKind.denied, message: kAdminDeniedMessage)),
+      );
+    });
+
+    test('an id never reaches another document', () async {
+      for (final id in ['', 'a/b', '..']) {
+        await expectLater(admin.createSession(_details(), id: id), throwsArgumentError, reason: id);
+      }
+      expect(log, isEmpty);
+    });
   });
 
   group('updateSession', () {

@@ -75,8 +75,14 @@ abstract class AdminService {
   /// The session [id], updated live.
   Stream<SessionLookup> watchSession(String id);
 
-  /// Adds an ad hoc session; returns its id.
-  Future<String> createSession(SessionDetails details);
+  /// An id for a new session, made without writing anything.
+  String newSessionId();
+
+  /// Adds an ad hoc session as [id] (from [newSessionId]; a new one if
+  /// null) and returns its id. Trying again with the same id never makes a
+  /// second session: a try that got no answer may still have been saved, and
+  /// a retry then finds it and returns its id.
+  Future<String> createSession(SessionDetails details, {String? id});
 
   /// Changes an ad hoc session's details.
   Future<void> updateSession(Booking session, SessionDetails details);
@@ -162,13 +168,22 @@ class FirebaseAdminService implements AdminService {
       );
 
   @override
-  Future<String> createSession(SessionDetails details) async {
+  String newSessionId() => _bookings.doc().id;
+
+  @override
+  Future<String> createSession(SessionDetails details, {String? id}) async {
     _check(sessionDetailsProblem(details));
     final uid = _signedInUid();
     // The id is made here, not by add(), so it's known before the server
-    // answers.
-    final doc = _bookings.doc();
-    await _write('add a session', () => doc.set(newSessionData(details, createdBy: uid)));
+    // answers and a retry can use it again.
+    final doc = _bookings.doc(id == null ? newSessionId() : _sessionId(id));
+    try {
+      await _write('add a session', () => doc.set(newSessionData(details, createdBy: uid)));
+    } on AdminException catch (e) {
+      // A retry after a try that got no answer but was saved: the rules
+      // take set() on a document that's there as an update, and refuse it.
+      if (id == null || e.kind != AdminErrorKind.denied || !await _exists(doc)) rethrow;
+    }
     return doc.id;
   }
 
@@ -341,13 +356,27 @@ class FirebaseAdminService implements AdminService {
     }
   }
 
-  /// `galleries/<id>`, for a session id that can't reach another folder.
-  static String _galleryPath(String id) {
+  /// [id], if it's a session id that can't reach another document or
+  /// folder.
+  static String _sessionId(String id) {
     // An empty id would make it every family's photos.
     if (id.isEmpty || id.contains('/') || id == '.' || id == '..') {
       throw ArgumentError.value(id, 'id', 'Not a session id');
     }
-    return '$_galleries/$id';
+    return id;
+  }
+
+  /// `galleries/<id>`, for a session id that can't reach another folder.
+  static String _galleryPath(String id) => '$_galleries/${_sessionId(id)}';
+
+  /// Whether [doc] is there; false if that can't be read either.
+  static Future<bool> _exists(DocumentReference<Map<String, dynamic>> doc) async {
+    try {
+      return (await doc.get()).exists;
+    } catch (e) {
+      log('Admin: could not read ${doc.path}: $e');
+      return false;
+    }
   }
 
   static String? _nameProblem(String name) => name == PhotoRules.safeObjectName(name)

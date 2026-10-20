@@ -353,6 +353,9 @@ class FakeAdminService implements AdminService {
   /// Every upload started, in order.
   final uploads = <FakePhotoUpload>[];
 
+  /// The id each [createSession] call was for, in order.
+  final createSessionIds = <String>[];
+
   var _nextId = 1;
   final _changes = StreamController<void>.broadcast(sync: true);
 
@@ -436,12 +439,18 @@ class FakeAdminService implements AdminService {
   }
 
   @override
-  Future<String> createSession(SessionDetails details) async {
+  String newSessionId() => 'session-${_nextId++}';
+
+  @override
+  Future<String> createSession(SessionDetails details, {String? id}) async {
+    final sessionId = id ?? newSessionId();
+    createSessionIds.add(sessionId);
     await _write('createSession', 'createSession(${details.name.trim()})');
-    final id = 'session-${_nextId++}';
-    sessions[id] = _adHoc(id, details, photosReady: false);
+    // Already saved by an earlier try: the real one finds it, and never
+    // makes a second session or changes the first.
+    sessions.putIfAbsent(sessionId, () => _adHoc(sessionId, details, photosReady: false));
     notifyChanged();
-    return id;
+    return sessionId;
   }
 
   @override

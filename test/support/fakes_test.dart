@@ -58,6 +58,19 @@ void main() {
       expect(session.uid, isNull);
     });
 
+    test('createSession with an id already saved finds it, and never makes a second', () async {
+      final admin = FakeAdminService();
+      final id = admin.newSessionId();
+      final other = SessionDetails(name: 'Other', email: 'o@example.com', date: DateTime(2027));
+
+      expect(await admin.createSession(harper, id: id), id);
+      expect(await admin.createSession(other, id: id), id);
+
+      expect(admin.sessions.keys, [id]);
+      expect(admin.sessions[id]!.name, 'The Harper family');
+      expect(admin.createSessionIds, [id, id]);
+    });
+
     test('one session: found, unreadable, or missing once deleted', () async {
       final admin = FakeAdminService(
         sessions: [testSession('s1')],

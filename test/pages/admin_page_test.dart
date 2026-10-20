@@ -73,6 +73,25 @@ void main() {
     expect(ready.tone, StatusTone.success);
   });
 
+  testWidgets('photos available on a booking that can’t be delivered say why, not "Ready to download"',
+      (tester) async {
+    await pumpAdminPage(tester, const AdminPage(),
+        admin: FakeAdminService(sessions: [
+          for (final status in [BookingStatus.pending, BookingStatus.cancelled, BookingStatus.refunded])
+            testSession(status.name, status: status, photosReady: true),
+        ]));
+
+    for (final (id, label) in [
+      ('pending', 'Ready once paid'),
+      ('cancelled', 'Can’t download: cancelled'),
+      ('refunded', 'Can’t download: refunded'),
+    ]) {
+      final tag = find.descendant(of: _card(id), matching: find.widgetWithText(StatusTag, label));
+      expect(tester.widget<StatusTag>(tag).tone, StatusTone.neutral);
+    }
+    expect(find.text('Ready to download'), findsNothing);
+  });
+
   testWidgets('a session with neither name nor email is just "Session"', (tester) async {
     await pumpAdminPage(tester, const AdminPage(),
         admin: FakeAdminService(sessions: [

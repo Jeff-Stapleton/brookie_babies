@@ -368,6 +368,18 @@ void main() {
         expect(find.widgetWithText(FilledButton, 'Make photos available'), findsOneWidget);
       });
     }
+
+    testWidgets('available on a booking that can’t be delivered: the tag says why, not "Ready to download"',
+        (tester) async {
+      final admin = FakeAdminService(
+        sessions: [testSession('b', status: BookingStatus.pending, photosReady: true)],
+        sessionPhotos: {'b': _photos},
+      );
+      await _pumpSession(tester, admin: admin, id: 'b');
+
+      expect(tester.widget<StatusTag>(find.widgetWithText(StatusTag, 'Ready once paid')).tone, StatusTone.neutral);
+      expect(find.text('Ready to download'), findsNothing);
+    });
   });
 
   group('uploading', () {

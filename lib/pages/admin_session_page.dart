@@ -643,7 +643,7 @@ class _SessionBodyState extends State<_SessionBody> {
       children: [
         const AdminHeading('Downloads'),
         const SizedBox(height: BrookieSpace.s3),
-        PhotosReadyTag(ready: ready),
+        PhotosReadyTag(ready: ready, status: booking.status),
         const SizedBox(height: BrookieSpace.s2),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),

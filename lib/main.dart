@@ -1,3 +1,6 @@
+import 'dart:js_interop';
+
+import 'package:brookie_babies/pages/admin_page.dart';
 import 'package:brookie_babies/pages/home_page.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/pages/scheduling_page.dart';
@@ -10,6 +13,7 @@ import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/services/portfolio_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/embedded_browser.dart';
+import 'package:brookie_babies/utilities/leave_warning.dart';
 import 'package:brookie_babies/utilities/web_photo_picker.dart' as web_photo_picker;
 import 'package:brookie_babies/widgets/focus_ring.dart';
 
@@ -28,6 +32,7 @@ Map<String, Widget Function(BuildContext)> routes = {
   '/schedule': (context) => const SchedulingPage(packageName: '',),
   // "Your sessions", also linkable as https://brookie-babies.web.app/#/profile.
   '/profile': (context) => const ProfilePage(),
+  AdminPage.routeName: (context) => const AdminPage(),
 };
 
 Future<void> main() async {
@@ -35,6 +40,7 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  _warnBeforeLeaving();
   final admin = FirebaseAdminService(FirebaseFirestore.instance, FirebaseStorage.instance, FirebaseAuth.instance);
   runApp(MyApp(
     auth: FirebaseAuthService(FirebaseAuth.instance),
@@ -47,6 +53,25 @@ Future<void> main() async {
     pickPhotos: web_photo_picker.pickPhotos,
     isEmbeddedBrowser: isEmbeddedBrowser(web.window.navigator.userAgent),
   ));
+}
+
+/// While [LeaveWarning] is active (uploads running, changes unsaved), the
+/// browser asks before the tab closes or reloads. The listener is only
+/// there while it's needed: any `beforeunload` listener stops the browser
+/// keeping the page for a quick back and forward.
+void _warnBeforeLeaving() {
+  final ask = ((web.BeforeUnloadEvent event) {
+    event.preventDefault();
+    // Older browsers ask only when this is set (they show their own words).
+    event.returnValue = 'Leave the site?';
+  }).toJS;
+  LeaveWarning.active.addListener(() {
+    if (LeaveWarning.active.value) {
+      web.window.addEventListener('beforeunload', ask);
+    } else {
+      web.window.removeEventListener('beforeunload', ask);
+    }
+  });
 }
 
 class MyApp extends StatelessWidget {

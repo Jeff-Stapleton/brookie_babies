@@ -1,5 +1,6 @@
 import 'dart:developer';
 
+import 'package:brookie_babies/components/account_button.dart';
 import 'package:brookie_babies/components/booking_card.dart';
 import 'package:brookie_babies/components/sign_in_dialog.dart';
 import 'package:brookie_babies/models/app_user.dart';
@@ -195,7 +196,8 @@ class _AccountHeader extends StatelessWidget {
           ],
         ),
         OutlinedButton(
-          onPressed: AppServices.of(context).auth.signOut,
+          // Asks first if an admin page under this one has uploads running.
+          onPressed: () => signOutWithWarning(context),
           child: const Text('Sign out'),
         ),
       ],

@@ -6,13 +6,16 @@ import 'package:flutter/material.dart';
 /// page's short name, and the account control. On paper with a hairline
 /// underneath (the AppBar theme), never a shadow.
 class BrookieTopBar extends StatelessWidget implements PreferredSizeWidget {
-  const BrookieTopBar({super.key, required this.title, this.showSessionsLink = true});
+  const BrookieTopBar({super.key, required this.title, this.showSessionsLink = true, this.showAdminLink = true});
 
   /// Two to four words, sentence case.
   final String title;
 
   /// See [AccountButton.showSessionsLink].
   final bool showSessionsLink;
+
+  /// See [AccountButton.showAdminLink]. False on every admin page.
+  final bool showAdminLink;
 
   static const _height = 64.0;
 
@@ -41,7 +44,7 @@ class BrookieTopBar extends StatelessWidget implements PreferredSizeWidget {
       titleSpacing: canPop ? BrookieSpace.s2 : BrookieSpace.s4,
       title: Text(title),
       actions: [
-        AccountButton(showSessionsLink: showSessionsLink),
+        AccountButton(showSessionsLink: showSessionsLink, showAdminLink: showAdminLink),
         const SizedBox(width: BrookieSpace.s4),
       ],
     );

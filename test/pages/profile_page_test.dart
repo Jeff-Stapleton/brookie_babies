@@ -5,6 +5,8 @@ import 'package:brookie_babies/pages/home_page.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/leave_warning.dart';
+import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/empty_state.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
@@ -134,6 +136,21 @@ void main() {
 
     expect(auth.currentUser, isNull);
     expect(find.text('Sign in to see your sessions and download your photos.'), findsOneWidget);
+  });
+
+  testWidgets('Sign out asks first while an admin page below has work to lose', (tester) async {
+    addTearDown(LeaveWarning.reset);
+    final auth = await pumpProfile(tester);
+    LeaveWarning.set(tester, true);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Sign out'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign out now?'), findsOneWidget);
+    expect(auth.currentUser, isNotNull);
+
+    await tester.tap(find.descendant(of: find.byType(BrookieDialog), matching: find.text('Sign out')));
+    await tester.pumpAndSettle();
+    expect(auth.currentUser, isNull);
   });
 
   testWidgets('splits upcoming and past sessions, nearest first', (tester) async {

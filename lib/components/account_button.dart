@@ -1,25 +1,29 @@
+import 'dart:developer';
 import 'dart:math' as math;
 
 import 'package:brookie_babies/components/sign_in_dialog.dart';
 import 'package:brookie_babies/models/app_user.dart';
+import 'package:brookie_babies/pages/admin_page.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/keyboard_input.dart';
+import 'package:brookie_babies/utilities/leave_warning.dart';
 import 'package:brookie_babies/widgets/account_avatar.dart';
+import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// The account control at the right of a top bar: a "Sign in" chip when
 /// signed out; when signed in, a butter avatar that opens the account menu
-/// ("Your sessions", "Sign out").
+/// ("Your sessions", "Admin" for admins, "Sign out").
 ///
 /// Its focus rings show only for keyboard focus ([KeyboardInput]): the
 /// avatar takes focus when its menu opens, and the chip when the sign-in
 /// dialog closes, and after a click a ring would look like keyboard focus.
 class AccountButton extends StatelessWidget {
-  const AccountButton({super.key, this.onPhoto = false, this.showSessionsLink = true});
+  const AccountButton({super.key, this.onPhoto = false, this.showSessionsLink = true, this.showAdminLink = true});
 
   /// Whether the button sits on a photograph (the home page's hero) rather
   /// than on paper.
@@ -31,6 +35,11 @@ class AccountButton extends StatelessWidget {
   /// has its own "Sign in" button.
   final bool showSessionsLink;
 
+  /// Whether this control is anywhere but the admin pages. False there: the
+  /// menu leaves out "Admin", and signed out the control shows nothing,
+  /// since AdminGate has its own "Sign in" button.
+  final bool showAdminLink;
+
   @override
   Widget build(BuildContext context) {
     KeyboardInput.listen();
@@ -40,12 +49,37 @@ class AccountButton extends StatelessWidget {
       initialData: auth.currentUser,
       builder: (context, snapshot) {
         final user = snapshot.data;
-        if (user != null) return _AccountMenu(user: user, onPhoto: onPhoto, showSessionsLink: showSessionsLink);
-        // On "Your sessions" the page's own "Sign in" is the one way in.
-        return showSessionsLink ? _SignInChip(onPhoto: onPhoto) : const SizedBox.shrink();
+        if (user != null) {
+          return _AccountMenu(
+            user: user,
+            onPhoto: onPhoto,
+            showSessionsLink: showSessionsLink,
+            showAdminLink: showAdminLink,
+          );
+        }
+        // On "Your sessions" and the admin pages the page's own "Sign in"
+        // is the one way in.
+        return showSessionsLink && showAdminLink ? _SignInChip(onPhoto: onPhoto) : const SizedBox.shrink();
       },
     );
   }
+}
+
+/// Signs out, first asking while leaving would lose work ([LeaveWarning]):
+/// uploads still running, or changes not yet saved.
+Future<void> signOutWithWarning(BuildContext context) async {
+  final auth = AppServices.of(context).auth;
+  if (LeaveWarning.active.value) {
+    final confirmed = await showBrookieConfirm(
+      context,
+      title: 'Sign out now?',
+      message: 'Uploads still running will stop, and changes you haven’t saved will be lost.',
+      confirmLabel: 'Sign out',
+      destructive: true,
+    );
+    if (!confirmed) return;
+  }
+  await auth.signOut();
 }
 
 /// How far a padded (48px) tap target reaches past a 40px control on each
@@ -134,12 +168,21 @@ class _SignInChip extends StatelessWidget {
 /// and last, and Escape closes it and returns focus to the avatar. Opened
 /// with a click or a tap, focus doesn't move into the menu, and the avatar
 /// (which MenuAnchor focuses) shows no ring.
+///
+/// "Admin" appears once [AuthService.isAdmin] says so, checked again for
+/// each user who signs in.
 class _AccountMenu extends StatefulWidget {
-  const _AccountMenu({required this.user, required this.onPhoto, required this.showSessionsLink});
+  const _AccountMenu({
+    required this.user,
+    required this.onPhoto,
+    required this.showSessionsLink,
+    required this.showAdminLink,
+  });
 
   final AppUser user;
   final bool onPhoto;
   final bool showSessionsLink;
+  final bool showAdminLink;
 
   @override
   State<_AccountMenu> createState() => _AccountMenuState();
@@ -149,16 +192,54 @@ class _AccountMenuState extends State<_AccountMenu> {
   final _controller = MenuController();
   final _avatarFocus = FocusNode(debugLabel: 'Account');
   final _sessionsFocus = FocusNode(debugLabel: 'Your sessions');
+  final _adminFocus = FocusNode(debugLabel: 'Admin');
   final _signOutFocus = FocusNode(debugLabel: 'Sign out');
 
-  List<FocusNode> get _items => [if (widget.showSessionsLink) _sessionsFocus, _signOutFocus];
+  /// Whether [_AccountMenu.user] is an admin; false until the check answers.
+  bool _isAdmin = false;
+
+  bool get _showAdmin => widget.showAdminLink && _isAdmin;
+
+  List<FocusNode> get _items => [
+        if (widget.showSessionsLink) _sessionsFocus,
+        if (_showAdmin) _adminFocus,
+        _signOutFocus,
+      ];
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAdmin();
+  }
+
+  @override
+  void didUpdateWidget(_AccountMenu oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.user.uid != widget.user.uid || oldWidget.showAdminLink != widget.showAdminLink) _checkAdmin();
+  }
 
   @override
   void dispose() {
     _avatarFocus.dispose();
     _sessionsFocus.dispose();
+    _adminFocus.dispose();
     _signOutFocus.dispose();
     super.dispose();
+  }
+
+  void _checkAdmin() {
+    _isAdmin = false;
+    // The admin pages leave the link out, and their gate checks for itself.
+    if (!widget.showAdminLink) return;
+    final uid = widget.user.uid;
+    AppServices.of(context).auth.isAdmin().then(
+      (admin) {
+        // An answer for someone who has since signed out counts for no one.
+        if (mounted && widget.user.uid == uid && admin != _isAdmin) setState(() => _isAdmin = admin);
+      },
+      // Only the link is missing; the admin pages say what went wrong.
+      onError: (Object e) => log('Could not check admin access: $e'),
+    );
   }
 
   /// Opens the menu (if it isn't open) and focuses its first or last item
@@ -196,7 +277,6 @@ class _AccountMenuState extends State<_AccountMenu> {
   @override
   Widget build(BuildContext context) {
     final c = BrookieColors.of(context);
-    final auth = AppServices.of(context).auth;
     final direction = Directionality.of(context);
     final gutter = BrookieLayout.gutter(context);
     final maxWidth = math.min(320.0, MediaQuery.sizeOf(context).width - 2 * gutter);
@@ -255,11 +335,21 @@ class _AccountMenuState extends State<_AccountMenu> {
                     ),
                     const SizedBox(height: BrookieSpace.s1),
                   ],
+                  if (_showAdmin) ...[
+                    MenuItemButton(
+                      focusNode: _adminFocus,
+                      requestFocusOnHover: false,
+                      style: itemStyle,
+                      onPressed: () => AdminPage.open(context),
+                      child: const Text('Admin'),
+                    ),
+                    const SizedBox(height: BrookieSpace.s1),
+                  ],
                   MenuItemButton(
                     focusNode: _signOutFocus,
                     requestFocusOnHover: false,
                     style: itemStyle,
-                    onPressed: auth.signOut,
+                    onPressed: () => signOutWithWarning(context),
                     child: const Text('Sign out'),
                   ),
                 ],

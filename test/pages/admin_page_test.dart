@@ -258,11 +258,11 @@ void main() {
       final scroll = tester.widget<SingleChildScrollView>(find.byType(SingleChildScrollView)).controller!;
       expect(scroll.offset, greaterThan(0));
 
-      AdminPage.returnWithNotice(tester.element(find.byType(AdminPage)), 'Deleted the Harper family’s session.');
+      AdminPage.returnWithNotice(tester.element(find.byType(AdminPage)), 'Deleted the session for the Harper family.');
       await tester.pumpAndSettle();
 
       expect(scroll.offset, 0);
-      final notice = find.widgetWithText(InlineMessage, 'Deleted the Harper family’s session.');
+      final notice = find.widgetWithText(InlineMessage, 'Deleted the session for the Harper family.');
       expect(tester.getTopLeft(notice).dy, greaterThan(tester.getBottomLeft(find.text('Admin').last).dy));
     });
   });
@@ -276,7 +276,8 @@ void main() {
           ..sessions['long'] = testSession('long',
               name: null, email: 'a.very.long.address.for.a.family@example.com', status: BookingStatus.pending);
         await pumpAdminPage(tester, const AdminPage(), admin: admin, brightness: brightness, size: Size(width, 800));
-        AdminPage.returnWithNotice(tester.element(find.byType(AdminPage)), 'Deleted the Harper family’s session.');
+        AdminPage.returnWithNotice(
+            tester.element(find.byType(AdminPage)), 'Deleted the session for the Harper family.');
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);

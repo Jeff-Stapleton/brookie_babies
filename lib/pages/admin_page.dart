@@ -36,7 +36,7 @@ class AdminPage extends StatefulWidget {
   }
 
   /// Goes back to the admin page and shows [message] there as a success
-  /// notice: "Deleted the Harper family’s session."
+  /// notice: "Deleted the session for the Harper family."
   static void returnWithNotice(BuildContext context, String message) {
     // Home rather than an empty navigator, should the admin page not be
     // open below.

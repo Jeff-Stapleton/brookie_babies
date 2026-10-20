@@ -887,7 +887,7 @@ void main() {
 
       expect(admin.calls, contains('deleteSession(s1)'));
       expect(find.byType(AdminSessionPage), findsNothing);
-      expect(find.widgetWithText(InlineMessage, 'Deleted the Harper family’s session.'), findsOneWidget);
+      expect(find.widgetWithText(InlineMessage, 'Deleted the session for the Harper family.'), findsOneWidget);
       expect(find.byKey(const ValueKey('s1')), findsNothing);
     });
 
@@ -901,7 +901,19 @@ void main() {
       await tester.tap(_inDialog('Delete session'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Deleted Grandma Jo’s session.'), findsOneWidget);
+      expect(find.text('Deleted the session for Grandma Jo.'), findsOneWidget);
+    });
+
+    testWidgets('a plural name reads right: no possessive', (tester) async {
+      final admin = FakeAdminService(sessions: [testSession('s1', name: 'The Novaks')]);
+      await openFromAdmin(tester, admin);
+
+      await tapInView(tester, find.text('Delete session'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete session'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Deleted the session for the Novaks.'), findsOneWidget);
     });
 
     testWidgets('stops uploads first, so nothing lands in its folder afterwards', (tester) async {

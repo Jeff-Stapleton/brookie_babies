@@ -583,7 +583,8 @@ class _SessionBodyState extends State<_SessionBody> {
       await _admin.deleteSession(widget.sessionId);
       if (!mounted) return;
       // Still deleting as far as the page shows, while it fades out.
-      AdminPage.returnWithNotice(context, 'Deleted ${_inSentence(name)}’s session.');
+      // No possessive: "the Novaks’s" and "Brooke’s cousins’s" don't read.
+      AdminPage.returnWithNotice(context, 'Deleted the session for ${_inSentence(name)}.');
       // With nothing below it to go back to, it stays, and says it's gone.
       if (ModalRoute.isCurrentOf(context) ?? false) {
         setState(() => _deletingSession = false);

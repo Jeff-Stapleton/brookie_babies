@@ -149,6 +149,11 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
 
   _TileFocus _focusFor(String name) => _focus.putIfAbsent(name, () => _TileFocus(name));
 
+  /// Each tile's key by photo name. Global, so a tile moving to another
+  /// slot or row (a photo added or deleted before it) keeps its photo as it
+  /// is, rather than showing its placeholder and fading in again.
+  final _keys = <String, GlobalKey>{};
+
   List<String> _names() => [for (final photo in widget.photos) photo.name];
 
   @override
@@ -157,6 +162,7 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
     final names = _names().toSet();
     for (final (i, photo) in oldWidget.photos.indexed) {
       if (names.contains(photo.name)) continue;
+      _keys.remove(photo.name);
       final gone = _focus.remove(photo.name);
       if (gone == null) continue;
       if (gone.hasFocus) {
@@ -230,16 +236,19 @@ class _HomePhotoLibraryState extends State<HomePhotoLibrary> {
       // Taken off already: saving is what's left.
       lockedReason = 'Can’t delete $name: the site shows it until you save the home page';
     }
-    return _LibraryTile(
-      key: ValueKey(name),
-      photo: photo,
-      width: width,
-      focus: _focusFor(name),
-      selected: selected,
-      onToggle: !deleting && (selected || widget.canAdd) ? () => widget.onToggle(name) : null,
-      lockedReason: lockedReason,
-      deleting: deleting,
-      onDelete: () => widget.onDelete(photo),
+    return KeyedSubtree(
+      key: _keys.putIfAbsent(name, () => GlobalKey(debugLabel: name)),
+      child: _LibraryTile(
+        key: ValueKey(name),
+        photo: photo,
+        width: width,
+        focus: _focusFor(name),
+        selected: selected,
+        onToggle: !deleting && (selected || widget.canAdd) ? () => widget.onToggle(name) : null,
+        lockedReason: lockedReason,
+        deleting: deleting,
+        onDelete: () => widget.onDelete(photo),
+      ),
     );
   }
 }

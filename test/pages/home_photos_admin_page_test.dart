@@ -177,6 +177,29 @@ void main() {
       expect(tester.widget<NetworkPhoto>(tiles.first).url, Uri.parse('https://storage.example.com/IMG_01.jpg'));
     });
 
+    photoTest('photos shown stay as they are when one is added or deleted before them', (tester) async {
+      admin.autoCompleteUploads = true;
+      picker.next = [testPhoto('IMG_00.jpg')];
+      await pumpPage(tester);
+      State photo(String name) =>
+          tester.state(find.descendant(of: tile(name), matching: find.byType(NetworkPhoto)));
+      // Five a row: the next slot along, the next row, and the row after.
+      const names = ['IMG_01.jpg', 'IMG_05.jpg', 'IMG_10.jpg'];
+      final before = {for (final name in names) name: photo(name)};
+
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+      await reveal(tester, tile('IMG_10.jpg'));
+      for (final name in names) {
+        expect(photo(name), same(before[name]), reason: '$name after an upload');
+      }
+
+      await tapAndSettle(tester, deleteButton(tile('IMG_00.jpg')));
+      await tapAndSettle(tester, find.widgetWithText(FilledButton, 'Delete photo'));
+      for (final name in names) {
+        expect(photo(name), same(before[name]), reason: '$name after a delete');
+      }
+    });
+
     photoTest('decode sizes follow the device’s pixel ratio', (tester) async {
       tester.view.physicalSize = const Size(1440 * 2, 900 * 2);
       tester.view.devicePixelRatio = 2;

@@ -85,7 +85,9 @@ class UploadQueue extends ChangeNotifier {
   final String? Function(PickedPhoto photo)? _validate;
 
   /// Called as each photo is stored, so the page can add it to its list
-  /// without listing the folder again.
+  /// without listing the folder again. Also called for a photo found
+  /// already stored as it went (skipped, not done), so it may name a photo
+  /// the page lists already: add it only if it isn't there.
   final void Function(UploadItem item)? onUploaded;
 
   /// How many photos upload at once.
@@ -108,25 +110,33 @@ class UploadQueue extends ChangeNotifier {
   /// Whether [retryFailed] has anything to retry.
   bool get canRetry => _items.any((item) => item.canRetry);
 
-  /// Queues [photos]. [existing] are the names already in the destination;
-  /// a photo with one of those names, or one already queued, is skipped.
-  /// An earlier failed, skipped or cancelled try at a name gives way to the
-  /// new one.
+  /// Queues [photos]. [existing] are the names in the destination, as the
+  /// page lists them now; a photo with one of those names, or one already
+  /// queued, is skipped. An earlier failed, skipped or cancelled try at a
+  /// name gives way to the new one, and so do one still being cancelled
+  /// and one stored earlier that the page no longer lists (it was deleted
+  /// since).
   void add(Iterable<PickedPhoto> photos, {Iterable<String> existing = const []}) {
-    final here = {
-      ...existing,
-      for (final item in _items)
-        if (item.status == UploadStatus.done) item.name,
-    };
+    // Only the page's list: it adds each stored photo through [onUploaded]
+    // and drops the ones it deletes, so a photo deleted to be replaced can
+    // go again.
+    final here = existing.toSet();
     final taken = {
       for (final item in _items)
-        if (!item.isFinished) item.name,
+        if (!item.isFinished && !item._cancelling) item.name,
     };
     final picked = <String>{};
     for (final photo in photos) {
       final item = UploadItem._(photo, PhotoRules.safeObjectName(photo.name));
       if (picked.add(item.name)) {
-        _items.removeWhere((old) => old.name == item.name && old.isFinished && old.status != UploadStatus.done);
+        // One being cancelled leaves the list now rather than linger as
+        // cancelled. If it got through after all, onUploaded still tells
+        // the page, and Storage refuses the new try as already there.
+        _items.removeWhere((old) =>
+            old.name == item.name &&
+            (old.isFinished
+                ? old.status != UploadStatus.done || !here.contains(item.name)
+                : old._cancelling));
       }
       final problem = _validate?.call(photo);
       if (problem != null) {
@@ -234,13 +244,16 @@ class UploadQueue extends ChangeNotifier {
         .._status = UploadStatus.done
         .._progress = 1;
       onUploaded?.call(item);
-    } else if (item._cancelling || kind == AdminErrorKind.cancelled) {
-      item._status = UploadStatus.cancelled;
     } else if (kind == AdminErrorKind.alreadyExists) {
-      // Stored since the page listed the folder (another tab, say).
+      // Stored since the page listed the folder (another tab, or an earlier
+      // try that got through without saying so). It's there all the same,
+      // so the page lists it.
       item
         .._status = UploadStatus.skipped
         .._message = kUploadAlreadyHere;
+      onUploaded?.call(item);
+    } else if (item._cancelling || kind == AdminErrorKind.cancelled) {
+      item._status = UploadStatus.cancelled;
     } else {
       if (error is! AdminException) log('Upload of ${item.name} failed: $error');
       item

@@ -1,3 +1,4 @@
+import 'package:brookie_babies/components/upload_progress_list.dart';
 import 'package:brookie_babies/models/picked_photo.dart';
 import 'package:brookie_babies/services/admin_service.dart';
 import 'package:brookie_babies/services/photo_rules.dart';
@@ -7,12 +8,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
 
-/// An upload that ignores cancel(): it finished before Storage heard.
+/// An upload that ignores cancel(): it ended before Storage heard.
 class _TooLateToCancel implements PhotoUpload {
   final _upload = FakePhotoUpload(fullPath: 'galleries/s1/late.jpg', photo: testPhoto('late.jpg'), name: 'late.jpg');
   var cancelCalls = 0;
 
   void complete() => _upload.complete();
+
+  void fail(AdminErrorKind kind) => _upload.fail(kind);
 
   @override
   ValueListenable<double> get progress => _upload.progress;
@@ -131,12 +134,12 @@ void main() {
       expect(queue.countOf(UploadStatus.queued), 2);
     });
 
-    test('a name uploaded earlier counts as already here', () async {
+    test('a name uploaded earlier is skipped while the page still lists it', () async {
       queue.add(photos(1));
       admin.uploads.single.complete();
       await pumpEventQueue();
 
-      queue.add(photos(2));
+      queue.add(photos(2), existing: ['IMG_1.jpg']);
 
       expect(queue.items.where((item) => item.name == 'IMG_1.jpg').map((item) => item.status),
           [UploadStatus.done, UploadStatus.skipped]);
@@ -144,7 +147,26 @@ void main() {
       expect(admin.uploads.map((u) => u.name), ['IMG_1.jpg', 'IMG_2.jpg']);
     });
 
-    test('stored since the page listed it (another tab): skipped, not failed', () async {
+    test('a photo deleted since it was uploaded can go again, and replaces its entry', () async {
+      queue.add(photos(2));
+      for (final upload in admin.pendingUploads) {
+        upload.complete();
+      }
+      await pumpEventQueue();
+      // "Delete all photos": the page lists neither now.
+      admin.sessionPhotos['s1']!.clear();
+
+      queue.add(photos(2));
+
+      expect(queue.items.map((item) => (item.name, item.status)), [
+        ('IMG_1.jpg', UploadStatus.uploading),
+        ('IMG_2.jpg', UploadStatus.uploading),
+      ]);
+      expect(admin.uploads, hasLength(4));
+      expect(uploadSummary(queue), 'Uploading 0 of 2');
+    });
+
+    test('stored since the page listed it (another tab): skipped, not failed, and the page hears of it', () async {
       admin.sessionPhotos['s1'] = ['IMG_1.jpg'];
 
       queue.add(photos(1));
@@ -152,7 +174,36 @@ void main() {
 
       expect(item('IMG_1.jpg').status, UploadStatus.skipped);
       expect(item('IMG_1.jpg').message, kUploadAlreadyHere);
+      expect(uploaded.map((item) => item.name), ['IMG_1.jpg']);
+    });
+
+    test('a retry of a photo that got through without saying so is skipped, and the page hears of it', () async {
+      queue.add(photos(1));
+      // Stored on the server, but the browser gave up waiting.
+      admin.sessionPhotos['s1'] = ['IMG_1.jpg'];
+      admin.uploads.single.fail(AdminErrorKind.offline);
+      await pumpEventQueue();
       expect(uploaded, isEmpty);
+
+      queue.retryFailed();
+      await pumpEventQueue();
+
+      expect(item('IMG_1.jpg').status, UploadStatus.skipped);
+      expect(uploaded.map((item) => item.name), ['IMG_1.jpg']);
+    });
+
+    test('found already there as it was cancelled: skipped, not cancelled, and the page hears of it', () async {
+      final refused = _TooLateToCancel();
+      final racing = UploadQueue(upload: (photo, name) => refused, onUploaded: uploaded.add);
+      addTearDown(racing.dispose);
+      racing.add([testPhoto('late.jpg')]);
+
+      racing.cancelAll();
+      refused.fail(AdminErrorKind.alreadyExists);
+      await pumpEventQueue();
+
+      expect(racing.items.single.status, UploadStatus.skipped);
+      expect(uploaded, hasLength(1));
     });
   });
 
@@ -271,6 +322,50 @@ void main() {
       expect(queue.isBusy, isFalse);
       expect(queue.canRetry, isFalse);
       expect(admin.uploads, hasLength(3));
+    });
+
+    test('picking the folder again while the cancel settles queues every photo afresh', () async {
+      queue.add(photos(5));
+      queue.cancelAll();
+
+      // Before Storage has confirmed the three running ones are cancelled.
+      queue.add(photos(5));
+      await pumpEventQueue();
+
+      expect(statuses(), [
+        UploadStatus.uploading,
+        UploadStatus.uploading,
+        UploadStatus.uploading,
+        UploadStatus.queued,
+        UploadStatus.queued,
+      ]);
+      expect(queue.items.map((item) => item.message), everyElement(isNull));
+      expect(admin.uploads.skip(3).map((u) => u.name), ['IMG_1.jpg', 'IMG_2.jpg', 'IMG_3.jpg']);
+      expect(uploadSummary(queue), 'Uploading 0 of 5');
+    });
+
+    test('one that got through though cancelled still reaches the page, and its new try is skipped', () async {
+      final finishing = _TooLateToCancel();
+      var calls = 0;
+      final racing = UploadQueue(
+        upload: (photo, name) => ++calls == 1 ? finishing : admin.uploadSessionPhoto('s1', photo, name),
+        onUploaded: uploaded.add,
+      );
+      addTearDown(racing.dispose);
+      racing.add([testPhoto('late.jpg')]);
+      racing.cancelAll();
+
+      racing.add([testPhoto('late.jpg')]);
+      finishing.complete();
+      await pumpEventQueue();
+      expect(uploaded.map((item) => item.name), ['late.jpg']);
+
+      // Storage refuses the new try: the first is there.
+      admin.uploads.single.fail(AdminErrorKind.alreadyExists);
+      await pumpEventQueue();
+
+      expect([for (final item in racing.items) (item.name, item.status)], [('late.jpg', UploadStatus.skipped)]);
+      expect(uploaded.map((item) => item.name), ['late.jpg', 'late.jpg']);
     });
 
     test('a photo that finished before the cancel arrived stays done', () async {

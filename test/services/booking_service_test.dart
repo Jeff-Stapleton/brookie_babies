@@ -1,12 +1,108 @@
+// The recording fakes below implement cloud_firestore's @sealed query types,
+// as test/support/fake_firebase.dart does: Fake covers any member it adds.
+// ignore_for_file: subtype_of_sealed_class
+
 import 'dart:async';
 
+import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/services/booking_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 BookingDoc _doc(String id, {String status = 'paid', String date = '2026-11-14'}) =>
     (id: id, data: {'status': status, 'packageName': 'Premium', 'date': date});
 
+/// Records each query listened to, as its collection then its filters
+/// ('uid == u1'). Anything but equality filters (orderBy, limit, another
+/// operator) isn't faked, so it fails the test.
+class _RecordingFirestore extends Fake implements FirebaseFirestore {
+  final queries = <List<String>>[];
+
+  @override
+  CollectionReference<Map<String, dynamic>> collection(String collectionPath) =>
+      _RecordingQuery(this, [collectionPath]);
+}
+
+class _RecordingQuery extends Fake implements CollectionReference<Map<String, dynamic>> {
+  _RecordingQuery(this._db, this._parts);
+
+  final _RecordingFirestore _db;
+  final List<String> _parts;
+
+  @override
+  Query<Map<String, dynamic>> where(
+    Object field, {
+    Object? isEqualTo,
+    Object? isNotEqualTo,
+    Object? isLessThan,
+    Object? isLessThanOrEqualTo,
+    Object? isGreaterThan,
+    Object? isGreaterThanOrEqualTo,
+    Object? arrayContains,
+    Iterable<Object?>? arrayContainsAny,
+    Iterable<Object?>? whereIn,
+    Iterable<Object?>? whereNotIn,
+    bool? isNull,
+  }) {
+    final others = [
+      isNotEqualTo,
+      isLessThan,
+      isLessThanOrEqualTo,
+      isGreaterThan,
+      isGreaterThanOrEqualTo,
+      arrayContains,
+      arrayContainsAny,
+      whereIn,
+      whereNotIn,
+      isNull,
+    ].nonNulls;
+    return _RecordingQuery(_db, [..._parts, others.isEmpty ? '$field == $isEqualTo' : '$field: not only isEqualTo']);
+  }
+
+  @override
+  Stream<QuerySnapshot<Map<String, dynamic>>> snapshots({
+    bool includeMetadataChanges = false,
+    ListenSource source = ListenSource.defaultSource,
+  }) {
+    _db.queries.add(_parts);
+    return Stream.value(_NoDocs());
+  }
+}
+
+class _NoDocs extends Fake implements QuerySnapshot<Map<String, dynamic>> {
+  @override
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> get docs => const [];
+}
+
 void main() {
+  // Rules aren't filters: Firestore refuses a query that asks for more than
+  // firestore.rules lets the family read, and a refused shared query only
+  // shows as "No sessions yet", so its exact shape is checked here.
+  group('FirestoreBookingService asks for exactly what the rules allow', () {
+    Future<List<List<String>>> queriesFor(AppUser user) async {
+      final db = _RecordingFirestore();
+      final subscription = FirestoreBookingService(db).watchBookings(user).listen(null);
+      addTearDown(subscription.cancel);
+      await pumpEventQueue();
+      return db.queries;
+    }
+
+    test('the bookings with their uid, and the ad hoc sessions shared with their email as stored', () async {
+      expect(await queriesFor(const AppUser(uid: 'u1', email: ' Harper@Example.COM ')), [
+        ['bookings', 'uid == u1'],
+        ['bookings', 'status == adhoc', 'email == harper@example.com'],
+      ]);
+    });
+
+    test('only the uid query without an email', () async {
+      for (final email in [null, '', '  ']) {
+        expect(await queriesFor(AppUser(uid: 'u1', email: email)), [
+          ['bookings', 'uid == u1'],
+        ], reason: '$email');
+      }
+    });
+  });
+
   late StreamController<List<BookingDoc>> byUid;
   late StreamController<List<BookingDoc>> byEmail;
   late List<UserBookings> emitted;

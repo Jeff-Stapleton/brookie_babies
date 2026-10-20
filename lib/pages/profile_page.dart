@@ -154,7 +154,7 @@ class _SessionsState extends State<_Sessions> {
                 ),
               );
             }
-            return _BookingSections(bookings: data.bookings, unreadable: data.unreadable);
+            return _BookingSections(bookings: data.bookings, unreadable: data.unreadable, email: widget.user.email);
           },
         ),
       ],
@@ -206,10 +206,13 @@ class _AccountHeader extends StatelessWidget {
 }
 
 class _BookingSections extends StatelessWidget {
-  const _BookingSections({required this.bookings, required this.unreadable});
+  const _BookingSections({required this.bookings, required this.unreadable, required this.email});
 
   final List<Booking> bookings;
   final int unreadable;
+
+  /// The email they're signed in as, which shared sessions are matched by.
+  final String? email;
 
   @override
   Widget build(BuildContext context) {
@@ -234,7 +237,7 @@ class _BookingSections extends StatelessWidget {
                   'and we’ll sort it out.'),
           const SizedBox(height: BrookieSpace.s6),
         ],
-        if (bookings.isEmpty && unreadable == 0) const _NoSessions(),
+        if (bookings.isEmpty && unreadable == 0) _NoSessions(email: email),
         if (upcoming.isNotEmpty)
           _Section(title: 'Upcoming', bookings: upcoming, isPast: false, primaryDownload: primaryDownload),
         if (upcoming.isNotEmpty && past.isNotEmpty) SizedBox(height: sectionGap),
@@ -286,19 +289,41 @@ class _Section extends StatelessWidget {
   }
 }
 
-/// Bookings appear once confirmed, which can lag behind payment.
+/// Bookings appear once confirmed, which can lag behind payment. A session
+/// shared with a family shows only for the exact email it was shared with,
+/// so beneath the band the page names the one they're signed in as: a
+/// guest on another Google account can tell why theirs is missing.
 class _NoSessions extends StatelessWidget {
-  const _NoSessions();
+  const _NoSessions({required this.email});
+
+  final String? email;
 
   @override
   Widget build(BuildContext context) {
     // Short enough to set on one line from about 740px wide.
-    return EmptyState(
+    final band = EmptyState(
       message: 'No sessions yet. Your booking appears here once we’ve confirmed it.',
       action: OutlinedButton(
         onPressed: () => HomePage.showPackages(context),
         child: const Text('See packages'),
       ),
+    );
+    final email = this.email?.trim() ?? '';
+    if (email.isEmpty) return band;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        band,
+        const SizedBox(height: BrookieSpace.s4),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
+          child: Text(
+            'You’re signed in as $email. To see a session shared with a different email, sign out and sign '
+            'in with that one.',
+            style: TextStyle(color: BrookieColors.of(context).inkSoft),
+          ),
+        ),
+      ],
     );
   }
 }

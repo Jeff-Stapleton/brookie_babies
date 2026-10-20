@@ -89,6 +89,7 @@ Storage bucket has files under `_admin/gallery` and CORS is configured (see belo
 | Production build | `flutter build web` (output in `build/web`) |
 | Deploy to Firebase Hosting | `flutter build web --release && firebase deploy --only hosting` |
 | Cloud Functions build and tests | `npm ci --prefix functions && npm test --prefix functions` |
+| Check the rules before deploying (read-only) | `bash scripts/test-rules.sh` (see [Deploying the backend](#deploying-the-backend)) |
 | Deploy functions and rules by hand | `firebase deploy --only functions,firestore:rules,storage` (CI does this on pushes to `main`; see [Deploying the backend](#deploying-the-backend)) |
 | Make an account an admin (owner) | `bash scripts/grant-admin.sh <email>` (`--revoke` to undo; see [Admin portal](#admin-portal)) |
 
@@ -330,7 +331,14 @@ Admins are accounts whose ID token carries the custom claim `admin: true` (see "
 
 No new IAM roles, function permissions, APIs or secrets are needed: the function reads the same bookings and bucket as before, and everything admins do goes through the rules.
 
-There are no automated rules tests yet: CI has no emulator. Check a rules change by compiling it with `firebase deploy --only firestore:rules,storage --dry-run`, which changes nothing, and by evaluating cases with the read-only Firebase Rules API (`https://firebaserules.googleapis.com/v1/projects/brookie-babies:test`) or the Firebase emulator. Never test rules by writing to the live project.
+CI doesn't evaluate the rules (it has no emulator); `flutter test` only checks that the app's limits match them. Before you deploy a rules change, compile it with `firebase deploy --only firestore:rules,storage --dry-run`, then check it against the cases in `rules-tests/`:
+
+```bash
+gcloud auth login            # once, as the owner
+bash scripts/test-rules.sh   # "firestore.rules: 149 of 149 cases pass", then storage.rules
+```
+
+Both are read-only: the script sends the rules and each case to the Firebase Rules API's test endpoint (`projects/brookie-babies:test`), which deploys nothing and reads no live data, and it never prints your access token. It lists any case that fails and exits with an error. Add cases to `rules-tests/firestore-cases.mjs` or `rules-tests/storage-cases.mjs` for what you change. Never test rules by writing to the live project.
 
 #### Deploy order
 

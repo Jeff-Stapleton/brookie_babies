@@ -11,6 +11,7 @@ import 'package:brookie_babies/widgets/empty_state.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -104,6 +105,45 @@ void main() {
     expect(bookings.watchedUsers.single.email, testUser.email);
     expect(find.textContaining('No sessions yet.'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, 'See packages'), findsOneWidget);
+  });
+
+  group('with no sessions, names the email they’re signed in as', () {
+    const note = 'You’re signed in as parent@example.com. To see a session shared with a different email, sign '
+        'out and sign in with that one.';
+
+    for (final brightness in Brightness.values) {
+      testWidgets('beneath the band, quieter than it (${brightness.name})', (tester) async {
+        await pumpProfile(tester, brightness: brightness, size: const Size(1440, 900));
+
+        final shown = find.text(note);
+        expect(shown, findsOneWidget);
+        final colors = brightness == Brightness.dark ? BrookieColors.dark : BrookieColors.light;
+        expect(tester.renderObject<RenderParagraph>(shown).text.style!.color, colors.inkSoft);
+        final band = tester.getRect(find.byType(EmptyState));
+        expect(tester.getTopLeft(shown), Offset(band.left, band.bottom + BrookieSpace.s4));
+        expect(tester.getSize(shown).width, lessThanOrEqualTo(BrookieSize.readingWidth));
+      });
+    }
+
+    testWidgets('a long email fits a 320px phone', (tester) async {
+      await pumpProfile(
+        tester,
+        user: const AppUser(uid: 'u2', email: 'a.very.long.address.for.a.family.of.five@example.com'),
+        size: const Size(320, 800),
+      );
+
+      expect(find.textContaining('You’re signed in as a.very.long.address'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('not without an email, nor once there are sessions', (tester) async {
+      await pumpProfile(tester, user: const AppUser(uid: 'u3'));
+      expect(find.textContaining('No sessions yet.'), findsOneWidget);
+      expect(find.textContaining('signed in as'), findsNothing);
+
+      await pumpProfile(tester, bookings: FakeBookingService([_adHoc('s1')]));
+      expect(find.textContaining('signed in as'), findsNothing);
+    });
   });
 
   testWidgets('a long name and email fit a narrow phone', (tester) async {

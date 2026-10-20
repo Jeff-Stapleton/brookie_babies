@@ -3,6 +3,7 @@ import 'dart:developer';
 
 import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/models/booking.dart';
+import 'package:brookie_babies/services/photo_rules.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
@@ -37,7 +38,8 @@ class FirestoreBookingService implements BookingService {
         .snapshots()
         .map((snapshot) => [for (final doc in snapshot.docs) (id: doc.id, data: doc.data())]);
 
-    final email = user.email?.trim().toLowerCase() ?? '';
+    // As the session stores it (firestore.rules lowercases the token's).
+    final email = SessionRules.normalizeEmail(user.email ?? '');
     return mergeUserBookings(
       docs(bookings.where('uid', isEqualTo: user.uid)),
       sharedByEmail: email.isEmpty

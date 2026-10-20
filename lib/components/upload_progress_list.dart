@@ -1,5 +1,7 @@
 import 'package:brookie_babies/theme/brookie_theme.dart';
+import 'package:brookie_babies/utilities/keyboard_input.dart';
 import 'package:brookie_babies/utilities/upload_queue.dart';
+import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:flutter/material.dart';
 
 /// How an [UploadQueue] is going, for both admin upload pages: one summary
@@ -11,16 +13,68 @@ import 'package:flutter/material.dart';
 /// line as each photo finishes, not every progress bar. Queued and finished
 /// photos aren't listed one by one: a folder can hold hundreds. Shows
 /// nothing for an empty queue.
-class UploadProgressList extends StatelessWidget {
-  const UploadProgressList({super.key, required this.queue});
+///
+/// "Retry failed" and "Cancel uploads" go once they've done their work, so
+/// the focused one hands keyboard focus on rather than dropping it: to the
+/// other button if it's there, else to [focusWhenDone], else to the summary.
+class UploadProgressList extends StatefulWidget {
+  const UploadProgressList({super.key, required this.queue, this.focusWhenDone});
 
   final UploadQueue queue;
 
+  /// Where focus goes when the focused button goes and the other isn't
+  /// there either, such as the page's upload button.
+  final FocusNode? focusWhenDone;
+
+  @override
+  State<UploadProgressList> createState() => _UploadProgressListState();
+}
+
+class _UploadProgressListState extends State<UploadProgressList> {
+  final _retryFocus = FocusNode(debugLabel: 'Retry failed');
+  final _cancelFocus = FocusNode(debugLabel: 'Cancel uploads');
+  // Holds focus only when handed it: Tab never stops on the summary.
+  final _summaryFocus = FocusNode(debugLabel: 'Upload summary', skipTraversal: true);
+
+  @override
+  void initState() {
+    super.initState();
+    KeyboardInput.listen();
+  }
+
+  @override
+  void dispose() {
+    _retryFocus.dispose();
+    _cancelFocus.dispose();
+    _summaryFocus.dispose();
+    super.dispose();
+  }
+
+  /// Hands focus on, once the next frame has built the buttons, if a
+  /// focused button isn't shown any more.
+  void _keepFocus({required bool retry, required bool cancel}) {
+    final losing = !retry && _retryFocus.hasFocus || !cancel && _cancelFocus.hasFocus;
+    if (!losing) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final target = cancel
+          ? _cancelFocus
+          : retry
+              ? _retryFocus
+              : widget.focusWhenDone ?? ((_summaryFocus.context?.mounted ?? false) ? _summaryFocus : null);
+      target?.requestFocus();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final queue = widget.queue;
     return ListenableBuilder(
       listenable: queue,
       builder: (context, child) {
+        final retry = queue.canRetry;
+        final cancel = queue.isBusy;
+        _keepFocus(retry: retry, cancel: cancel);
         if (queue.items.isEmpty) return const SizedBox.shrink();
         final uploading = [
           for (final item in queue.items)
@@ -37,9 +91,20 @@ class UploadProgressList extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Semantics(
-              liveRegion: true,
-              child: Text(uploadSummary(queue), style: Theme.of(context).textTheme.titleSmall),
+            Focus(
+              focusNode: _summaryFocus,
+              includeSemantics: false,
+              child: ListenableBuilder(
+                listenable: Listenable.merge([_summaryFocus, KeyboardInput.changes]),
+                builder: (context, child) => FocusRing(
+                  visible: _summaryFocus.hasFocus && KeyboardInput.lastWasKey,
+                  child: child!,
+                ),
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(uploadSummary(queue), style: Theme.of(context).textTheme.titleSmall),
+                ),
+              ),
             ),
             for (final item in uploading) ...[
               const SizedBox(height: BrookieSpace.s3),
@@ -64,15 +129,24 @@ class UploadProgressList extends StatelessWidget {
                 initiallyOpen: false,
               ),
             ],
-            if (queue.canRetry || queue.isBusy) ...[
+            if (retry || cancel) ...[
               const SizedBox(height: BrookieSpace.s4),
               Wrap(
                 spacing: BrookieSpace.s3,
                 runSpacing: BrookieSpace.s3,
                 children: [
-                  if (queue.canRetry)
-                    OutlinedButton(onPressed: queue.retryFailed, child: const Text('Retry failed')),
-                  if (queue.isBusy) TextButton(onPressed: queue.cancelAll, child: const Text('Cancel uploads')),
+                  if (retry)
+                    OutlinedButton(
+                      focusNode: _retryFocus,
+                      onPressed: queue.retryFailed,
+                      child: const Text('Retry failed'),
+                    ),
+                  if (cancel)
+                    TextButton(
+                      focusNode: _cancelFocus,
+                      onPressed: queue.cancelAll,
+                      child: const Text('Cancel uploads'),
+                    ),
                 ],
               ),
             ],

@@ -149,8 +149,9 @@ Functions → getGalleryDownloadUrl → Logs.
   - Drag and drop from Finder onto the upload buttons.
   - Deep links to a session's admin page (for example `/#/admin/<id>`), so it
     can be bookmarked or reloaded.
-  - Security rules tests in the Firebase emulator, run in CI. Today rules are
-    only compiled and checked by hand with the read-only Rules API.
+  - Security rules tests in CI (the Firebase emulator, or the
+    `rules-tests/` cases with a read-only service account). Today
+    `scripts/test-rules.sh` runs them by hand before a deploy.
   - Stop anyone listing `_admin/gallery` once `site/home` is saved, so photos
     that aren't on the home page can't be found that way.
   - Sign-in without Google for ad hoc guests (for example an email link), for

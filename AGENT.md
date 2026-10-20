@@ -166,6 +166,8 @@ firestore.rules           bookings: customers read their own (uid), guests ad ho
                           photosReady; site/home: public get, admin writes
 storage.rules             _admin/gallery/: public read, admin add (JPEG/PNG/WebP < 20 MiB) and delete;
                           galleries/: admin only (< 100 MiB); gallery-zips/: admin delete; no overwrites
+rules-tests/              Rules API test cases for both rules files (firestore-cases.mjs, storage-cases.mjs),
+                          and payload.mjs / report.mjs, which scripts/test-rules.sh runs (Node, no packages)
 firebase.json             Hosting config (public build/web, SPA rewrite), functions, rules, FlutterFire metadata
 cors.json                 CORS rule for the Storage bucket (GET from any origin)
 scripts/
@@ -173,6 +175,7 @@ scripts/
   setup-github-production.sh  One-time (owner): restrict the `production` environment to main
   setup-functions-runtime.sh  One-time (owner): runtime SA access for the functions (Firestore read, bucket objects, self-signing)
   grant-admin.sh          Owner only (agents never run it): set or --revoke the admin claim on a Google account
+  test-rules.sh           Read-only: checks both rules files against rules-tests/ with the Rules API (deploys nothing)
 .github/deploy-tools/     Pinned Firebase CLI (package.json + package-lock.json) for the deploy-backend job
 .github/workflows/ci.yml  CI: analyze, test, build; preview on PR; on main: deploy backend, then live site
 ```
@@ -201,8 +204,9 @@ scripts/
    user's `bookings`, split into upcoming and past: `watchBookings(user)` merges
    `where('uid', isEqualTo: uid)` with, when the user has an email,
    `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <lowercased email>)`
-   (ad hoc sessions shared with them; that query failing counts as none). A
-   paid or ad hoc session with
+   (ad hoc sessions shared with them; that query failing counts as none). With
+   none, the empty state names the email they're signed in as, for a guest on
+   the wrong Google account. A paid or ad hoc session with
    `photosReady: true` has "Download all photos" (past ones without it
    say the photos are being edited; ad hoc ones have no payment tag): `getGalleryDownloadUrl`
    checks the booking belongs to the caller (its uid, or an ad hoc session's
@@ -219,8 +223,9 @@ Admin flows (accounts with the `admin: true` claim, from `scripts/grant-admin.sh
    sessions" and "Sign out") → `AdminPage.open`, which puts `AdminPage` over
    the home page; the named route `/admin` (`/#/admin`) opens it too. Every
    admin page wraps its body in `AdminGate`, which
-   checks `isAdmin(refresh: true)` per uid and otherwise asks to sign in or
-   says the account isn't an admin.
+   checks `isAdmin()` per uid (and `isAdmin(refresh: true)` only after a
+   "no", so moving between admin pages needs no network) and otherwise asks
+   to sign in or says the account isn't an admin.
 6. "Add a session" → `SessionFormPage` → `AdminService.createSession` (an ad
    hoc `bookings` doc: `status: 'adhoc'`, name, email, date, ...) → replaced by
    `AdminSessionPage` for the new id. A session card on Admin opens the same page.
@@ -266,6 +271,7 @@ npm ci --prefix functions       # install deps from package-lock.json
 npm test --prefix functions     # tsc build + node:test unit tests
 firebase deploy --only functions,firestore:rules,storage   # backend deploy by hand; CI does it on pushes to main
 firebase deploy --only firestore:rules,storage --dry-run   # compile the rules; changes nothing
+bash scripts/test-rules.sh      # rules vs rules-tests/ cases with the read-only Rules API (needs gcloud auth login)
 
 # Owner only; agents never run it (it changes who can write to the live project)
 bash scripts/grant-admin.sh <email> [--revoke]
@@ -349,9 +355,11 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   (`PhotoRules`, `SessionRules`) and `newSessionData()` / `sessionChanges()` in
   `lib/services/admin_service.dart` send exactly what `firestore.rules` and
   `storage.rules` accept, so a rule rejection only ever means an access
-  problem. Change them together with the rules (each points at the other), and
-  keep `PhotoRules.homeMaxPhotos` = 1 + `FeaturedPhotos.maxCount` (a test
-  checks it).
+  problem. Change them together with the rules (each points at the other;
+  `test/services/rules_mirror_test.dart` reads both rules files and fails when
+  the keys, limits, types, packages or email pattern disagree), and keep
+  `PhotoRules.homeMaxPhotos` = 1 + `FeaturedPhotos.maxCount` (a test checks
+  it).
 - One primary button per view and the photograph rules (square corners, never
   tinted, overlaid or badged: say a photo's state beside it) apply to the
   admin pages too. Their tests check each view at 320, 390 and 1440px in both
@@ -433,13 +441,16 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   for good) and say the change may still be saved. `deleteSession` hides the
   photos, deletes them and the cached zip, then the doc, and counts a session
   already gone as deleted.
-- The rules have no automated tests: CI has no emulator.
+- CI doesn't evaluate the rules: it has no emulator, and
   `FirebaseAdminService` is tested against the in-memory fakes in
-  `test/support/fake_firebase.dart`, which don't apply the rules. Check a
-  rules change with `firebase deploy --only firestore:rules,storage --dry-run`
-  and the read-only Rules API
-  (`firebaserules.googleapis.com/v1/projects/brookie-babies:test`) or the
-  emulator, never by writing to the live project.
+  `test/support/fake_firebase.dart`, which don't apply them
+  (`rules_mirror_test.dart` only compares their limits with the Dart). Before
+  deploying a rules change, compile it with
+  `firebase deploy --only firestore:rules,storage --dry-run` and run
+  `bash scripts/test-rules.sh` (the cases in `rules-tests/` against the
+  read-only Rules API, `projects/brookie-babies:test`; it needs the owner's
+  `gcloud auth login`), adding cases for what changed. Never test rules by
+  writing to the live project.
 - Deploy order: the site relies on the new rules and function, not the other
   way round, so deploy the backend before (or with) the site. A site that goes
   first gets its guest query and `site/home` read refused (both fall back

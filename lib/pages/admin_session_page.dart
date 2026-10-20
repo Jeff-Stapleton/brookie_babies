@@ -255,9 +255,11 @@ class _SessionBodyState extends State<_SessionBody> {
   }
 
   /// Adds a stored photo to the list, without listing the folder again.
+  /// The queue also reports one it found already stored (from another tab,
+  /// say), which may be listed by then, so it's added only once.
   void _uploaded(UploadItem item) {
     final photos = _photos;
-    if (!mounted || photos == null) return;
+    if (!mounted || photos == null || photos.any((photo) => photo.name == item.name)) return;
     setState(() {
       _photos = [...photos, _storedPhoto(widget.sessionId, item.name)]..sort((a, b) => a.name.compareTo(b.name));
     });

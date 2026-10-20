@@ -412,7 +412,10 @@ class _SessionBodyState extends State<_SessionBody> {
   /// to the photo now in its place (or the one before, or "Upload photos"),
   /// rather than back to the top of the page.
   void _removePhotos(Set<String> gone) {
-    final photos = _photos!;
+    // Being listed again (after a failed "Delete session"): the new list
+    // won't have them.
+    final photos = _photos;
+    if (photos == null) return;
     final focused = photos.indexWhere((photo) {
       final node = _photoFocus[photo.fullPath];
       return node != null && gone.contains(photo.fullPath) && _focusIsOn(node);

@@ -113,8 +113,9 @@ class UploadQueue extends ChangeNotifier {
   /// Queues [photos]. [existing] are the names in the destination, as the
   /// page lists them now; a photo with one of those names, or one already
   /// queued, is skipped. An earlier failed, skipped or cancelled try at a
-  /// name gives way to the new one, and so does one stored earlier that the
-  /// page no longer lists (it was deleted since).
+  /// name gives way to the new one, and so do one still being cancelled
+  /// and one stored earlier that the page no longer lists (it was deleted
+  /// since).
   void add(Iterable<PickedPhoto> photos, {Iterable<String> existing = const []}) {
     // Only the page's list: it adds each stored photo through [onUploaded]
     // and drops the ones it deletes, so a photo deleted to be replaced can
@@ -122,16 +123,20 @@ class UploadQueue extends ChangeNotifier {
     final here = existing.toSet();
     final taken = {
       for (final item in _items)
-        if (!item.isFinished) item.name,
+        if (!item.isFinished && !item._cancelling) item.name,
     };
     final picked = <String>{};
     for (final photo in photos) {
       final item = UploadItem._(photo, PhotoRules.safeObjectName(photo.name));
       if (picked.add(item.name)) {
+        // One being cancelled leaves the list now rather than linger as
+        // cancelled. If it got through after all, onUploaded still tells
+        // the page, and Storage refuses the new try as already there.
         _items.removeWhere((old) =>
             old.name == item.name &&
-            old.isFinished &&
-            (old.status != UploadStatus.done || !here.contains(item.name)));
+            (old.isFinished
+                ? old.status != UploadStatus.done || !here.contains(item.name)
+                : old._cancelling));
       }
       final problem = _validate?.call(photo);
       if (problem != null) {

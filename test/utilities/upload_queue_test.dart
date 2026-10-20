@@ -324,6 +324,50 @@ void main() {
       expect(admin.uploads, hasLength(3));
     });
 
+    test('picking the folder again while the cancel settles queues every photo afresh', () async {
+      queue.add(photos(5));
+      queue.cancelAll();
+
+      // Before Storage has confirmed the three running ones are cancelled.
+      queue.add(photos(5));
+      await pumpEventQueue();
+
+      expect(statuses(), [
+        UploadStatus.uploading,
+        UploadStatus.uploading,
+        UploadStatus.uploading,
+        UploadStatus.queued,
+        UploadStatus.queued,
+      ]);
+      expect(queue.items.map((item) => item.message), everyElement(isNull));
+      expect(admin.uploads.skip(3).map((u) => u.name), ['IMG_1.jpg', 'IMG_2.jpg', 'IMG_3.jpg']);
+      expect(uploadSummary(queue), 'Uploading 0 of 5');
+    });
+
+    test('one that got through though cancelled still reaches the page, and its new try is skipped', () async {
+      final finishing = _TooLateToCancel();
+      var calls = 0;
+      final racing = UploadQueue(
+        upload: (photo, name) => ++calls == 1 ? finishing : admin.uploadSessionPhoto('s1', photo, name),
+        onUploaded: uploaded.add,
+      );
+      addTearDown(racing.dispose);
+      racing.add([testPhoto('late.jpg')]);
+      racing.cancelAll();
+
+      racing.add([testPhoto('late.jpg')]);
+      finishing.complete();
+      await pumpEventQueue();
+      expect(uploaded.map((item) => item.name), ['late.jpg']);
+
+      // Storage refuses the new try: the first is there.
+      admin.uploads.single.fail(AdminErrorKind.alreadyExists);
+      await pumpEventQueue();
+
+      expect([for (final item in racing.items) (item.name, item.status)], [('late.jpg', UploadStatus.skipped)]);
+      expect(uploaded.map((item) => item.name), ['late.jpg', 'late.jpg']);
+    });
+
     test('a photo that finished before the cancel arrived stays done', () async {
       final finishing = _TooLateToCancel();
       final racing = UploadQueue(upload: (photo, name) => finishing, onUploaded: uploaded.add);

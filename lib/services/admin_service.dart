@@ -38,6 +38,13 @@ class AdminException implements Exception {
 const kAdminDeniedMessage =
     'We couldn’t save that change. If you were just made an admin, refresh the page and try again.';
 
+/// [AdminErrorKind.denied] for a read. The app checks nothing before a
+/// read, so besides a claim not yet in the token, the site may be running
+/// ahead of its rules: deployed before the rules that let admins read (see
+/// the README's deploy order).
+const kAdminReadDeniedMessage = 'We couldn’t load this. If you were just made an admin, refresh the page and try '
+    'again. If that doesn’t help, the site’s security rules may not be deployed yet.';
+
 /// [AdminErrorKind.offline].
 const kAdminOfflineMessage = 'We couldn’t reach the server. Check your connection and try again.';
 
@@ -442,7 +449,7 @@ class FirebaseAdminService implements AdminService {
 /// What the admin was doing when something failed, for the message.
 enum _Doing {
   reading(
-    denied: 'We couldn’t load this. If you were just made an admin, refresh the page and try again.',
+    denied: kAdminReadDeniedMessage,
     failed: 'We couldn’t load this. Refresh the page to try again.',
   ),
   writing(denied: kAdminDeniedMessage, failed: _writeFailedMessage),

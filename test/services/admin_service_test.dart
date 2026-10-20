@@ -543,6 +543,21 @@ void main() {
       await expectLater(admin.watchSessions().first, throwsA(_adminError(AdminErrorKind.denied)));
     });
 
+    test('a refused read also says the rules may not be deployed yet', () async {
+      db.errors['snapshots bookings'] = _firestoreError('permission-denied');
+      storage.errors['listAll galleries/s1'] = _storageError('unauthorized');
+      db.errors['get site/home'] = _firestoreError('permission-denied');
+
+      for (final read in [
+        () => admin.watchSessions().first,
+        () => admin.listSessionPhotos('s1'),
+        () => admin.homePhotoNames(),
+      ]) {
+        await expectLater(read(), throwsA(_adminError(AdminErrorKind.denied, message: kAdminReadDeniedMessage)));
+      }
+      expect(kAdminReadDeniedMessage, contains('security rules may not be deployed yet'));
+    });
+
     test('a failure once listening is an AdminException too', () async {
       final errors = <Object>[];
       final subscription = admin.watchSessions().listen(null, onError: errors.add);

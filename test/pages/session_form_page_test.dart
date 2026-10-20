@@ -642,6 +642,33 @@ void main() {
       expect(find.text('Fri, Jul 1'), findsOneWidget);
     });
 
+    for (final width in adminTestWidths) {
+      testWidgets('${width.toInt()}px wide: full-size days with room for their rings', (tester) async {
+        await pumpAdminPage(tester, SessionFormPage(now: now), size: Size(width, 800));
+
+        await tapInView(tester, _dateField());
+        await tester.pumpAndSettle();
+
+        final page = tester.getRect(find.descendant(of: find.byType(BookingCalendar), matching: find.byType(PageView)));
+        expect(page.left, greaterThanOrEqualTo(0));
+        expect(page.right, lessThanOrEqualTo(width));
+        for (var day = 1; day <= 28; day++) {
+          final disc = tester.getRect(find
+              .ancestor(
+                of: find.descendant(of: find.byType(BookingCalendar), matching: find.text('$day')),
+                matching: find.byType(AnimatedContainer),
+              )
+              .first);
+          expect(disc.width, moreOrLessEquals(BrookieSize.day, epsilon: 0.01), reason: '$day');
+          expect(disc.height, moreOrLessEquals(BrookieSize.day, epsilon: 0.01), reason: '$day');
+          final ring = disc.inflate(4);
+          expect(ring.left >= page.left && ring.right <= page.right && ring.bottom <= page.bottom, isTrue,
+              reason: 'ring around $day ($ring) inside the month page ($page)');
+        }
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     testWidgets('Cancel keeps the field as it was', (tester) async {
       await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
 

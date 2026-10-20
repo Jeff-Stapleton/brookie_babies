@@ -804,8 +804,19 @@ class _DateDialogState extends State<_DateDialog> {
     // A session dated outside the range keeps its day choosable.
     if (initial != null && initial.isBefore(first)) first = initial;
     if (initial != null && initial.isAfter(last)) last = initial;
+
+    // Where the calendar's card won't fit inside the dialog's padding (at
+    // most s5 a side), it spans the dialog as a band instead, and the
+    // dialog comes as close to the window's edges as full-size days need.
+    final window = MediaQuery.sizeOf(context).width;
+    final themeInset = DialogTheme.of(context).insetPadding ?? const EdgeInsets.all(BrookieSpace.s4);
+    final band = window - themeInset.horizontal - 2 * BrookieSpace.s5 < BookingCalendar.minCardWidth;
+    final side = ((window - BookingCalendar.minBandWidth) / 2).clamp(0.0, themeInset.left);
+
     return BrookieDialog(
       title: 'Choose a date',
+      contentEdgeToEdge: band,
+      insetPadding: band ? themeInset.copyWith(left: side, right: side) : null,
       content: [
         // As wide as the dialog allows, up to the calendar's widest.
         _UnmeasuredWidth(
@@ -815,6 +826,7 @@ class _DateDialogState extends State<_DateDialog> {
             lastDay: last,
             today: now,
             selectedDay: _selected,
+            edgeToEdge: band,
             showOpenings: false,
             // The calendar hands back UTC midnights.
             onDaySelected: (day) => setState(() => _selected = DateTime(day.year, day.month, day.day)),

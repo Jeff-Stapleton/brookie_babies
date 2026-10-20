@@ -85,7 +85,9 @@ class UploadQueue extends ChangeNotifier {
   final String? Function(PickedPhoto photo)? _validate;
 
   /// Called as each photo is stored, so the page can add it to its list
-  /// without listing the folder again.
+  /// without listing the folder again. Also called for a photo found
+  /// already stored as it went (skipped, not done), so it may name a photo
+  /// the page lists already: add it only if it isn't there.
   final void Function(UploadItem item)? onUploaded;
 
   /// How many photos upload at once.
@@ -237,13 +239,16 @@ class UploadQueue extends ChangeNotifier {
         .._status = UploadStatus.done
         .._progress = 1;
       onUploaded?.call(item);
-    } else if (item._cancelling || kind == AdminErrorKind.cancelled) {
-      item._status = UploadStatus.cancelled;
     } else if (kind == AdminErrorKind.alreadyExists) {
-      // Stored since the page listed the folder (another tab, say).
+      // Stored since the page listed the folder (another tab, or an earlier
+      // try that got through without saying so). It's there all the same,
+      // so the page lists it.
       item
         .._status = UploadStatus.skipped
         .._message = kUploadAlreadyHere;
+      onUploaded?.call(item);
+    } else if (item._cancelling || kind == AdminErrorKind.cancelled) {
+      item._status = UploadStatus.cancelled;
     } else {
       if (error is! AdminException) log('Upload of ${item.name} failed: $error');
       item

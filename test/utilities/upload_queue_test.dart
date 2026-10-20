@@ -8,12 +8,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
 
-/// An upload that ignores cancel(): it finished before Storage heard.
+/// An upload that ignores cancel(): it ended before Storage heard.
 class _TooLateToCancel implements PhotoUpload {
   final _upload = FakePhotoUpload(fullPath: 'galleries/s1/late.jpg', photo: testPhoto('late.jpg'), name: 'late.jpg');
   var cancelCalls = 0;
 
   void complete() => _upload.complete();
+
+  void fail(AdminErrorKind kind) => _upload.fail(kind);
 
   @override
   ValueListenable<double> get progress => _upload.progress;
@@ -164,7 +166,7 @@ void main() {
       expect(uploadSummary(queue), 'Uploading 0 of 2');
     });
 
-    test('stored since the page listed it (another tab): skipped, not failed', () async {
+    test('stored since the page listed it (another tab): skipped, not failed, and the page hears of it', () async {
       admin.sessionPhotos['s1'] = ['IMG_1.jpg'];
 
       queue.add(photos(1));
@@ -172,7 +174,36 @@ void main() {
 
       expect(item('IMG_1.jpg').status, UploadStatus.skipped);
       expect(item('IMG_1.jpg').message, kUploadAlreadyHere);
+      expect(uploaded.map((item) => item.name), ['IMG_1.jpg']);
+    });
+
+    test('a retry of a photo that got through without saying so is skipped, and the page hears of it', () async {
+      queue.add(photos(1));
+      // Stored on the server, but the browser gave up waiting.
+      admin.sessionPhotos['s1'] = ['IMG_1.jpg'];
+      admin.uploads.single.fail(AdminErrorKind.offline);
+      await pumpEventQueue();
       expect(uploaded, isEmpty);
+
+      queue.retryFailed();
+      await pumpEventQueue();
+
+      expect(item('IMG_1.jpg').status, UploadStatus.skipped);
+      expect(uploaded.map((item) => item.name), ['IMG_1.jpg']);
+    });
+
+    test('found already there as it was cancelled: skipped, not cancelled, and the page hears of it', () async {
+      final refused = _TooLateToCancel();
+      final racing = UploadQueue(upload: (photo, name) => refused, onUploaded: uploaded.add);
+      addTearDown(racing.dispose);
+      racing.add([testPhoto('late.jpg')]);
+
+      racing.cancelAll();
+      refused.fail(AdminErrorKind.alreadyExists);
+      await pumpEventQueue();
+
+      expect(racing.items.single.status, UploadStatus.skipped);
+      expect(uploaded, hasLength(1));
     });
   });
 

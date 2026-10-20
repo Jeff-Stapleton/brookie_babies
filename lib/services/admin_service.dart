@@ -91,10 +91,12 @@ abstract class AdminService {
   /// a retry then finds it and returns its id.
   Future<String> createSession(SessionDetails details, {String? id});
 
-  /// Changes an ad hoc session's details.
+  /// Changes an ad hoc session's details. A new email also deletes the
+  /// cached zip, so links the old one was given stop working.
   Future<void> updateSession(Booking session, SessionDetails details);
 
-  /// Lets the family download the photos, or stops them.
+  /// Lets the family download the photos, or stops them. Stopping them also
+  /// deletes the cached zip, so links already given out stop working.
   Future<void> setPhotosReady(String id, bool ready);
 
   /// Deletes an ad hoc session: hides its photos, deletes them (in
@@ -112,7 +114,8 @@ abstract class AdminService {
   /// fails with [AdminErrorKind.alreadyExists].
   PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name);
 
-  /// Deletes one photo. One that's already gone counts as deleted.
+  /// Deletes one photo. One that's already gone counts as deleted. A
+  /// session photo's cached zip goes too, so links to it stop working.
   Future<void> deletePhoto(StoredPhoto photo);
 
   /// Every file directly in the public `_admin/gallery` folder, with a
@@ -210,6 +213,9 @@ class FirebaseAdminService implements AdminService {
       'edit session ${session.id}',
       () => _bookings.doc(session.id).update({...changes, 'updatedAt': FieldValue.serverTimestamp()}),
     );
+    // After the change, so no download in between rebuilds it for the old
+    // email.
+    if (changes.containsKey('email')) await _deleteZip(session.id);
   }
 
   @override
@@ -219,6 +225,8 @@ class FirebaseAdminService implements AdminService {
       'set photosReady on session $id',
       () => _bookings.doc(id).update({'photosReady': ready, 'updatedAt': FieldValue.serverTimestamp()}),
     );
+    // Hidden first, so no download in between rebuilds it.
+    if (!ready) await _deleteZip(id);
   }
 
   @override
@@ -247,9 +255,7 @@ class FirebaseAdminService implements AdminService {
     await _attempt('delete the photos of session $id', _Doing.writing, () async {
       // Everything, hidden files included: the folder goes with the session.
       await _forEachLimited(await _listAllUnder(storage.ref(folder)), _deleteIfThere);
-      // Admins may delete the cached zip but not look it up, so it goes by
-      // name.
-      await _deleteIfThere(storage.ref('gallery-zips/$id.zip'));
+      await _deleteIfThere(storage.ref(_zipPath(id)));
     });
     await _write('delete session $id', doc.delete);
   }
@@ -286,6 +292,11 @@ class FirebaseAdminService implements AdminService {
   Future<void> deletePhoto(StoredPhoto photo) async {
     _signedInUid();
     await _attempt('delete ${photo.fullPath}', _Doing.writing, () => _deleteIfThere(storage.ref(photo.fullPath)));
+    // 'galleries/<id>/<name>': after the photo, so no download in between
+    // rebuilds the zip with it. A retry finds the photo gone and tries the
+    // zip again.
+    final path = photo.fullPath.split('/');
+    if (path.length > 2 && path.first == _galleries) await _deleteZip(path[1]);
   }
 
   @override
@@ -375,6 +386,15 @@ class FirebaseAdminService implements AdminService {
 
   /// `galleries/<id>`, for a session id that can't reach another folder.
   static String _galleryPath(String id) => '$_galleries/${_sessionId(id)}';
+
+  /// The session's cached zip (getGalleryDownloadUrl, functions/src/gallery.ts).
+  static String _zipPath(String id) => 'gallery-zips/${_sessionId(id)}.zip';
+
+  /// Deletes session [id]'s cached zip, so the links already handed out for
+  /// it stop working; one that isn't there counts as deleted. Admins may
+  /// delete it but not look it up, so it goes by name.
+  Future<void> _deleteZip(String id) =>
+      _attempt('delete the zip of session $id', _Doing.writing, () => _deleteIfThere(storage.ref(_zipPath(id))));
 
   /// Whether [doc] is there; false if that can't be read either.
   static Future<bool> _exists(DocumentReference<Map<String, dynamic>> doc) async {

@@ -444,6 +444,42 @@ void main() {
       expect(log, isEmpty);
     });
 
+    test('a new email deletes the cached zip after the change, so the old one’s links stop working', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      final session = testSession('s1', date: DateTime(2026, 11, 14), photosReady: true);
+
+      await admin.updateSession(session, _details(email: 'grandma@example.com'));
+
+      expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects, isEmpty);
+    });
+
+    test('other changes, or the same email in capitals, leave the zip', () async {
+      addAdHoc('s1');
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+
+      await admin.updateSession(
+        testSession('s1', date: DateTime(2026, 11, 14)),
+        _details(name: 'The Harpers', email: ' Harper@Example.com'),
+      );
+
+      expect(log, ['update bookings/s1']);
+      expect(storage.objects, hasLength(1));
+    });
+
+    test('a new email whose change is refused leaves the zip', () async {
+      addAdHoc('s1');
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      db.errors['update bookings/s1'] = _firestoreError('permission-denied');
+
+      await expectLater(
+        admin.updateSession(testSession('s1', date: DateTime(2026, 11, 14)), _details(email: 'pat@example.com')),
+        throwsA(_adminError(AdminErrorKind.denied)),
+      );
+      expect(log, ['update bookings/s1']);
+    });
+
     test('only ad hoc sessions', () async {
       final paid = testSession('p1', status: BookingStatus.paid, date: DateTime(2026, 11, 14));
 
@@ -460,14 +496,59 @@ void main() {
     });
   });
 
-  test('setPhotosReady updates photosReady and updatedAt only', () async {
-    addAdHoc('s1');
+  group('setPhotosReady', () {
+    test('updates photosReady and updatedAt only', () async {
+      addAdHoc('s1');
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
 
-    await admin.setPhotosReady('s1', true);
+      await admin.setPhotosReady('s1', true);
 
-    expect(log, ['update bookings/s1']);
-    expect(db.writes.single.data, {'photosReady': true, 'updatedAt': FieldValue.serverTimestamp()});
-    expect(db.docs['bookings/s1']!['photosReady'], isTrue);
+      expect(log, ['update bookings/s1']);
+      expect(db.writes.single.data, {'photosReady': true, 'updatedAt': FieldValue.serverTimestamp()});
+      expect(db.docs['bookings/s1']!['photosReady'], isTrue);
+      expect(storage.objects, hasLength(1));
+    });
+
+    test('hiding them deletes the cached zip once hidden, so links already given out stop working', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects.addAll({'gallery-zips/s1.zip': 'application/zip', 'gallery-zips/s10.zip': 'application/zip'});
+
+      await admin.setPhotosReady('s1', false);
+
+      expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects.keys, ['gallery-zips/s10.zip']);
+    });
+
+    test('hiding them with no zip yet is fine', () async {
+      addAdHoc('s1', photosReady: true);
+
+      await admin.setPhotosReady('s1', false);
+
+      expect(db.docs['bookings/s1']!['photosReady'], isFalse);
+    });
+
+    test('a zip that won’t delete is an AdminException, the photos still hidden; trying again finishes', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      storage.errors['delete gallery-zips/s1.zip'] = _storageError('retry-limit-exceeded');
+
+      await expectLater(admin.setPhotosReady('s1', false), throwsA(_adminError(AdminErrorKind.offline)));
+      expect(db.docs['bookings/s1']!['photosReady'], isFalse);
+
+      storage.errors.clear();
+      await admin.setPhotosReady('s1', false);
+      expect(storage.objects, isEmpty);
+    });
+
+    test('refused: the zip stays, and nothing is hidden', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      db.errors['update bookings/s1'] = _firestoreError('permission-denied');
+
+      await expectLater(admin.setPhotosReady('s1', false), throwsA(_adminError(AdminErrorKind.denied)));
+      expect(log, ['update bookings/s1']);
+      expect(storage.objects, hasLength(1));
+    });
   });
 
   group('writes that get no answer', () {
@@ -905,17 +986,41 @@ void main() {
   group('deletePhoto', () {
     const photo = StoredPhoto(name: 'edits/a.jpg', fullPath: 'galleries/s1/edits/a.jpg');
 
-    test('deletes it', () async {
-      storage.objects[photo.fullPath] = 'image/jpeg';
+    test('deletes it, then the session’s cached zip, so links to the photo stop working', () async {
+      storage.objects.addAll({
+        photo.fullPath: 'image/jpeg',
+        'gallery-zips/s1.zip': 'application/zip',
+        'gallery-zips/s10.zip': 'application/zip',
+      });
 
       await admin.deletePhoto(photo);
 
-      expect(log, ['delete galleries/s1/edits/a.jpg']);
+      expect(log, ['delete galleries/s1/edits/a.jpg', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects.keys, ['gallery-zips/s10.zip']);
+    });
+
+    test('a home page library photo has no zip to delete', () async {
+      storage.objects['_admin/gallery/a.jpg'] = 'image/jpeg';
+
+      await admin.deletePhoto(const StoredPhoto(name: 'a.jpg', fullPath: '_admin/gallery/a.jpg'));
+
+      expect(log, ['delete _admin/gallery/a.jpg']);
+    });
+
+    test('one already gone counts as deleted, and its zip goes all the same', () async {
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+
+      await admin.deletePhoto(photo);
+
       expect(storage.objects, isEmpty);
     });
 
-    test('one already gone counts as deleted', () async {
-      await admin.deletePhoto(photo);
+    test('a photo that won’t delete leaves the zip', () async {
+      storage.objects.addAll({photo.fullPath: 'image/jpeg', 'gallery-zips/s1.zip': 'application/zip'});
+      storage.errors['delete ${photo.fullPath}'] = _storageError('unknown');
+
+      await expectLater(admin.deletePhoto(photo), throwsA(isA<AdminException>()));
+      expect(log, isNot(contains('delete gallery-zips/s1.zip')));
     });
 
     test('fails as an AdminException', () async {

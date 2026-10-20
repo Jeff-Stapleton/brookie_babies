@@ -310,6 +310,54 @@ void main() {
       expect(LeaveWarning.active.value, isFalse);
     });
 
+    photoTest('an upload that changes the site’s photos has the home page look again, once the uploads stop',
+        (tester) async {
+      admin.homeNames = null;
+      picker.next = [testPhoto('IMG_00.jpg'), testPhoto('IMG_99.jpg')];
+      await pumpPage(tester);
+      final loads = portfolio.loads;
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+
+      admin.uploads.first.complete();
+      await tester.pumpAndSettle();
+      expect(portfolio.loads, loads, reason: 'still uploading');
+      admin.uploads.last.complete();
+      await tester.pumpAndSettle();
+
+      expect(portfolio.loads, loads + 1);
+    });
+
+    photoTest('leaving with uploads still running, the home page looks again for the ones that landed',
+        (tester) async {
+      admin.homeNames = null;
+      picker.next = [testPhoto('IMG_00.jpg'), testPhoto('IMG_99.jpg')];
+      await pumpPage(tester);
+      final loads = portfolio.loads;
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+      admin.uploads.first.complete();
+      await tester.pumpAndSettle();
+
+      await tapAndSettle(tester, find.byTooltip('Back'));
+      await tapAndSettle(tester, find.widgetWithText(FilledButton, 'Stop and leave'));
+
+      expect(find.byType(HomePhotosAdminPage), findsNothing);
+      expect(portfolio.loads, loads + 1);
+    });
+
+    photoTest('an upload that sorts after the site’s photos leaves the home page alone', (tester) async {
+      admin
+        ..homeNames = null
+        ..autoCompleteUploads = true;
+      picker.next = [testPhoto('IMG_99.jpg')];
+      await pumpPage(tester);
+      final loads = portfolio.loads;
+
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+
+      expect(chosen(tester), _photos(7));
+      expect(portfolio.loads, loads);
+    });
+
     photoTest('a photo that lands during the first save leaves what’s being saved alone', (tester) async {
       admin
         ..homeNames = null
@@ -762,6 +810,25 @@ void main() {
       // And it can go on the home page.
       await tapAndSettle(tester, check('IMG_99.jpg'));
       expect(chosen(tester).last, 'IMG_99.jpg');
+    });
+
+    photoTest('a chosen photo uploaded again after it was deleted is back on the home page', (tester) async {
+      admin
+        ..homeNames = ['IMG_03.jpg', 'gone.jpg', 'IMG_01.jpg']
+        ..autoCompleteUploads = true;
+      picker.next = [testPhoto('gone.jpg')];
+      await pumpPage(tester);
+      final loads = portfolio.loads;
+      expect(chosen(tester), ['IMG_03.jpg', 'IMG_01.jpg']);
+
+      await tapAndSettle(tester, find.widgetWithText(OutlinedButton, 'Upload photos'));
+
+      // As the site shows it again: in its place, and not to be deleted.
+      expect(chosen(tester), ['IMG_03.jpg', 'gone.jpg', 'IMG_01.jpg']);
+      expect(find.textContaining('isn’t in the library any more'), findsNothing);
+      expect(discard(), findsNothing);
+      expect(iconEnabled(tester, deleteButton(tile('gone.jpg'))), isFalse);
+      expect(portfolio.loads, loads + 1);
     });
 
     photoTest('a name passed on twice joins the library once', (tester) async {

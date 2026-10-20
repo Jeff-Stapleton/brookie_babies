@@ -65,8 +65,16 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   /// library's first photos by name, and [_saved] follows them.
   bool _neverChosen = false;
 
+  /// The home page photos as `site/home` lists them, [_missing] ones
+  /// included.
+  List<String> _savedChoice = const [];
+
   /// Chosen photos the library no longer has, which the site leaves out.
   List<String> _missing = const [];
+
+  /// An upload changed what the site shows, and the home page under this
+  /// one hasn't looked again yet: it does once the uploads stop.
+  bool _homeOutOfDate = false;
 
   bool _saving = false;
   bool _justSaved = false;
@@ -98,6 +106,7 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   @override
   void dispose() {
     LeaveWarning.set(this, false);
+    if (_homeOutOfDate) HomePage.reloadPhotos();
     _queue
       ..removeListener(_onQueueChanged)
       ..dispose();
@@ -136,10 +145,9 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
         if (chosen == null) {
           _saved = _firstPhotos();
         } else {
-          // As the site does: the photos still in the library, once each,
-          // up to the most it shows.
+          _savedChoice = chosen;
+          _saved = _shownOf(chosen);
           final photos = _photoNames();
-          _saved = chosen.where(photos.contains).toSet().take(PhotoRules.homeMaxPhotos).toList();
           _missing = chosen.where((name) => !photos.contains(name)).toSet().toList();
         }
         _chosen = _saved;
@@ -159,6 +167,13 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
         for (final file in _library ?? const <StoredPhoto>[])
           if (StoragePortfolioService.isPhoto(file.name)) file.name,
       };
+
+  /// What the site shows of [choice], as it does: the photos still in the
+  /// library, once each, up to the most it shows.
+  List<String> _shownOf(List<String> choice) {
+    final photos = _photoNames();
+    return choice.where(photos.contains).toSet().take(PhotoRules.homeMaxPhotos).toList();
+  }
 
   /// What the site shows while nothing has been chosen: the library's first
   /// photos by name.
@@ -207,7 +222,7 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
       HomePage.reloadPhotos();
       if (!mounted) return;
       _set(() {
-        _saved = names;
+        _saved = _savedChoice = names;
         _neverChosen = false;
         _missing = const [];
         _justSaved = true;
@@ -284,13 +299,25 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
   void _onUploaded(UploadItem item) {
     final library = _library;
     if (!mounted || library == null || library.any((file) => file.name == item.name)) return;
+    final shown = _saved;
     _set(() {
       _library = [
         ...library,
         StoredPhoto(name: item.name, fullPath: '${StoragePortfolioService.folder}/${item.name}'),
       ]..sort((a, b) => a.name.compareTo(b.name));
       _followFirstPhotos();
+      // Chosen, deleted, and back again: the site shows it again.
+      if (_missing.contains(item.name)) {
+        _missing = [
+          for (final name in _missing)
+            if (name != item.name) name,
+        ];
+        final saved = _shownOf(_savedChoice);
+        if (!_changed && !_saving) _chosen = saved;
+        _saved = saved;
+      }
     });
+    if (!listEquals(shown, _saved)) _homeOutOfDate = true;
   }
 
   void _onQueueChanged() {
@@ -298,7 +325,12 @@ class _HomePhotosEditorState extends State<_HomePhotosEditor> {
     if (uploading == _wasUploading) return;
     _wasUploading = uploading;
     _set(() {});
-    if (!uploading) _fetchLinks();
+    if (uploading) return;
+    _fetchLinks();
+    if (_homeOutOfDate) {
+      _homeOutOfDate = false;
+      HomePage.reloadPhotos();
+    }
   }
 
   /// Lists the library once the uploads are done, for the links to show

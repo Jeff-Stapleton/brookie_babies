@@ -1,12 +1,24 @@
 # TODO
 
-Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-20 (admin portal).
+Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-21 (function build permissions).
 
 ## 1. Ship the admin portal
 
 The admin portal (README, "Admin portal") needs new security rules and a new
 version of the download function. Do these in order.
 
+- [x] **Let the functions build.** Building the new `getGalleryDownloadUrl`
+      failed on 2026-10-20 ("missing permission on the build service
+      account"); `scripts/setup-functions-runtime.sh` now grants the build
+      account what it needs, and was run on 2026-10-21. Re-running the CI
+      job then put the new rules and the new site live.
+- [ ] **Deploy the new `getGalleryDownloadUrl`.** The re-run skipped it as
+      "unchanged" (the failed update had already written its source hash),
+      so the old function still runs: paid downloads work, ad hoc guests'
+      don't. Merging PR #21 fixes it (CI now deploys `functions:default`,
+      which never skips). Check afterwards that
+      `gcloud functions describe getGalleryDownloadUrl --region=us-central1 --project=brookie-babies --format='value(updateTime)'`
+      shows the merge's date.
 - [ ] **Deploy the backend before merging.** If
       `gh variable get BACKEND_DEPLOY_LIVE` prints `true`, merging deploys it
       before the site, so skip this. Otherwise, from the portal's branch, up to
@@ -145,8 +157,13 @@ Functions → getGalleryDownloadUrl → Logs.
     switch Hosting deploys to keyless sign-in too.
   - Give the functions a dedicated runtime service account with only what
     they need (Firestore, the Storage bucket, signing their own links)
-    instead of the default compute account. This is worth doing if the setup
-    script warns that the compute account has Editor.
+    instead of the default compute account (`setGlobalOptions({serviceAccount})`).
+    The compute account also builds the functions, so today the running
+    function can write to `gcf-artifacts`, the next build's image cache;
+    splitting them leaves the compute account only building. When doing it,
+    split `scripts/setup-functions-runtime.sh` too: runtime grants to the new
+    account, build grants still to the compute account, and give
+    github-deployer `roles/iam.serviceAccountUser` on the new account first.
   - Add a branch ruleset on `main` that blocks force-pushes and deletion.
 - [ ] **Admin portal follow-ups** (not built yet):
   - Email families when their photos are ready. Today you copy the message

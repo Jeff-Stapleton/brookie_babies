@@ -359,12 +359,12 @@ On pushes to `main`, CI deploys the backend before the site, but only once `BACK
 The `deploy-backend` job in `.github/workflows/ci.yml` runs on every push to `main` after the checks pass, and before the live site deploys:
 
 ```bash
-firebase deploy --only functions,firestore:rules,storage --project brookie-babies --non-interactive --force
+firebase deploy --only functions:default,firestore:rules,storage --project brookie-babies --non-interactive --force
 ```
 
 - **No stored key.** The job trades its GitHub sign-in token for credentials that expire within the hour, belonging to the `github-deployer` service account (Workload Identity Federation). Google only accepts tokens from this repository's `production` environment on `main`, and GitHub only lets `main` deploy to that environment.
 - **No direct access, but not a sandbox.** `github-deployer` has no direct permission to read bookings, photos or secret values, to turn Google Cloud APIs on or off, or to change who has access to the project. What it deploys can still reach all of that: functions run as `375587092017-compute@developer.gserviceaccount.com`, and a rules change can open up any data. So anyone who can push to `main`, or get code into the npm packages the deploy installs, effectively has access to all customer data. Keep push access to this repository limited to the owner. The setup script warns if the runtime account has broad (Editor) access.
-- **Small no-change deploys.** Unchanged functions are skipped, and the rules are re-released as-is.
+- **Every push rebuilds the functions.** The job targets the `default` codebase (`functions:default`) rather than plain `functions`, so firebase-tools never skips a function as unchanged. With plain `functions` it compares a source hash label that a *failed* update still writes, so after one failed build the old code would stay live while every later deploy reported "Skipped (No changes detected)". The rules are re-released as-is when unchanged.
 - **The site waits for the backend once real deploys are on.** With `BACKEND_DEPLOY_LIVE` set to `true`, a failed backend deploy also holds back the live site, so the site never goes live ahead of the functions it calls. In dry-run mode the site deploys regardless. Deploy backend changes by hand before merging site code that depends on them.
 - `--force` deletes any function that has been removed from `functions/src`.
 
@@ -393,6 +393,8 @@ firebase deploy --only functions,firestore:rules,storage --project brookie-babie
 - **"Failed to generate Google Cloud federated token" in the sign-in step:** the identity pool, provider or condition doesn't match. Re-run `scripts/setup-gcp-deployer.sh`, wait 5 minutes, and re-run the job.
 - **Failures in the deploy step:** the error usually names the API call that failed. For more detail, run the same deploy locally as the owner with `firebase deploy --only functions,firestore:rules,storage --debug` (add `--dry-run` to change nothing). Don't add `--debug` in CI: this repository's logs are public, and debug output includes API responses such as the signed URL the function source is uploaded to.
 - **A 403:** the error names the missing permission. Add it to `scripts/setup-gcp-deployer.sh` and re-run the script.
+- **A function shows "Skipped (No changes detected)" but runs old code:** a failed update left the new source hash on it. Deploy it by name, which is never skipped: `firebase deploy --only functions:getGalleryDownloadUrl` (CI's `functions:default` does the same for every function). Check with `gcloud functions describe getGalleryDownloadUrl --region=us-central1 --project=brookie-babies --format='value(buildConfig.build,updateTime)'`.
+- **"Could not build the function due to a missing permission on the build service account":** the functions are built as `375587092017-compute@developer.gserviceaccount.com`, which needs the build grants in `scripts/setup-functions-runtime.sh` (see "Function runtime permissions"). Run the script, wait about 5 minutes, then re-run the failed job. The build log is empty when this happens, because the account can't write logs either; `gcloud builds describe <build id> --region=us-central1 --project=brookie-babies` shows which step failed (`gcs-fetcher` means it couldn't read the source) and a warning about the missing Logs Writer role. Don't fix it with Editor or the project-wide Cloud Build roles.
 
 **Before merging something new**, prepare the project, because `github-deployer` deliberately can't. Otherwise the CI deploy fails:
 
@@ -430,6 +432,14 @@ Signing also needs the **IAM Service Account Credentials API**, which is turned 
 If downloads fail with "We couldn't get your photos ready just now", check the function's log:
 - **A Firestore or Storage permission error:** re-run the script.
 - **A `signBlob` error:** check the Token Creator grant and the API.
+
+The same account also **builds** the functions. Since 2024 Cloud Build uses the default compute account for projects like this one (it has no organization, so the old Cloud Build account can't be chosen, and neither firebase-tools nor firebase-functions can name another build account). The first deploy only worked because the account still had the Editor role Google grants it by default; removing Editor on 2026-10-17 left it unable to build. The script gives it Google's documented minimum for a build account, each as narrow as it can be:
+
+- **Fetching the uploaded source:** `roles/storage.objectViewer` on the `gcf-v2-sources-375587092017-us-central1` bucket only.
+- **Saving the built image:** `roles/artifactregistry.writer` on the `gcf-artifacts` repository only.
+- **Writing build logs:** `roles/logging.logWriter` (project; it can't be granted lower).
+
+Never fix a failed build with Editor or `roles/cloudbuild.builds.builder`: this account also runs `getGalleryDownloadUrl`, and those roles reach every bucket, families' photos included. Even these narrow grants let the running function write to `gcf-artifacts`, the next build's image cache; giving the functions their own runtime account (`setGlobalOptions({serviceAccount})`, on the TODO list) would leave the compute account only building.
 
 When a new function needs other data, add the role to this script, scoped as narrowly as possible.
 

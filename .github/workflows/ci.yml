@@ -222,10 +222,17 @@ jobs:
           FIREBASE_SKIP_INFORMATIONAL_IAM: "true"
           DRY_RUN: ${{ vars.BACKEND_DEPLOY_LIVE != 'true' && '--dry-run' || '' }}
         # --force: delete functions that were removed from the source.
+        # functions:default (the codebase, not bare "functions") so every
+        # function is rebuilt on every push: with a bare "functions",
+        # firebase-tools skips any function whose source hash label matches,
+        # and a failed update still writes that label, so after one failed
+        # build the function would be skipped as "unchanged" until its code
+        # changed again (as happened after #10). Deletes still apply to the
+        # whole codebase.
         # Never add --debug here: this repository's logs are public, and debug
         # output includes API responses such as the signed URL the function
         # source is uploaded to. Debug locally instead (README).
-        run: firebase deploy --only functions,firestore:rules,storage --project brookie-babies --non-interactive --force ${DRY_RUN:+"$DRY_RUN"}
+        run: firebase deploy --only functions:default,firestore:rules,storage --project brookie-babies --non-interactive --force ${DRY_RUN:+"$DRY_RUN"}
 
   deploy-live:
     name: Deploy live site

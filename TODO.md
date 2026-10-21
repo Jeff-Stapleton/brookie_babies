@@ -7,17 +7,18 @@ Open items for sign-in, bookings, photo downloads, the admin portal and site con
 The admin portal (README, "Admin portal") needs new security rules and a new
 version of the download function. Do these in order.
 
-- [ ] **Let the functions build, then finish the deploy.** PR #10 is merged
-      and CI deployed the new rules on 2026-10-20, but building the new
-      `getGalleryDownloadUrl` failed ("missing permission on the build
-      service account"), so the old function and the old site are still
-      live. Signed in to gcloud as the project owner, from the repo root:
-      ```bash
-      bash scripts/setup-functions-runtime.sh
-      ```
-      Wait about 5 minutes, then Actions → CI → the run for "Merge pull
-      request #10" → **Re-run failed jobs**. Both **Deploy functions and
-      rules** and **Deploy live site** should go green.
+- [x] **Let the functions build.** Building the new `getGalleryDownloadUrl`
+      failed on 2026-10-20 ("missing permission on the build service
+      account"); `scripts/setup-functions-runtime.sh` now grants the build
+      account what it needs, and was run on 2026-10-21. Re-running the CI
+      job then put the new rules and the new site live.
+- [ ] **Deploy the new `getGalleryDownloadUrl`.** The re-run skipped it as
+      "unchanged" (the failed update had already written its source hash),
+      so the old function still runs: paid downloads work, ad hoc guests'
+      don't. Merging PR #21 fixes it (CI now deploys `functions:default`,
+      which never skips). Check afterwards that
+      `gcloud functions describe getGalleryDownloadUrl --region=us-central1 --project=brookie-babies --format='value(updateTime)'`
+      shows the merge's date.
 - [ ] **Deploy the backend before merging.** If
       `gh variable get BACKEND_DEPLOY_LIVE` prints `true`, merging deploys it
       before the site, so skip this. Otherwise, from the portal's branch, up to

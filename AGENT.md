@@ -485,6 +485,9 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   account. Without the script's three scoped build grants every deploy fails with
   "missing permission on the build service account" and an empty build log. Never
   grant it Editor or `roles/cloudbuild.builds.builder` instead: it is also the runtime.
+- CI deploys `--only functions:default` (the codebase), not bare `functions`: with
+  the bare form firebase-tools skips functions whose source hash label matches, and
+  a failed update still writes that label, so the old code would stay live.
 - `getGalleryDownloadUrl` signs URLs through the IAM signBlob API, which needs
   Service Account Token Creator on the functions' runtime service account
   (README, "Deploying the backend").

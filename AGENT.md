@@ -173,7 +173,8 @@ cors.json                 CORS rule for the Storage bucket (GET from any origin)
 scripts/
   setup-gcp-deployer.sh   One-time (owner): keyless CI deploys: WIF pool/provider, github-deployer SA + roles
   setup-github-production.sh  One-time (owner): restrict the `production` environment to main
-  setup-functions-runtime.sh  One-time (owner): runtime SA access for the functions (Firestore read, bucket objects, self-signing)
+  setup-functions-runtime.sh  One-time (owner): runtime SA access for the functions (Firestore read, bucket objects, self-signing),
+                          and the same account's build grants (gcf-v2-sources read, gcf-artifacts write, log writing)
   grant-admin.sh          Owner only (agents never run it): set or --revoke the admin claim on a Google account
   test-rules.sh           Read-only: checks both rules files against rules-tests/ with the Rules API (deploys nothing)
 .github/deploy-tools/     Pinned Firebase CLI (package.json + package-lock.json) for the deploy-backend job
@@ -479,6 +480,11 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   `BACKEND_DEPLOY_LIVE` is `true`, that failure also holds back the live site.
 - The functions' runtime account has no broad access; `scripts/setup-functions-runtime.sh`
   grants what they need. A new function that reads other data needs a role added there.
+- That account (the default compute account) also builds the functions: Cloud
+  Build's default since 2024, and nothing in firebase-tools can name another build
+  account. Without the script's three scoped build grants every deploy fails with
+  "missing permission on the build service account" and an empty build log. Never
+  grant it Editor or `roles/cloudbuild.builds.builder` instead: it is also the runtime.
 - `getGalleryDownloadUrl` signs URLs through the IAM signBlob API, which needs
   Service Account Token Creator on the functions' runtime service account
   (README, "Deploying the backend").

@@ -393,6 +393,7 @@ firebase deploy --only functions,firestore:rules,storage --project brookie-babie
 - **"Failed to generate Google Cloud federated token" in the sign-in step:** the identity pool, provider or condition doesn't match. Re-run `scripts/setup-gcp-deployer.sh`, wait 5 minutes, and re-run the job.
 - **Failures in the deploy step:** the error usually names the API call that failed. For more detail, run the same deploy locally as the owner with `firebase deploy --only functions,firestore:rules,storage --debug` (add `--dry-run` to change nothing). Don't add `--debug` in CI: this repository's logs are public, and debug output includes API responses such as the signed URL the function source is uploaded to.
 - **A 403:** the error names the missing permission. Add it to `scripts/setup-gcp-deployer.sh` and re-run the script.
+- **"Could not build the function due to a missing permission on the build service account":** the functions are built as `375587092017-compute@developer.gserviceaccount.com`, which needs the build grants in `scripts/setup-functions-runtime.sh` (see "Function runtime permissions"). Run the script, wait about 5 minutes, then re-run the failed job. The build log is empty when this happens, because the account can't write logs either; `gcloud builds describe <build id> --region=us-central1 --project=brookie-babies` shows which step failed (`gcs-fetcher` means it couldn't read the source) and a warning about the missing Logs Writer role. Don't fix it with Editor or the project-wide Cloud Build roles.
 
 **Before merging something new**, prepare the project, because `github-deployer` deliberately can't. Otherwise the CI deploy fails:
 
@@ -430,6 +431,14 @@ Signing also needs the **IAM Service Account Credentials API**, which is turned 
 If downloads fail with "We couldn't get your photos ready just now", check the function's log:
 - **A Firestore or Storage permission error:** re-run the script.
 - **A `signBlob` error:** check the Token Creator grant and the API.
+
+The same account also **builds** the functions. Since 2024 Cloud Build uses the default compute account for projects like this one (it has no organization, so the old Cloud Build account can't be chosen, and neither firebase-tools nor firebase-functions can name another build account). The first deploy only worked because the account still had the Editor role Google grants it by default; removing Editor on 2026-10-17 left it unable to build. The script gives it Google's documented minimum for a build account, each as narrow as it can be:
+
+- **Fetching the uploaded source:** `roles/storage.objectViewer` on the `gcf-v2-sources-375587092017-us-central1` bucket only.
+- **Saving the built image:** `roles/artifactregistry.writer` on the `gcf-artifacts` repository only.
+- **Writing build logs:** `roles/logging.logWriter` (project; it can't be granted lower).
+
+Never fix a failed build with Editor or `roles/cloudbuild.builds.builder`: this account also runs `getGalleryDownloadUrl`, and those roles reach every bucket, families' photos included. Even these narrow grants let the running function write to `gcf-artifacts`, the next build's image cache; giving the functions their own runtime account (`setGlobalOptions({serviceAccount})`, on the TODO list) would leave the compute account only building.
 
 When a new function needs other data, add the role to this script, scoped as narrowly as possible.
 

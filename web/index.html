@@ -17,6 +17,17 @@
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
+  <!-- The site's address is brookestapletonphoto.com (siteDomain in
+       lib/utilities/site_domain.dart). Send visitors of Firebase's default
+       addresses there, keeping the page and its # route. Only these two
+       hosts: preview channels and localhost stay where they are, and
+       /__/auth/ on firebaseapp.com never loads this page. -->
+  <script>
+    if (location.hostname === 'brookie-babies.web.app' || location.hostname === 'brookie-babies.firebaseapp.com') {
+      location.replace('https://brookestapletonphoto.com' + location.pathname + location.search + location.hash);
+    }
+  </script>
+  <link rel="canonical" href="https://brookestapletonphoto.com/">
   <!-- The viewport Flutter installs, set early so the loading screen is sized
        for phones. flt-viewport marks it as Flutter's own, so debug builds
        don't warn when the engine swaps in its identical tag. -->
@@ -35,8 +46,8 @@
   <meta property="og:site_name" content="Brooke Stapleton Photography">
   <meta property="og:title" content="Brooke Stapleton Photography">
   <meta property="og:description" content="Book a photo session with Brooke Stapleton Photography, then download your edited photos.">
-  <meta property="og:url" content="https://brookie-babies.web.app/">
-  <meta property="og:image" content="https://brookie-babies.web.app/icons/og-image.png">
+  <meta property="og:url" content="https://brookestapletonphoto.com/">
+  <meta property="og:image" content="https://brookestapletonphoto.com/icons/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="The Brooke Stapleton Photography logo">

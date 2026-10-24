@@ -48,7 +48,7 @@ version of the download function. Do these in order.
 - [ ] **Test it** in Chrome, then in Safari, on the live site once merged.
       (To test before merging, deploy the backend by hand as above, then
       `flutter run -d chrome`: it uses the real project.)
-  - [ ] Open https://brookie-babies.web.app/#/admin, or the account menu →
+  - [ ] Open https://brookestapletonphoto.com/#/admin, or the account menu →
         **Admin**.
   - [ ] **Add a session** for a second Google account of yours: a name, its
         Gmail address and today's date.
@@ -82,7 +82,7 @@ version of the download function. Do these in order.
 
 PR #7 is merged and the backend is deployed: the `getGalleryDownloadUrl`
 function, the Firestore and Storage rules, and the signing permission. What's
-left is one real download, on the live site: https://brookie-babies.web.app
+left is one real download, on the live site: https://brookestapletonphoto.com
 
 - [ ] **Sign in** on the site with your Google account.
 - [ ] **Copy your user ID:** Firebase console → Authentication → Users →
@@ -126,10 +126,9 @@ Functions → getGalleryDownloadUrl → Logs.
 ## 4. Settings now that sign-in is live
 
 - [ ] **Stripe:** for each of the three Payment Links, set **After payment**
-      to redirect to `https://brookie-babies.web.app` (to
-      `https://brookestapletonphoto.com` once it's connected; see
-      section 7). Checkout now opens in the same tab, so without a redirect
-      customers have no way back to the site.
+      to redirect to `https://brookestapletonphoto.com`. Checkout now opens
+      in the same tab, so without a redirect customers have no way back to
+      the site.
 - [ ] **Firebase console → Authentication → Sign-in method → Google:** set
       the public-facing project name to "Brooke Stapleton Photography" and
       the support email.
@@ -251,10 +250,10 @@ brookie-babies.firebaseapp.com), then the redirect from the old addresses.
       "redirect_uri_mismatch" means it isn't.
 - [x] **Connected:** https://brookestapletonphoto.com serves the site over
       HTTPS, and www redirects to it (2026-10-25).
-- [ ] **First merge: this branch** (`feat/design-system`): the home screen
+- [x] **First merge** (PR #22, 2026-10-25): the home screen
       label, the download's file name, and signing in through the new domain
       when served from it. Safe any time: nothing changes on web.app.
-- [ ] **Check it**, after the three items above, in a private window at
+- [x] **Check it** (passed 2026-10-25), in a private window at
       https://brookestapletonphoto.com: the site loads; **Sign in** shows
       Google's chooser naming brookestapletonphoto.com and signs you in (the
       first real use of the redirect URI; "redirect_uri_mismatch" means that
@@ -264,8 +263,8 @@ brookie-babies.firebaseapp.com), then the redirect from the old addresses.
       Everyone signs in once more on the new domain (sign-in is kept per
       address); admin rights carry over.
 - [ ] **Second merge: go live.** Only after the check passes, or every
-      visitor is sent to an address where sign-in doesn't work. A change
-      already prepared: `web/index.html` sends visitors of
+      visitor is sent to an address where sign-in doesn't work.
+      `web/index.html` sends visitors of
       `brookie-babies.web.app` and `brookie-babies.firebaseapp.com` on to the
       new domain, keeping the path and the `#` route (Hosting redirects can't
       tell the hosts apart, so it's an inline script; preview channels and

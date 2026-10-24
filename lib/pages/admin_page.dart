@@ -22,7 +22,7 @@ import 'package:flutter/material.dart';
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
 
-  /// Also linkable as https://brookie-babies.web.app/#/admin.
+  /// Also linkable as https://brookestapletonphoto.com/#/admin.
   static const routeName = '/admin';
 
   /// Opens the admin page over the home page, closing anything else that

@@ -252,7 +252,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: production
-      url: https://brookie-babies.web.app
+      url: https://brookestapletonphoto.com
     permissions:
       contents: read
     steps:

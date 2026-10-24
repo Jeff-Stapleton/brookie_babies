@@ -31,7 +31,7 @@ import 'package:web/web.dart' as web;
 
 Map<String, Widget Function(BuildContext)> routes = {
   '/schedule': (context) => const SchedulingPage(packageName: '',),
-  // "Your sessions", also linkable as https://brookie-babies.web.app/#/profile.
+  // "Your sessions", also linkable as https://brookestapletonphoto.com/#/profile.
   '/profile': (context) => const ProfilePage(),
   AdminPage.routeName: (context) => const AdminPage(),
 };

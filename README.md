@@ -102,6 +102,11 @@ Storage bucket has files under `_admin/gallery` and CORS is configured (see belo
   ```
 - **Using a different Firebase project**: run `flutterfire configure` to
   regenerate `lib/firebase_options.dart`, and update `.firebaserc`.
+- **Custom domain**: the site is moving to https://brookestapletonphotography.com.
+  Connecting it is console and DNS work, listed in order in
+  [TODO.md](TODO.md) ("Custom domain"). Served from that domain, the app signs
+  in through it (`lib/utilities/site_domain.dart`), so Google's sign-in screen
+  shows it instead of brookie-babies.firebaseapp.com.
 
 ## Project structure
 

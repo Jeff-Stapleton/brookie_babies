@@ -439,7 +439,7 @@ export function zipFileName(date: unknown, bookingId: string): string {
     .replace(/[^A-Za-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
-  return `brookie-babies-photos-${safe || bookingId}.zip`;
+  return `brooke-stapleton-photography-${safe || bookingId}.zip`;
 }
 
 function contentDisposition(fileName: string): string {

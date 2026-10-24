@@ -6,10 +6,10 @@ void main() {
   const generated = DefaultFirebaseOptions.web;
 
   test('the site’s own domain signs in through itself', () {
-    final options = withSiteAuthDomain(generated, Uri.parse('https://brookestapletonphotography.com/#/profile'));
+    final options = withSiteAuthDomain(generated, Uri.parse('https://brookestapletonphoto.com/#/profile'));
 
-    expect(options.authDomain, 'brookestapletonphotography.com');
-    expect(options, generated.copyWith(authDomain: 'brookestapletonphotography.com'));
+    expect(options.authDomain, 'brookestapletonphoto.com');
+    expect(options, generated.copyWith(authDomain: 'brookestapletonphoto.com'));
   });
 
   test('every other host keeps the generated auth domain', () {
@@ -17,7 +17,7 @@ void main() {
       'https://brookie-babies.web.app/',
       'https://brookie-babies.firebaseapp.com/#/admin',
       'https://brookie-babies--pr22-feat-domain-abc123.web.app/',
-      'https://www.brookestapletonphotography.com/',
+      'https://www.brookestapletonphoto.com/',
       'http://localhost:5000/',
     ];
     for (final page in pages) {

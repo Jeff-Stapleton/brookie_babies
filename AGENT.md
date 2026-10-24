@@ -139,7 +139,7 @@ lib/
     utils.dart            Date formatters ("Saturday, October 24", "Sat, Oct 24") and the booking window
     keyboard_input.dart   KeyboardInput: whether the last input was a key (like :focus-visible)
     embedded_browser.dart Detects in-app browsers (Instagram, Facebook, TikTok, Pinterest, Android WebViews, ...)
-    site_domain.dart      siteDomain (brookestapletonphotography.com) and withSiteAuthDomain: sign-in through
+    site_domain.dart      siteDomain (brookestapletonphoto.com) and withSiteAuthDomain: sign-in through
                           the custom domain when the site is served from it
     leave_warning.dart    LeaveWarning: whether a page has uploads running or unsaved changes (main.dart's
                           beforeunload, signOutWithWarning)
@@ -343,13 +343,13 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   breaks redirects in current browsers, and a redirect would lose the chosen
   session.
 - The auth domain follows the host: on `siteDomain`
-  (brookestapletonphotography.com) `withSiteAuthDomain` in `main.dart` signs in
+  (brookestapletonphoto.com) `withSiteAuthDomain` in `main.dart` signs in
   through that domain's own `/__/auth/handler`, so Google's chooser names it;
   everywhere else it stays `brookie-babies.firebaseapp.com`. Leave
   `authDomain` in `lib/firebase_options.dart` as generated. Signing in on the
   custom domain needs it in Auth's authorized domains and in the Google Auth
   Platform's (Branding), and
-  `https://brookestapletonphotography.com/__/auth/handler` in the OAuth web
+  `https://brookestapletonphoto.com/__/auth/handler` in the OAuth web
   client's redirect URIs (TODO.md, "Custom domain").
 - The same goes for `AppServices.of(context).pickPhotos(accept: ...)`: call it
   first in the tap handler, or the browser won't open the file picker. Never

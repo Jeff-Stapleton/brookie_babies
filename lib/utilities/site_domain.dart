@@ -3,7 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 /// The studio's own domain. Firebase Hosting serves the site on it once it's
 /// connected in the console (TODO.md, "Custom domain"), alongside
 /// brookie-babies.web.app.
-const siteDomain = 'brookestapletonphotography.com';
+const siteDomain = 'brookestapletonphoto.com';
 
 /// [options] for the page at [page]. Served from [siteDomain], Google sign-in
 /// goes through that domain's own `/__/auth/handler`, so Google's account

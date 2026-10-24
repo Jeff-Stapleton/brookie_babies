@@ -127,7 +127,7 @@ Functions → getGalleryDownloadUrl → Logs.
 
 - [ ] **Stripe:** for each of the three Payment Links, set **After payment**
       to redirect to `https://brookie-babies.web.app` (to
-      `https://brookestapletonphotography.com` once it's connected; see
+      `https://brookestapletonphoto.com` once it's connected; see
       section 7). Checkout now opens in the same tab, so without a redirect
       customers have no way back to the site.
 - [ ] **Firebase console → Authentication → Sign-in method → Google:** set
@@ -217,54 +217,54 @@ supply. Each lives in one place in the code.
       color to ink `#1C1B19`, the background to paper `#F6F6F3`, and the logo
       as the icon, so the payment page matches the site.
 
-## 7. Custom domain: brookestapletonphotography.com
+## 7. Custom domain: brookestapletonphoto.com
 
-Families should see https://brookestapletonphotography.com instead of
-brookie-babies.web.app. Do these in order; the site keeps working on web.app
-the whole time. The app is ready: served from the new domain, it signs in
-through it (`lib/utilities/site_domain.dart`), so Google's sign-in screen
-names brookestapletonphotography.com instead of
-brookie-babies.firebaseapp.com. The download is already named
-`brooke-stapleton-photography-<date>.zip`.
+Families should see https://brookestapletonphoto.com instead of
+brookie-babies.web.app. The site keeps working on web.app the whole time.
+The app is ready: served from the new domain, it signs in through it
+(`lib/utilities/site_domain.dart`), so Google's sign-in screen names
+brookestapletonphoto.com instead of brookie-babies.firebaseapp.com.
 
-- [ ] **Buy the domain.** On 2026-10-24 `brookestapletonphotography.com` was
-      not registered by anyone. Buy it from any registrar (Firebase doesn't
-      sell domains), turn on auto-renew, and keep its DNS at the registrar.
-- [ ] **Let sign-in work there.** Harmless before the domain is connected,
-      but do it after buying it:
-  - Firebase console → Authentication → Settings → **Authorized domains** →
-    Add domain → `brookestapletonphotography.com`. Without it, sign-in on the
-    new domain fails, and with it booking and downloads.
-  - Google Cloud console, project `brookie-babies` → Google Auth Platform →
-    **Branding** (older console: APIs & Services → OAuth consent screen) →
-    Authorized domains → add `brookestapletonphotography.com` → Save. Google
-    may not save the redirect URI below until the domain is listed here.
-    It needs no verification.
-  - Same console → Google Auth Platform → **Clients** (older console: APIs &
-    Services → Credentials) → "Web client (auto created by Google Service)" →
-    Authorized redirect URIs → add
-    `https://brookestapletonphotography.com/__/auth/handler`, exactly. Keep
-    the firebaseapp.com one. Without it, Google refuses sign-in on the new
-    domain with `redirect_uri_mismatch`.
-- [ ] **Connect it:** Firebase console → Hosting → **Add custom domain** →
-      `brookestapletonphotography.com`, leave the redirect box unticked →
-      **Quick setup**. At the registrar, add the records it shows (an A record
-      for `@`, and a TXT record if it asks you to verify ownership; keep that
-      TXT record), and delete any parking-page A, AAAA or CNAME records for
-      `@`. Then add `www.brookestapletonphotography.com` the same way, ticking
-      the box to redirect it to `brookestapletonphotography.com`. Wait until
-      both show **Connected**: the certificate can take up to 24 hours.
-- [ ] **Check it** in a private window at https://brookestapletonphotography.com:
+- [x] **Buy the domain.** Registered 2026-10-24 at Squarespace Domains, which
+      also hosts its DNS.
+- [x] **Firebase Auth:** `brookestapletonphoto.com` added to Authentication →
+      Settings → Authorized domains (2026-10-24).
+- [x] **Google sign-in redirect URI:**
+      `https://brookestapletonphoto.com/__/auth/handler` requested for the
+      Google sign-in OAuth client on 2026-10-24, through the Firebase
+      Management API (`firebase:provisionFirebaseApp` with
+      `googleSigninProviderConfig.oauthRedirectUris`, what
+      `firebase deploy --only auth` sends). Check: Google Cloud console →
+      Google Auth Platform → Clients → "Web client (auto created by Google
+      Service)" lists it under Authorized redirect URIs. If it's missing, add
+      it there, after adding `brookestapletonphoto.com` under Google Auth
+      Platform → **Branding** → Authorized domains (Google may not save the URI
+      without it). Without the URI, Google refuses sign-in on the new domain
+      with `redirect_uri_mismatch`.
+- [x] **Firebase Hosting:** `brookestapletonphoto.com` and
+      `www.brookestapletonphoto.com` (which redirects to it) added to the
+      `brookie-babies` site on 2026-10-24.
+- [ ] **DNS at Squarespace** (Domains → brookestapletonphoto.com → DNS):
+  - Delete the Squarespace Defaults: the four A records for `@`
+    (198.185.159.144, 198.185.159.145, 198.49.23.144, 198.49.23.145) and the
+    CNAME `www` → `ext-sq.squarespace.com`.
+  - Add: A, host `@`, `199.36.158.100`.
+  - Add: TXT, host `@`, `hosting-site=brookie-babies`. Keep it for good.
+  - Add: CNAME, host `www`, `brookie-babies.web.app`.
+  - Leave the TXT `v=spf1 -all` (it says the domain sends no email).
+- [ ] **Wait for Connected:** Firebase console → Hosting shows both domains as
+      **Connected** once DNS has spread and the certificate is made (up to 24
+      hours).
+- [ ] **Check it** in a private window at https://brookestapletonphoto.com:
       the site loads; **Sign in** shows Google's chooser naming
-      brookestapletonphotography.com; **Your sessions** lists your sessions;
-      **Download all photos** works; and
-      https://www.brookestapletonphotography.com ends up at the same address.
-      Everyone signs in once more on the new domain (sign-in is kept per
-      address); admin rights carry over.
+      brookestapletonphoto.com; **Your sessions** lists your sessions;
+      **Download all photos** works; and https://www.brookestapletonphoto.com
+      ends up at the same address. Everyone signs in once more on the new
+      domain (sign-in is kept per address); admin rights carry over.
 - [ ] **Go live** (a code change; don't merge it before the check passes, or
       every visitor is sent to an address that doesn't work yet):
   - `web/index.html`: point `og:url` and `og:image` at the new domain, and add
-    `<link rel="canonical" href="https://brookestapletonphotography.com/">`.
+    `<link rel="canonical" href="https://brookestapletonphoto.com/">`.
   - Send visitors of `brookie-babies.web.app` and
     `brookie-babies.firebaseapp.com` on to the new domain, keeping the path and
     the `#` route (an inline script in `web/index.html`; Hosting redirects
@@ -275,15 +275,15 @@ brookie-babies.firebaseapp.com. The download is already named
     `lib/main.dart` and `lib/pages/admin_page.dart`, and the `production`
     environment URL in `.github/workflows/ci.yml`.
 - [ ] **Stripe**, once the check passes: set the three Payment Links' **After
-      payment** redirect to `https://brookestapletonphotography.com` (section
-      4). In Settings → Business → Public details, set the website to it, and
-      check the statement descriptor (for example `BROOKE STAPLETON PHOTO`,
-      the 22-character limit) and the business name (Business details), which
+      payment** redirect to `https://brookestapletonphoto.com` (section 4). In
+      Settings → Business → Public details, set the website to it, and check
+      the statement descriptor (for example `BROOKE STAPLETON PHOTO`, the
+      22-character limit) and the business name (Business details), which
       Checkout shows.
 - [ ] **Optional:**
   - Google Search Console: add a Domain property for
-    `brookestapletonphotography.com` (verified with a DNS TXT record), so
-    Google lists the new address.
+    `brookestapletonphoto.com` (verified with a DNS TXT record), so Google
+    lists the new address.
   - To show "Brooke Stapleton Photography" and the logo on Google's sign-in
     screen, not just the domain: Google Auth Platform → Branding (app name,
     support email, logo, home page, a privacy policy page on the domain) →

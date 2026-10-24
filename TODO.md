@@ -220,61 +220,66 @@ supply. Each lives in one place in the code.
 ## 7. Custom domain: brookestapletonphoto.com
 
 Families should see https://brookestapletonphoto.com instead of
-brookie-babies.web.app. The site keeps working on web.app the whole time.
-The app is ready: served from the new domain, it signs in through it
-(`lib/utilities/site_domain.dart`), so Google's sign-in screen names
-brookestapletonphoto.com instead of brookie-babies.firebaseapp.com.
+brookie-babies.web.app. The site keeps working on web.app the whole time. It
+goes out in two merges, so the new sign-in is tested on the real domain
+before anyone is sent there: first the app that signs in through the new
+domain when served from it (`lib/utilities/site_domain.dart`, so Google's
+sign-in screen names brookestapletonphoto.com instead of
+brookie-babies.firebaseapp.com), then the redirect from the old addresses.
 
 - [x] **Buy the domain.** Registered 2026-10-24 at Squarespace Domains, which
       also hosts its DNS.
 - [x] **Firebase Auth:** `brookestapletonphoto.com` added to Authentication →
       Settings → Authorized domains (2026-10-24).
-- [x] **Google sign-in redirect URI:**
-      `https://brookestapletonphoto.com/__/auth/handler` requested for the
-      Google sign-in OAuth client on 2026-10-24, through the Firebase
-      Management API (`firebase:provisionFirebaseApp` with
-      `googleSigninProviderConfig.oauthRedirectUris`, what
-      `firebase deploy --only auth` sends). Check: Google Cloud console →
-      Google Auth Platform → Clients → "Web client (auto created by Google
-      Service)" lists it under Authorized redirect URIs. If it's missing, add
-      it there, after adding `brookestapletonphoto.com` under Google Auth
-      Platform → **Branding** → Authorized domains (Google may not save the URI
-      without it). Without the URI, Google refuses sign-in on the new domain
-      with `redirect_uri_mismatch`.
 - [x] **Firebase Hosting:** `brookestapletonphoto.com` and
       `www.brookestapletonphoto.com` (which redirects to it) added to the
-      `brookie-babies` site on 2026-10-24.
-- [ ] **DNS at Squarespace** (Domains → brookestapletonphoto.com → DNS):
-  - Delete the Squarespace Defaults: the four A records for `@`
-    (198.185.159.144, 198.185.159.145, 198.49.23.144, 198.49.23.145) and the
-    CNAME `www` → `ext-sq.squarespace.com`.
-  - Add: A, host `@`, `199.36.158.100`.
-  - Add: TXT, host `@`, `hosting-site=brookie-babies`. Keep it for good.
-  - Add: CNAME, host `www`, `brookie-babies.web.app`.
-  - Leave the TXT `v=spf1 -all` (it says the domain sends no email).
+      `brookie-babies` site (2026-10-24).
+- [x] **DNS at Squarespace** (Domains → brookestapletonphoto.com → DNS), set
+      2026-10-24: the Squarespace Defaults deleted; A `@` `199.36.158.100`;
+      TXT `@` `hosting-site=brookie-babies` (keep it for good); CNAME `www`
+      `brookie-babies.web.app`.
+- [ ] **Google sign-in redirect URI**
+      `https://brookestapletonphoto.com/__/auth/handler`. Requested on
+      2026-10-24 through the Firebase Management API
+      (`firebase:provisionFirebaseApp` with
+      `googleSigninProviderConfig.oauthRedirectUris`, what
+      `firebase deploy --only auth` sends); done once Google accepts it.
+      Check: open
+      `https://accounts.google.com/o/oauth2/v2/auth?client_id=<web client id>&redirect_uri=https%3A%2F%2Fbrookestapletonphoto.com%2F__%2Fauth%2Fhandler&response_type=code&scope=openid`
+      (the client ID is in Authentication → Sign-in method → Google → Web SDK
+      configuration): Google's account chooser means it's accepted;
+      "redirect_uri_mismatch" means not yet. If it still isn't after a few
+      hours, add it by hand: Google Cloud console → Google Auth Platform →
+      **Branding** → Authorized domains → add `brookestapletonphoto.com` →
+      Save; then **Clients** → "Web client (auto created by Google Service)" →
+      Authorized redirect URIs → add the URI → Save.
 - [ ] **Wait for Connected:** Firebase console → Hosting shows both domains as
-      **Connected** once DNS has spread and the certificate is made (up to 24
-      hours).
-- [ ] **Check it** in a private window at https://brookestapletonphoto.com:
-      the site loads; **Sign in** shows Google's chooser naming
-      brookestapletonphoto.com; **Your sessions** lists your sessions;
-      **Download all photos** works; and https://www.brookestapletonphoto.com
-      ends up at the same address. Everyone signs in once more on the new
-      domain (sign-in is kept per address); admin rights carry over.
-- [ ] **Go live** (a code change; don't merge it before the check passes, or
-      every visitor is sent to an address that doesn't work yet):
-  - `web/index.html`: point `og:url` and `og:image` at the new domain, and add
-    `<link rel="canonical" href="https://brookestapletonphoto.com/">`.
-  - Send visitors of `brookie-babies.web.app` and
-    `brookie-babies.firebaseapp.com` on to the new domain, keeping the path and
-    the `#` route (an inline script in `web/index.html`; Hosting redirects
-    can't tell the hosts apart). Match those two hosts exactly, so preview
-    channels (`brookie-babies--pr…web.app`) keep working.
-  - `AdminSessionPage.familyLink`: fall back to `siteDomain`.
-  - The live URL in README, this file, AGENT.md, the comments in
-    `lib/main.dart` and `lib/pages/admin_page.dart`, and the `production`
-    environment URL in `.github/workflows/ci.yml`.
-- [ ] **Stripe**, once the check passes: set the three Payment Links' **After
+      **Connected** once the certificate is made (up to 24 hours after DNS).
+- [ ] **First merge: this branch** (`feat/design-system`): the home screen
+      label, the download's file name, and signing in through the new domain
+      when served from it. Safe any time: nothing changes on web.app.
+- [ ] **Check it**, after the three items above, in a private window at
+      https://brookestapletonphoto.com: the site loads; **Sign in** shows
+      Google's chooser naming brookestapletonphoto.com and signs you in (the
+      first real use of the redirect URI; "redirect_uri_mismatch" means that
+      item isn't done, and web.app is unaffected); **Your sessions** lists
+      your sessions; **Download all photos** works; and
+      https://www.brookestapletonphoto.com ends up at the same address.
+      Everyone signs in once more on the new domain (sign-in is kept per
+      address); admin rights carry over.
+- [ ] **Second merge: go live.** Only after the check passes, or every
+      visitor is sent to an address where sign-in doesn't work. A change
+      already prepared: `web/index.html` sends visitors of
+      `brookie-babies.web.app` and `brookie-babies.firebaseapp.com` on to the
+      new domain, keeping the path and the `#` route (Hosting redirects can't
+      tell the hosts apart, so it's an inline script; preview channels and
+      localhost stay put); link previews and a canonical link name the new
+      domain, and so do the docs and CI's `production` URL. After it, anyone
+      who added the site to a home screen from web.app (Brooke's phone in
+      particular) deletes that icon and adds it again from
+      https://brookestapletonphoto.com: the old one would open the site in a
+      browser frame on every launch.
+- [ ] **Stripe**, once it's live: set the three Payment Links' **After
       payment** redirect to `https://brookestapletonphoto.com` (section 4). In
       Settings → Business → Public details, set the website to it, and check
       the statement descriptor (for example `BROOKE STAPLETON PHOTO`, the

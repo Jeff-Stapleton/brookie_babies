@@ -238,23 +238,19 @@ brookie-babies.firebaseapp.com), then the redirect from the old addresses.
       2026-10-24: the Squarespace Defaults deleted; A `@` `199.36.158.100`;
       TXT `@` `hosting-site=brookie-babies` (keep it for good); CNAME `www`
       `brookie-babies.web.app`.
-- [ ] **Google sign-in redirect URI**
-      `https://brookestapletonphoto.com/__/auth/handler`. Requested on
-      2026-10-24 through the Firebase Management API
-      (`firebase:provisionFirebaseApp` with
-      `googleSigninProviderConfig.oauthRedirectUris`, what
-      `firebase deploy --only auth` sends); done once Google accepts it.
-      Check: open
+- [x] **Google sign-in redirect URI**
+      `https://brookestapletonphoto.com/__/auth/handler`, accepted by Google
+      on 2026-10-25. Added in Google Cloud console (Google Auth Platform →
+      Branding → Authorized domains: `brookestapletonphoto.com`; then Clients
+      → "Web client (auto created by Google Service)" → Authorized redirect
+      URIs); the Firebase Management API request for it
+      (`firebase:provisionFirebaseApp`) never finished. To check it: open
       `https://accounts.google.com/o/oauth2/v2/auth?client_id=<web client id>&redirect_uri=https%3A%2F%2Fbrookestapletonphoto.com%2F__%2Fauth%2Fhandler&response_type=code&scope=openid`
       (the client ID is in Authentication → Sign-in method → Google → Web SDK
       configuration): Google's account chooser means it's accepted;
-      "redirect_uri_mismatch" means not yet. If it still isn't after a few
-      hours, add it by hand: Google Cloud console → Google Auth Platform →
-      **Branding** → Authorized domains → add `brookestapletonphoto.com` →
-      Save; then **Clients** → "Web client (auto created by Google Service)" →
-      Authorized redirect URIs → add the URI → Save.
-- [ ] **Wait for Connected:** Firebase console → Hosting shows both domains as
-      **Connected** once the certificate is made (up to 24 hours after DNS).
+      "redirect_uri_mismatch" means it isn't.
+- [x] **Connected:** https://brookestapletonphoto.com serves the site over
+      HTTPS, and www redirects to it (2026-10-25).
 - [ ] **First merge: this branch** (`feat/design-system`): the home screen
       label, the download's file name, and signing in through the new domain
       when served from it. Safe any time: nothing changes on web.app.

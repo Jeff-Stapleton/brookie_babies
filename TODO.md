@@ -1,6 +1,6 @@
 # TODO
 
-Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-21 (function build permissions).
+Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-24 (custom domain).
 
 ## 1. Ship the admin portal
 
@@ -126,12 +126,13 @@ Functions → getGalleryDownloadUrl → Logs.
 ## 4. Settings now that sign-in is live
 
 - [ ] **Stripe:** for each of the three Payment Links, set **After payment**
-      to redirect to `https://brookie-babies.web.app`. Checkout now opens in
-      the same tab, so without a redirect customers have no way back to the
-      site.
+      to redirect to `https://brookie-babies.web.app` (to
+      `https://brookestapletonphoto.com` once it's connected; see
+      section 7). Checkout now opens in the same tab, so without a redirect
+      customers have no way back to the site.
 - [ ] **Firebase console → Authentication → Sign-in method → Google:** set
-      the public-facing project name and support email. Both appear on
-      Google's sign-in screen.
+      the public-facing project name to "Brooke Stapleton Photography" and
+      the support email.
 
 ## 5. Next development
 
@@ -215,5 +216,76 @@ supply. Each lives in one place in the code.
 - [ ] **Stripe Checkout branding:** in the Stripe Dashboard, set the accent
       color to ink `#1C1B19`, the background to paper `#F6F6F3`, and the logo
       as the icon, so the payment page matches the site.
-- [ ] **Custom domain:** link previews point at https://brookie-babies.web.app/;
-      update `web/index.html` if the site moves to its own domain.
+
+## 7. Custom domain: brookestapletonphoto.com
+
+Families should see https://brookestapletonphoto.com instead of
+brookie-babies.web.app. The site keeps working on web.app the whole time. It
+goes out in two merges, so the new sign-in is tested on the real domain
+before anyone is sent there: first the app that signs in through the new
+domain when served from it (`lib/utilities/site_domain.dart`, so Google's
+sign-in screen names brookestapletonphoto.com instead of
+brookie-babies.firebaseapp.com), then the redirect from the old addresses.
+
+- [x] **Buy the domain.** Registered 2026-10-24 at Squarespace Domains, which
+      also hosts its DNS.
+- [x] **Firebase Auth:** `brookestapletonphoto.com` added to Authentication →
+      Settings → Authorized domains (2026-10-24).
+- [x] **Firebase Hosting:** `brookestapletonphoto.com` and
+      `www.brookestapletonphoto.com` (which redirects to it) added to the
+      `brookie-babies` site (2026-10-24).
+- [x] **DNS at Squarespace** (Domains → brookestapletonphoto.com → DNS), set
+      2026-10-24: the Squarespace Defaults deleted; A `@` `199.36.158.100`;
+      TXT `@` `hosting-site=brookie-babies` (keep it for good); CNAME `www`
+      `brookie-babies.web.app`.
+- [x] **Google sign-in redirect URI**
+      `https://brookestapletonphoto.com/__/auth/handler`, accepted by Google
+      on 2026-10-25. Added in Google Cloud console (Google Auth Platform →
+      Branding → Authorized domains: `brookestapletonphoto.com`; then Clients
+      → "Web client (auto created by Google Service)" → Authorized redirect
+      URIs); the Firebase Management API request for it
+      (`firebase:provisionFirebaseApp`) never finished. To check it: open
+      `https://accounts.google.com/o/oauth2/v2/auth?client_id=<web client id>&redirect_uri=https%3A%2F%2Fbrookestapletonphoto.com%2F__%2Fauth%2Fhandler&response_type=code&scope=openid`
+      (the client ID is in Authentication → Sign-in method → Google → Web SDK
+      configuration): Google's account chooser means it's accepted;
+      "redirect_uri_mismatch" means it isn't.
+- [x] **Connected:** https://brookestapletonphoto.com serves the site over
+      HTTPS, and www redirects to it (2026-10-25).
+- [ ] **First merge: this branch** (`feat/design-system`): the home screen
+      label, the download's file name, and signing in through the new domain
+      when served from it. Safe any time: nothing changes on web.app.
+- [ ] **Check it**, after the three items above, in a private window at
+      https://brookestapletonphoto.com: the site loads; **Sign in** shows
+      Google's chooser naming brookestapletonphoto.com and signs you in (the
+      first real use of the redirect URI; "redirect_uri_mismatch" means that
+      item isn't done, and web.app is unaffected); **Your sessions** lists
+      your sessions; **Download all photos** works; and
+      https://www.brookestapletonphoto.com ends up at the same address.
+      Everyone signs in once more on the new domain (sign-in is kept per
+      address); admin rights carry over.
+- [ ] **Second merge: go live.** Only after the check passes, or every
+      visitor is sent to an address where sign-in doesn't work. A change
+      already prepared: `web/index.html` sends visitors of
+      `brookie-babies.web.app` and `brookie-babies.firebaseapp.com` on to the
+      new domain, keeping the path and the `#` route (Hosting redirects can't
+      tell the hosts apart, so it's an inline script; preview channels and
+      localhost stay put); link previews and a canonical link name the new
+      domain, and so do the docs and CI's `production` URL. After it, anyone
+      who added the site to a home screen from web.app (Brooke's phone in
+      particular) deletes that icon and adds it again from
+      https://brookestapletonphoto.com: the old one would open the site in a
+      browser frame on every launch.
+- [ ] **Stripe**, once it's live: set the three Payment Links' **After
+      payment** redirect to `https://brookestapletonphoto.com` (section 4). In
+      Settings → Business → Public details, set the website to it, and check
+      the statement descriptor (for example `BROOKE STAPLETON PHOTO`, the
+      22-character limit) and the business name (Business details), which
+      Checkout shows.
+- [ ] **Optional:**
+  - Google Search Console: add a Domain property for
+    `brookestapletonphoto.com` (verified with a DNS TXT record), so Google
+    lists the new address.
+  - To show "Brooke Stapleton Photography" and the logo on Google's sign-in
+    screen, not just the domain: Google Auth Platform → Branding (app name,
+    support email, logo, home page, a privacy policy page on the domain) →
+    Verify branding → Publish. Google shows the name only once it's verified.

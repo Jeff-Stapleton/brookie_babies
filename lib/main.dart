@@ -14,6 +14,7 @@ import 'package:brookie_babies/services/portfolio_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/embedded_browser.dart';
 import 'package:brookie_babies/utilities/leave_warning.dart';
+import 'package:brookie_babies/utilities/site_domain.dart';
 import 'package:brookie_babies/utilities/web_photo_picker.dart' as web_photo_picker;
 import 'package:brookie_babies/widgets/focus_ring.dart';
 
@@ -38,7 +39,7 @@ Map<String, Widget Function(BuildContext)> routes = {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+    options: withSiteAuthDomain(DefaultFirebaseOptions.currentPlatform, Uri.base),
   );
   _warnBeforeLeaving();
   final admin = FirebaseAdminService(FirebaseFirestore.instance, FirebaseStorage.instance, FirebaseAuth.instance);

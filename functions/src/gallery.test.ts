@@ -655,7 +655,7 @@ describe("getGalleryDownload: signed URL", {timeout: 10_000}, () => {
         version: "v4",
         action: "read",
         expires,
-        responseDisposition: 'attachment; filename="brookie-babies-photos-2026-09-01.zip"',
+        responseDisposition: 'attachment; filename="brooke-stapleton-photography-2026-09-01.zip"',
       },
     ]);
     assert.deepEqual(result, {
@@ -673,16 +673,16 @@ describe("getGalleryDownload: signed URL", {timeout: 10_000}, () => {
 
     assert.equal(
       bucket.signedUrlConfigs[0].responseDisposition,
-      'attachment; filename="brookie-babies-photos-b1.zip"',
+      'attachment; filename="brooke-stapleton-photography-b1.zip"',
     );
   });
 
   test("zipFileName keeps the header safe", () => {
-    assert.equal(zipFileName("2026-09-01", "b1"), "brookie-babies-photos-2026-09-01.zip");
-    assert.equal(zipFileName('2026/09/01"; x=y', "b1"), "brookie-babies-photos-2026-09-01-x-y.zip");
-    assert.equal(zipFileName("\r\n", "b1"), "brookie-babies-photos-b1.zip");
-    assert.equal(zipFileName('"""', "b1"), "brookie-babies-photos-b1.zip");
-    assert.equal(zipFileName(20260901, "b1"), "brookie-babies-photos-b1.zip");
+    assert.equal(zipFileName("2026-09-01", "b1"), "brooke-stapleton-photography-2026-09-01.zip");
+    assert.equal(zipFileName('2026/09/01"; x=y', "b1"), "brooke-stapleton-photography-2026-09-01-x-y.zip");
+    assert.equal(zipFileName("\r\n", "b1"), "brooke-stapleton-photography-b1.zip");
+    assert.equal(zipFileName('"""', "b1"), "brooke-stapleton-photography-b1.zip");
+    assert.equal(zipFileName(20260901, "b1"), "brooke-stapleton-photography-b1.zip");
   });
 });
 

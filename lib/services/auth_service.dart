@@ -57,9 +57,11 @@ class FirebaseAuthService implements AuthService {
   @override
   AppUser? get currentUser => _toAppUser(_auth.currentUser);
 
-  // Popup rather than redirect: the site (web.app) and the auth domain
+  // Popup rather than redirect: on web.app the site and the auth domain
   // (firebaseapp.com) differ, which breaks redirect sign-in in current
-  // browsers, and a redirect would reload the app and lose the chosen session.
+  // browsers (only the studio's own domain signs in through itself; see
+  // withSiteAuthDomain), and a redirect would reload the app and lose the
+  // chosen session.
   @override
   Future<AppUser?> signInWithGoogle() async {
     final provider = GoogleAuthProvider()

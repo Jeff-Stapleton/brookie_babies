@@ -19,9 +19,11 @@ Booking _booking(String id, {
   String? location,
   String status = 'paid',
   bool photosReady = true,
-  String packageName = 'Premium',
+  String? packageName = 'Premium',
+  String? name,
 }) {
   return Booking.fromMap(id, {
+    'name': name,
     'packageName': packageName,
     'date': date,
     'time': time,
@@ -84,6 +86,7 @@ void main() {
     _booking('b1', time: '14:30', location: 'Liberty Park'),
     _booking('b2', date: '1999-01-01', time: '09:00'),
     _booking('b3', date: '1998-01-01', photosReady: false),
+    _booking('a1', date: '1997-01-01', status: 'adhoc', packageName: null, name: 'Church Family - Fall 2026'),
   ], 1);
 
   for (final width in [320.0, 360.0]) {
@@ -124,6 +127,7 @@ void main() {
           find.descendant(of: find.byType(SingleChildScrollView), matching: find.text('Your sessions'));
       expect(_breaksAWord(tester, headline), isFalse);
       expect(_breaksAWord(tester, find.text('Premium session').first), isFalse);
+      expect(_breaksAWord(tester, find.text('Church Family - Fall 2026')), isFalse);
       expect(_breaksAWord(tester, find.text('Upcoming')), isFalse);
     });
 

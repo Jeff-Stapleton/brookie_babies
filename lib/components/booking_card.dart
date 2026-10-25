@@ -9,10 +9,10 @@ import 'package:brookie_babies/widgets/detail_line.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:flutter/material.dart';
 
-/// One session on the "Your sessions" page: package, payment status, date,
-/// time and place, and for sessions whose photos can be delivered (paid or
-/// ad hoc), the photo download (or, once past, a note that the photos are
-/// being edited).
+/// One session on the "Your sessions" page: its title (an ad hoc session's
+/// name, with its package below), payment status, date, time and place, and
+/// for sessions whose photos can be delivered (paid or ad hoc), the photo
+/// download (or, once past, a note that the photos are being edited).
 class BookingCard extends StatelessWidget {
   const BookingCard({super.key, required this.booking, required this.isPast, this.primaryDownload = true});
 
@@ -28,6 +28,7 @@ class BookingCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final time = booking.time;
     final location = booking.location;
+    final title = booking.familyTitle;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(BrookieSpace.s5),
@@ -45,12 +46,17 @@ class BookingCard extends StatelessWidget {
                 spacing: BrookieSpace.s3,
                 runSpacing: BrookieSpace.s2,
                 children: [
-                  Text(booking.title, style: Theme.of(context).textTheme.titleLarge),
+                  Text(title, style: Theme.of(context).textTheme.titleLarge),
                   // Nothing was bought, so there's no payment to report.
                   if (!booking.isAdHoc) BookingStatusTag(status: booking.status),
                 ],
               ),
             ),
+            // Under an ad hoc session's name, its package, as on its admin card.
+            if (title != booking.title) ...[
+              const SizedBox(height: BrookieSpace.s1),
+              Text(booking.title, style: TextStyle(color: BrookieColors.of(context).inkSoft)),
+            ],
             const SizedBox(height: BrookieSpace.s3),
             DetailLine(icon: Icons.event_outlined, text: formatDayShort(booking.date, now: DateTime.now())),
             // The start time only: a booking doesn't record how long it runs.

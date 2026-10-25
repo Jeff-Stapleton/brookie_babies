@@ -56,7 +56,8 @@ lib/
   models/
     app_user.dart         AppUser: the signed-in customer (uid, email, name)
     booking.dart          Booking: one session (paid booking or ad hoc), parsed from a Firestore `bookings`
-                          document; title, isAdHoc, canDeliverPhotos; problemWith() says why one can't be read
+                          document; title, familyTitle, isAdHoc, canDeliverPhotos; problemWith() says why one
+                          can't be read
     picked_photo.dart     PickedPhoto: a file chosen in the browser's picker (name, size, type, the File itself)
     session_details.dart  SessionDetails: what the session form saves for an ad hoc session
     session_lookup.dart   SessionLookup (SessionFound / SessionMissing / SessionUnreadable) and UnreadableBooking
@@ -103,7 +104,8 @@ lib/
     account_button.dart   "Sign in" chip, or the butter avatar with the account menu ("Your sessions", "Admin"
                           for admins, "Sign out"; MenuAnchor: arrow keys, Escape); signOutWithWarning()
     sign_in_dialog.dart   showSignInDialog(): Google sign-in, or open-in-browser help in in-app browsers
-    booking_card.dart     One session on "Your sessions"; paid and ad hoc sessions with photos ready get
+    booking_card.dart     One session on "Your sessions", titled by familyTitle (an ad hoc session's name, as
+                          on the admin pages); paid and ad hoc sessions with photos ready get
                           "Download all photos"
     page_footer.dart      Logo and copyright
     admin_gate.dart       AdminGate: an admin page's body for admins only; otherwise sign in, not an admin,
@@ -210,7 +212,9 @@ scripts/
    `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <lowercased email>)`
    (ad hoc sessions shared with them; that query failing counts as none). With
    none, the empty state names the email they're signed in as, for a guest on
-   the wrong Google account. A paid or ad hoc session with
+   the wrong Google account. A paid booking's card is titled by its package
+   ("Premium session"); an ad hoc session's by the name the admin gave it, the
+   one the admin pages show, with its package below. A paid or ad hoc session with
    `photosReady: true` has "Download all photos" (past ones without it
    say the photos are being edited; ad hoc ones have no payment tag): `getGalleryDownloadUrl`
    checks the booking belongs to the caller (its uid, or an ad hoc session's

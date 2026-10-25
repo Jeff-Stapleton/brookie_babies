@@ -17,6 +17,7 @@ import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/photo_rules.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/leave_warning.dart';
+import 'package:brookie_babies/utilities/site_domain.dart';
 import 'package:brookie_babies/utilities/upload_queue.dart';
 import 'package:brookie_babies/utilities/utils.dart';
 import 'package:brookie_babies/widgets/booking_status_tag.dart';
@@ -44,7 +45,7 @@ class AdminSessionPage extends StatefulWidget {
   /// live site when it isn't running on the web).
   static Uri get familyLink {
     final base = Uri.base;
-    final origin = base.isScheme('http') || base.isScheme('https') ? base.origin : 'https://brookie-babies.web.app';
+    final origin = base.isScheme('http') || base.isScheme('https') ? base.origin : 'https://$siteDomain';
     return Uri.parse('$origin/#/profile');
   }
 

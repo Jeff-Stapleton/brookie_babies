@@ -226,7 +226,7 @@ void main() {
       await _pumpSession(tester);
 
       // Tests don't run on http(s), so the link is the live site's.
-      const message = 'Your photos from Brooke are ready. Open https://brookie-babies.web.app/#/profile and sign in '
+      const message = 'Your photos from Brooke are ready. Open https://brookestapletonphoto.com/#/profile and sign in '
           'with Google as harper@example.com to download them.';
       expect(find.widgetWithText(SelectableText, message), findsOneWidget);
       expect(find.text('Send it once the photos are available.'), findsOneWidget);
@@ -241,7 +241,7 @@ void main() {
       await _pumpSession(tester, admin: _service(ready: true), id: 'paid');
 
       expect(
-        find.text('Your photos from Brooke are ready. Open https://brookie-babies.web.app/#/profile and sign in '
+        find.text('Your photos from Brooke are ready. Open https://brookestapletonphoto.com/#/profile and sign in '
             'with the Google account you booked with to download them.'),
         findsOneWidget,
       );

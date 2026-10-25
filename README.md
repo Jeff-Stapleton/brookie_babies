@@ -102,11 +102,13 @@ Storage bucket has files under `_admin/gallery` and CORS is configured (see belo
   ```
 - **Using a different Firebase project**: run `flutterfire configure` to
   regenerate `lib/firebase_options.dart`, and update `.firebaserc`.
-- **Custom domain**: the site is moving to https://brookestapletonphoto.com.
-  Connecting it is console and DNS work, listed in order in
-  [TODO.md](TODO.md) ("Custom domain"). Served from that domain, the app signs
-  in through it (`lib/utilities/site_domain.dart`), so Google's sign-in screen
-  shows it instead of brookie-babies.firebaseapp.com.
+- **Custom domain**: the site lives at https://brookestapletonphoto.com
+  (DNS at Squarespace; the setup is in [TODO.md](TODO.md), "Custom domain").
+  `web/index.html` sends visitors of brookie-babies.web.app and
+  brookie-babies.firebaseapp.com there, keeping the `#` route; preview
+  channels and localhost aren't redirected. Served from that domain, the app
+  signs in through it (`lib/utilities/site_domain.dart`), so Google's sign-in
+  screen shows it instead of brookie-babies.firebaseapp.com.
 
 ## Project structure
 
@@ -148,7 +150,7 @@ See [AGENT.md](AGENT.md) for an architectural walkthrough, conventions and known
 
 ## Admin portal
 
-Brooke's tools live on the site itself, at https://brookie-babies.web.app/#/admin,
+Brooke's tools live on the site itself, at https://brookestapletonphoto.com/#/admin,
 or **Admin** in the account menu (shown only to admins). Admins can:
 
 - see every session, paid bookings and ad hoc ones, upcoming and past, with
@@ -303,7 +305,7 @@ private key. It deploys `build/web` to Firebase Hosting:
   checked but not deployed.
 - On push to `main` (or a manual run on `main`): first the Cloud Functions and
   Firestore/Storage rules (see [Automatic backend deploys](#automatic-backend-deploys)),
-  then the live site, https://brookie-babies.web.app. Both jobs use the
+  then the live site, https://brookestapletonphoto.com. Both jobs use the
   `production` environment, which `scripts/setup-github-production.sh`
   restricts to `main`.
 

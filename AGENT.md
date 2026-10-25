@@ -149,7 +149,8 @@ lib/
 assets/logo.png           The logo, used exactly as supplied
 assets/fonts/             Jost and Newsreader TTFs (SIL OFL, licenses alongside)
 assets/google/            Google's G mark for the sign-in button, rendered from Google's official assets
-web/                      index.html (title, meta, link previews, paper loading screen), manifest, icons
+web/                      index.html (title, meta, link previews, paper loading screen, the redirect from
+                          Firebase's default addresses to siteDomain), manifest, icons
                           (favicon, app icons and og-image are made from assets/logo.png)
 test/                     Widget and unit tests; mirrors lib/
   support/fakes.dart      Fake auth, booking, gallery, portfolio, admin and URL services, FakePhotoPicker,
@@ -350,7 +351,9 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   custom domain needs it in Auth's authorized domains and in the Google Auth
   Platform's (Branding), and
   `https://brookestapletonphoto.com/__/auth/handler` in the OAuth web
-  client's redirect URIs (TODO.md, "Custom domain").
+  client's redirect URIs (TODO.md, "Custom domain"). `web/index.html` names
+  the same domain in its redirect, canonical link and link previews; change
+  them together.
 - The same goes for `AppServices.of(context).pickPhotos(accept: ...)`: call it
   first in the tap handler, or the browser won't open the file picker. Never
   wait on its Future with the page blocked: browsers without the input's

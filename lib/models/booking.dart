@@ -46,7 +46,9 @@ class Booking {
   /// photos; on paid bookings, the email noted when it was entered.
   final String? email;
 
-  /// Who an ad hoc session is for: "The Harper family".
+  /// An ad hoc session's name, "The Harper family", which the admin pages
+  /// and the family both see as its title. On a paid booking, who it's for,
+  /// shown on the Admin page only.
   final String? name;
 
   static final _datePattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
@@ -54,6 +56,11 @@ class Booking {
 
   /// "Premium session", or "Photo session" when there is no package.
   String get title => packageName == null ? 'Photo session' : '$packageName session';
+
+  /// What "Your sessions" calls it: an ad hoc session's [name], as the
+  /// admin pages do, else [title]. A paid booking's name was typed in for
+  /// the Admin page, so the family sees its package.
+  String get familyTitle => (isAdHoc ? name : null) ?? title;
 
   bool get isAdHoc => status == BookingStatus.adhoc;
 

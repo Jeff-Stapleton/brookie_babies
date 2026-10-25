@@ -238,7 +238,7 @@ The first download builds a zip of the whole folder, which can take a few minute
 
 An ad hoc session is for family, friends and anyone not booked on the site: no payment, and no `uid`. It's a `bookings` document with `status` `adhoc`, shared by email: whoever signs in to the site with Google as that email, verified by Google, sees it under **Your sessions** (with no payment tag) and can download its photos once they're available.
 
-**Admin → Add a session**: a name (who it's for, such as "The Harper family"), the email they use to sign in to Google (exactly as their Google account shows it: Google sign-in accepts `janedoe@gmail.com` for `jane.doe@gmail.com`, but the site matches the account's own address, dots included; the form refuses addresses no Google sign-in could match, such as ones with angle brackets, `mailto:`, spaces or a Gmail `+tag`), a date, and optionally a package, time and location. **Add session** opens its page, ready for photos. **Edit details** changes them; changing the email of a session whose photos are available asks first, because it hands the photos to the new address. **Delete session** deletes the session and its photos for good. Only ad hoc sessions can be edited or deleted in the portal. A family signed in with a different Google account sees, under Your sessions, which account they're signed in as, so they can switch.
+**Admin → Add a session**: a name (who it's for, such as "The Harper family"; the family sees it as the session's title under Your sessions, as you do on the Admin page), the email they use to sign in to Google (exactly as their Google account shows it: Google sign-in accepts `janedoe@gmail.com` for `jane.doe@gmail.com`, but the site matches the account's own address, dots included; the form refuses addresses no Google sign-in could match, such as ones with angle brackets, `mailto:`, spaces or a Gmail `+tag`), a date, and optionally a package, time and location. **Add session** opens its page, ready for photos. **Edit details** changes them; changing the email of a session whose photos are available asks first, because it hands the photos to the new address. **Delete session** deletes the session and its photos for good. Only ad hoc sessions can be edited or deleted in the portal. A family signed in with a different Google account sees, under Your sessions, which account they're signed in as, so they can switch.
 
 **Add ad hoc sessions in the portal, not in the Firebase console.** The portal writes exactly what the rules and the download function check. A session typed in the console with `status` other than exactly `adhoc`, or an email with a capital letter or a space, is shared with nobody.
 
@@ -249,7 +249,7 @@ The portal saves these fields:
 | Field | Type | Value |
 |---|---|---|
 | `status` | string | `adhoc`, exactly |
-| `name` | string | Who it's for, 1 to 100 characters |
+| `name` | string | Who it's for, 1 to 100 characters: the session's title for you and the family |
 | `email` | string | The guest's Google email, trimmed and lowercase |
 | `packageName` | string | Optional: `Basic`, `Premium` or `Ultimate` |
 | `date` | string | `YYYY-MM-DD` |

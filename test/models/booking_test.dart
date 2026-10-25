@@ -122,6 +122,14 @@ void main() {
       expect(booking.email, 'harper@example.com');
     });
 
+    test('the family sees the name the admin pages show', () {
+      expect(Booking.fromMap('a1', adHoc)!.familyTitle, 'The Harper family');
+      expect(Booking.fromMap('a1', {...adHoc, 'packageName': 'Ultimate'})!.familyTitle, 'The Harper family');
+      // Typed in the console without one: its package, as before.
+      expect(Booking.fromMap('a1', {...adHoc}..remove('name'))!.familyTitle, 'Photo session');
+      expect(Booking.fromMap('a1', {...adHoc, 'name': ' '})!.familyTitle, 'Photo session');
+    });
+
     test('may name a package', () {
       final booking = Booking.fromMap('a1', {...adHoc, 'packageName': 'Ultimate'})!;
 
@@ -138,6 +146,10 @@ void main() {
 
   test('title names the package', () {
     expect(Booking.fromMap('b1', valid)!.title, 'Premium session');
+  });
+
+  test('the family sees a paid booking by its package: its name is for the Admin page', () {
+    expect(Booking.fromMap('b1', {...valid, 'name': 'The Harper family'})!.familyTitle, 'Premium session');
   });
 
   test('photos can be delivered for paid and ad hoc sessions only', () {

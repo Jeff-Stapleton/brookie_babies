@@ -28,8 +28,10 @@ Booking _booking(String id, {
   String status = 'paid',
   bool photosReady = true,
   String? packageName = 'Premium',
+  String? name,
 }) {
   return Booking.fromMap(id, {
+    'name': name,
     'packageName': packageName,
     'date': date,
     'time': time,
@@ -40,8 +42,14 @@ Booking _booking(String id, {
 }
 
 /// A session the photographer added and shared with the family's email.
-Booking _adHoc(String id, {String date = _past, bool photosReady = true, String? packageName}) =>
-    _booking(id, date: date, status: 'adhoc', photosReady: photosReady, packageName: packageName);
+Booking _adHoc(
+  String id, {
+  String date = _past,
+  bool photosReady = true,
+  String? packageName,
+  String name = 'Church Family - Fall 2026',
+}) =>
+    _booking(id, date: date, status: 'adhoc', photosReady: photosReady, packageName: packageName, name: name);
 
 /// The [StatusTag] labelled [label].
 StatusTag _tag(WidgetTester tester, String label) =>
@@ -542,9 +550,13 @@ void main() {
   });
 
   group('a session the photographer added (ad hoc)', () {
-    testWidgets('with photos ready: titled "Photo session", no payment tag, and the download', (tester) async {
+    testWidgets('with photos ready: titled by its name, no payment tag, and the download', (tester) async {
       await pumpProfile(tester, bookings: FakeBookingService([_adHoc('a1')]));
 
+      // The name the admin pages show, with the package line below, as on
+      // its admin card.
+      final title = tester.widget<Text>(find.text('Church Family - Fall 2026'));
+      expect(title.style, Theme.of(tester.element(find.byType(Card))).textTheme.titleLarge);
       expect(find.text('Photo session'), findsOneWidget);
       // Nothing was bought, so neither "Paid" nor the admin's "Ad hoc".
       expect(find.byType(StatusTag), findsOneWidget);
@@ -559,10 +571,12 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('names its package when it has one', (tester) async {
+    testWidgets('names its package under its name when it has one', (tester) async {
       await pumpProfile(tester, bookings: FakeBookingService([_adHoc('a1', packageName: 'Ultimate')]));
 
+      expect(find.text('Church Family - Fall 2026'), findsOneWidget);
       expect(find.text('Ultimate session'), findsOneWidget);
+      expect(find.text('Photo session'), findsNothing);
     });
 
     testWidgets('past, photos not ready yet: they are being edited', (tester) async {
@@ -580,20 +594,34 @@ void main() {
 
       final primary = find.widgetWithText(FilledButton, 'Download all photos');
       expect(primary, findsOneWidget);
-      expect(find.ancestor(of: primary, matching: find.widgetWithText(Card, 'Photo session')), findsOneWidget);
+      expect(find.ancestor(of: primary, matching: find.widgetWithText(Card, 'Church Family - Fall 2026')), findsOneWidget);
       expect(find.widgetWithText(OutlinedButton, 'Download all photos'), findsOneWidget);
     });
 
-    testWidgets('fits a narrow phone in both themes', (tester) async {
-      for (final brightness in Brightness.values) {
-        await pumpProfile(
-          tester,
-          size: const Size(320, 640),
-          brightness: brightness,
-          bookings: FakeBookingService([_adHoc('a1', packageName: 'Premium'), _booking('b1')]),
-        );
-        expect(tester.takeException(), isNull, reason: brightness.name);
+    testWidgets('fits a narrow phone in both themes, even with the longest name', (tester) async {
+      // SessionRules.nameMaxLength characters, in one unbroken word.
+      final longest = 'Stapletons' * 10;
+      for (final name in ['Church Family - Fall 2026', longest]) {
+        // A fresh page, which watches the new bookings.
+        await tester.pumpWidget(const SizedBox());
+        for (final brightness in Brightness.values) {
+          await pumpProfile(
+            tester,
+            size: const Size(320, 640),
+            brightness: brightness,
+            bookings: FakeBookingService([_adHoc('a1', packageName: 'Premium', name: name), _booking('b1')]),
+          );
+          expect(tester.takeException(), isNull, reason: '$name, ${brightness.name}');
+          expect(find.text(name), findsOneWidget);
+        }
       }
     });
+  });
+
+  testWidgets('a paid booking keeps its package as its title: its name is for the Admin page', (tester) async {
+    await pumpProfile(tester, bookings: FakeBookingService([_booking('b1', name: 'Jane Doe, paid by Venmo')]));
+
+    expect(find.text('Premium session'), findsOneWidget);
+    expect(find.textContaining('Jane Doe'), findsNothing);
   });
 }

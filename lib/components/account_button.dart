@@ -66,14 +66,16 @@ class AccountButton extends StatelessWidget {
 }
 
 /// Signs out, first asking while leaving would lose work ([LeaveWarning]):
-/// uploads still running, or changes not yet saved.
+/// uploads still running, a download being prepared, or changes not yet
+/// saved.
 Future<void> signOutWithWarning(BuildContext context) async {
   final auth = AppServices.of(context).auth;
   if (LeaveWarning.active.value) {
     final confirmed = await showBrookieConfirm(
       context,
       title: 'Sign out now?',
-      message: 'Uploads still running will stop, and changes you haven’t saved will be lost.',
+      message: 'Uploads still running will stop, downloads being prepared won’t start, and changes you haven’t '
+          'saved will be lost.',
       confirmLabel: 'Sign out',
       destructive: true,
     );

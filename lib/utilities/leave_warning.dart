@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
-/// Whether leaving the site now would lose work: uploads still running, or
-/// changes not yet saved.
+/// Whether leaving the site now would lose work: uploads still running, a
+/// download being prepared, or changes not yet saved.
 ///
 /// Pages that hold such work [set] it on while they do, and off in dispose.
 /// While it's [active], main.dart has the browser ask before the tab closes

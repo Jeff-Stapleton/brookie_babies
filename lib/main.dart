@@ -1,4 +1,6 @@
+import 'dart:developer';
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 
 import 'package:brookie_babies/pages/admin_page.dart';
 import 'package:brookie_babies/pages/home_page.dart';
@@ -14,6 +16,7 @@ import 'package:brookie_babies/services/portfolio_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/embedded_browser.dart';
 import 'package:brookie_babies/utilities/leave_warning.dart';
+import 'package:brookie_babies/utilities/screen_awake.dart';
 import 'package:brookie_babies/utilities/site_domain.dart';
 import 'package:brookie_babies/utilities/web_photo_picker.dart' as web_photo_picker;
 import 'package:brookie_babies/widgets/focus_ring.dart';
@@ -42,6 +45,7 @@ Future<void> main() async {
     options: withSiteAuthDomain(DefaultFirebaseOptions.currentPlatform, Uri.base),
   );
   _warnBeforeLeaving();
+  _keepScreenAwake();
   final admin = FirebaseAdminService(FirebaseFirestore.instance, FirebaseStorage.instance, FirebaseAuth.instance);
   runApp(MyApp(
     auth: FirebaseAuthService(FirebaseAuth.instance),
@@ -61,10 +65,11 @@ Future<void> main() async {
   ));
 }
 
-/// While [LeaveWarning] is active (uploads running, changes unsaved), the
-/// browser asks before the tab closes or reloads. The listener is only
-/// there while it's needed: any `beforeunload` listener stops the browser
-/// keeping the page for a quick back and forward.
+/// While [LeaveWarning] is active (uploads running, a download being
+/// prepared, changes unsaved), the browser asks before the tab closes or
+/// reloads. The listener is only there while it's needed: any
+/// `beforeunload` listener stops the browser keeping the page for a quick
+/// back and forward.
 void _warnBeforeLeaving() {
   final ask = ((web.BeforeUnloadEvent event) {
     event.preventDefault();
@@ -78,6 +83,54 @@ void _warnBeforeLeaving() {
       web.window.removeEventListener('beforeunload', ask);
     }
   });
+}
+
+/// While [ScreenAwake] is active (a download being prepared), asks the
+/// browser to keep the screen on, so a phone doesn't lock mid-wait and drop
+/// the connection. Browsers release the lock whenever the page is hidden,
+/// so it's asked for again when the page shows. Without the API (Safari
+/// before 16.4, older Firefox), or when the browser refuses (low battery),
+/// the screen locks as usual and the card explains if the wait failed.
+void _keepScreenAwake() {
+  final navigator = web.window.navigator;
+  if (!navigator.has('wakeLock')) return;
+  web.WakeLockSentinel? lock;
+  // One request at a time, so a lock is never held and forgotten.
+  var asking = false;
+  Future<void> ask() async {
+    if (asking || lock != null || !ScreenAwake.active.value || web.document.visibilityState != 'visible') return;
+    asking = true;
+    try {
+      final granted = await navigator.wakeLock.request('screen').toDart;
+      // Not needed any more by the time it came.
+      if (!ScreenAwake.active.value) {
+        granted.release();
+        return;
+      }
+      lock = granted;
+      // The browser let it go (the page was hidden): the next ask makes a
+      // new one.
+      granted.onrelease = ((web.Event _) {
+        if (identical(lock, granted)) lock = null;
+      }).toJS;
+    } catch (e) {
+      log('Keeping the screen on was refused: $e');
+    } finally {
+      asking = false;
+    }
+  }
+
+  ScreenAwake.active.addListener(() {
+    if (ScreenAwake.active.value) {
+      ask();
+    } else {
+      lock?.release();
+      lock = null;
+    }
+  });
+  web.document.addEventListener('visibilitychange', ((web.Event _) {
+    ask();
+  }).toJS);
 }
 
 class MyApp extends StatelessWidget {

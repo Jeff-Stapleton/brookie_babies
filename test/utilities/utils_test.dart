@@ -21,4 +21,14 @@ void main() {
     expect(firstBookableDay(now), DateTime(2026, 10, 17));
     expect(lastBookableDay(now), DateTime(2027, 1, 17));
   });
+
+  test('file sizes for families: whole MB, then GB with one decimal, 1000-based', () {
+    expect(formatFileSize(1), '1 MB');
+    expect(formatFileSize(1400000), '1 MB');
+    expect(formatFileSize(999000000), '999 MB');
+    // Rounds up to 1000 MB, so it's written in GB.
+    expect(formatFileSize(999600000), '1.0 GB');
+    expect(formatFileSize(4800000000), '4.8 GB');
+    expect(formatFileSize(12340000000), '12.3 GB');
+  });
 }

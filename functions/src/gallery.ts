@@ -3,7 +3,8 @@
 // an ad hoc session shared with their verified Google email), zips the
 // photos in galleries/{bookingId}/ into gallery-zips/{bookingId}.zip
 // (reusing the zip while the photos are unchanged) and returns a short-lived
-// signed URL for it.
+// signed URL for it. While it builds a zip, it streams its progress to callers
+// that ask for it (the site).
 //
 // Who may download mirrors who may read the booking in firestore.rules
 // (admins aside: they read every booking but download none), so the app only
@@ -28,14 +29,44 @@ export const BOOKING_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 // an older version are rebuilt.
 export const ZIP_FORMAT_VERSION = "brookie-babies-gallery-zip-v1";
 
+// At most one progress chunk per this long, so a gallery of small photos
+// doesn't send one per photo.
+export const PROGRESS_INTERVAL_MS = 500;
+// Builds this long are logged as warnings: they're close to index.ts's
+// timeoutSeconds (540).
+export const SLOW_BUILD_MS = 500_000;
+
+// Typographic apostrophes: notPaid and notReady reach families as they are
+// (galleryErrorMessage in lib/services/gallery_service.dart).
 export const MESSAGES = {
   unauthenticated: "Please sign in to download your photos.",
   invalidArgument: "A valid booking ID is required.",
-  notFound: "We couldn't find that booking.",
-  notPaid: "This session isn't paid for yet.",
-  notReady: "Your photos aren't ready yet.",
-  internal: "We couldn't prepare your photos. Please try again in a few minutes.",
+  notFound: "We couldn’t find that booking.",
+  notPaid: "This session isn’t paid for yet.",
+  notReady: "Your photos aren’t ready yet.",
+  internal: "We couldn’t prepare your photos. Please try again in a few minutes.",
 } as const;
+
+/**
+ * Progress while a zip is built, streamed to the site. Mirrors
+ * GalleryProgress.fromChunk in lib/services/gallery_service.dart; change them
+ * together, adding fields only.
+ */
+export interface GalleryProgress {
+  /** Always "zipping"; the site ignores other stages, so new ones can be added. */
+  stage: "zipping";
+  /**
+   * Photos read into the zip so far. It reaches photoCount only in the last
+   * chunk, sent once the whole zip has been read.
+   */
+  photosDone: number;
+  photoCount: number;
+  /**
+   * The photos' total size from the listing (the zip adds a few hundred bytes
+   * a photo); null if one wasn't listed.
+   */
+  totalBytes: number | null;
+}
 
 /** Response of the callable, shared with the Flutter client. */
 export interface GalleryDownload {
@@ -43,6 +74,8 @@ export interface GalleryDownload {
   photoCount: number;
   /** ISO 8601. */
   expiresAt: string;
+  /** As GalleryProgress.totalBytes. */
+  totalBytes: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +136,8 @@ export interface GalleryDeps {
   bucket: BucketLike;
   /** Clock, injectable for tests. */
   now: () => Date;
+  /** Build timings and callers who left. uid only, never the email. */
+  log?: (level: "info" | "warning", message: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,20 +159,36 @@ export interface CallableRequestLike {
 }
 
 /**
+ * What getGalleryDownload needs from onCall's response. A
+ * CallableResponse<GalleryProgress> fits it as it is.
+ */
+export interface ProgressStream {
+  /** Resolves false, writing nothing, when the caller doesn't stream or has left. */
+  sendChunk(chunk: GalleryProgress): Promise<boolean>;
+  /**
+   * Aborted when the caller disconnects, and also when a response ends: remove
+   * listeners before returning.
+   */
+  readonly signal: AbortSignal;
+}
+
+/**
  * Thin wrapper used by the onCall handler: requires sign-in, passes
  * HttpsErrors through and turns anything else into a logged 'internal' error
- * with a customer-friendly message.
+ * with a customer-friendly message. The stream goes to getGalleryDownload as
+ * it is: for a caller that doesn't stream, sendChunk writes nothing.
  */
 export async function handleGalleryDownloadRequest(
   deps: GalleryDeps & {logError: (message: string, error: unknown) => void},
   request: CallableRequestLike,
+  stream?: ProgressStream,
 ): Promise<GalleryDownload> {
   const auth = request.auth;
   if (!auth?.uid) {
     throw new HttpsError("unauthenticated", MESSAGES.unauthenticated);
   }
   try {
-    return await getGalleryDownload(deps, auth, request.data);
+    return await getGalleryDownload(deps, auth, request.data, stream);
   } catch (error) {
     if (error instanceof HttpsError) throw error;
     // Only reachable after the booking ID passed validation. Never log the
@@ -153,12 +204,15 @@ export async function handleGalleryDownloadRequest(
 
 /**
  * Returns a signed download URL for the zip of all photos of a booking the
- * caller may download, building (or rebuilding) the zip if needed.
+ * caller may download, building (or rebuilding) the zip if needed. While it
+ * builds one, it sends GalleryProgress to `stream`; nothing is sent before
+ * the build, on a cached zip or for an error.
  */
 export async function getGalleryDownload(
   deps: GalleryDeps,
   caller: CallerAuth,
   data: unknown,
+  stream?: ProgressStream,
 ): Promise<GalleryDownload> {
   const bookingId = parseBookingId(data);
 
@@ -192,8 +246,46 @@ export async function getGalleryDownload(
 
   const fingerprint = computeFingerprint(photos);
   const zipObject = deps.bucket.file(`${ZIP_PREFIX}${bookingId}.zip`);
+  // From the listing, so a cached zip reports the same size as a new one.
+  const totalBytes = totalSize(photos);
   if (!(await isCachedZipCurrent(zipObject, fingerprint))) {
-    await buildZip(zipObject, photos, fingerprint, deps.now());
+    const started = deps.now().getTime();
+    const elapsed = (): number => deps.now().getTime() - started;
+    const log = (message: string): void =>
+      deps.log?.(elapsed() >= SLOW_BUILD_MS ? "warning" : "info", message);
+    const who = `booking ${bookingId} (uid ${caller.uid})`; // Never the email.
+    let photosDone = 0;
+    const send = stream ? progressSender(stream, deps.now) : undefined;
+    // The build goes on without the caller, so a retry finds it cached (best
+    // effort: Cloud Run doesn't promise CPU to a request whose caller has
+    // gone). A timeout may show up as the caller leaving too.
+    const left = (): void =>
+      log(
+        `getGalleryDownloadUrl's caller left ${elapsed()} ms into building ` +
+          `the zip for ${who}, with ${photosDone} of ${photos.length} photos ` +
+          "in; finishing it anyway",
+      );
+    stream?.signal.addEventListener("abort", left, {once: true});
+    if (stream?.signal.aborted) left(); // A listener added after the abort never fires.
+    try {
+      await buildZip(zipObject, photos, fingerprint, deps.now(), (done) => {
+        photosDone = done;
+        send?.({
+          stage: "zipping",
+          photosDone: done,
+          photoCount: photos.length,
+          totalBytes,
+        });
+      });
+    } finally {
+      // The signal also aborts when a normal response ends: don't log that
+      // as leaving.
+      stream?.signal.removeEventListener("abort", left);
+    }
+    log(
+      `getGalleryDownloadUrl built the zip for ${who}: ${photos.length} photos, ` +
+        `${totalBytes ?? "unknown"} bytes, in ${elapsed()} ms`,
+    );
   }
 
   const expires = new Date(deps.now().getTime() + SIGNED_URL_TTL_MS);
@@ -205,7 +297,34 @@ export async function getGalleryDownload(
       zipFileName(booking.date, bookingId),
     ),
   });
-  return {url, photoCount: photos.length, expiresAt: expires.toISOString()};
+  return {url, photoCount: photos.length, expiresAt: expires.toISOString(), totalBytes};
+}
+
+/**
+ * Sends progress to the caller: the first chunk and the last (photosDone >=
+ * photoCount) always, others at most once per intervalMs. Never throws or
+ * rejects; silent once the caller has left.
+ */
+export function progressSender(
+  stream: ProgressStream,
+  now: () => Date,
+  intervalMs = PROGRESS_INTERVAL_MS,
+): (progress: GalleryProgress) => void {
+  let lastSent: number | undefined;
+  return (progress) => {
+    if (stream.signal.aborted) return;
+    const time = now().getTime();
+    const last = progress.photosDone >= progress.photoCount;
+    if (!last && lastSent !== undefined && time - lastSent < intervalMs) return;
+    lastSent = time;
+    // Not awaited: a slow browser must never slow the zip. Never left
+    // unhandled either: an unhandled rejection crashes the instance.
+    try {
+      stream.sendChunk({...progress}).catch(() => undefined);
+    } catch {
+      // A response that's already gone.
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +417,16 @@ export function selectPhotos(
   });
 }
 
+/** The photos' total size from the listing, or null if one wasn't listed. */
+export function totalSize(photos: readonly Pick<Photo, "size">[]): number | null {
+  let total = 0;
+  for (const photo of photos) {
+    if (photo.size === undefined) return null;
+    total += photo.size;
+  }
+  return total;
+}
+
 function parseSize(size: string | number | undefined): number | undefined {
   const value = typeof size === "string" && /^\d+$/.test(size) ? Number(size) : size;
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
@@ -372,12 +501,18 @@ async function isCachedZipCurrent(
  * Storage only creates an object when its upload finishes, so on any error
  * the upload is destroyed (never finished): no zip carrying this
  * fingerprint appears, and a previously cached zip is left untouched.
+ *
+ * `onProgress` hears how many photos are in the zip: each time yazl opens the
+ * next one, and photos.length once the whole zip has left yazl (a build that
+ * fails first never gets there). It's called synchronously from yazl and the
+ * output stream, so it must not throw; throttling is left to the caller.
  */
 export async function buildZip(
   zipObject: ZipObjectLike,
   photos: readonly Photo[],
   fingerprint: string,
   now: Date,
+  onProgress?: (photosDone: number) => void,
 ): Promise<void> {
   const zipfile = new yazl.ZipFile();
   const output = zipfile.outputStream as Readable;
@@ -402,7 +537,7 @@ export async function buildZip(
   };
   zipfile.on("error", fail);
 
-  for (const photo of photos) {
+  photos.forEach((photo, index) => {
     // Lazy: each download starts only when yazl reaches that entry, so at
     // most one source stream is open at a time.
     zipfile.addReadStreamLazy(
@@ -415,14 +550,23 @@ export async function buildZip(
       },
       (callback) => {
         if (failure) return; // Already failing; don't start another download.
+        // yazl opens a photo only once every earlier one has been read into
+        // the zip. The first getter runs synchronously inside
+        // addReadStreamLazy.
+        onProgress?.(index);
         const source = photo.file.createReadStream();
         currentSource = source;
         source.on("error", fail);
         callback(null, source);
       },
     );
-  }
+  });
   zipfile.end();
+  // The last chunk: every byte has left yazl, and Storage is finishing the
+  // upload. An 'end' listener doesn't start the stream flowing (never add
+  // 'data' or call resume(): that would read ahead of Storage). A failed
+  // build destroys `output`, which emits no 'end'.
+  output.once("end", () => onProgress?.(photos.length));
 
   try {
     await pipeline(output, upload);

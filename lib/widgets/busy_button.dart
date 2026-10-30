@@ -12,8 +12,8 @@ enum BusyButtonKind {
 }
 
 /// A button whose action takes a while: while [busy] it says so
-/// ([busyLabel], with a small spinner) and looks unavailable, but stays
-/// enabled.
+/// ([busyLabel], with a small spinner, or a still hourglass under reduced
+/// motion) and looks unavailable, but stays enabled.
 ///
 /// A disabled button would drop keyboard focus mid-action (onto whatever
 /// is next, where a second Enter would do something else), so a busy one
@@ -37,9 +37,12 @@ class BusyButton extends StatelessWidget {
   /// What it says while [busy]: "Saving changes…".
   final String busyLabel;
 
-  /// What screen readers hear while [busy], when [busyLabel] changes as it
-  /// goes ("Deleting 40 of 150…"): the button is a live region, so each new
-  /// count would be announced. Null for [busyLabel] itself.
+  /// What screen readers hear while [busy] instead of [busyLabel]. Either a
+  /// steady version of a label that counts ("Deleting 150 photos…" for
+  /// "Deleting 40 of 150…"), or the few steps of a long wait ("Preparing
+  /// your photos… 25% done"). Keep [busyLabel]'s words in it. The button is
+  /// a live region, so each change is announced. Null for [busyLabel]
+  /// itself.
   final String? busySemanticsLabel;
 
   final bool busy;
@@ -66,8 +69,12 @@ class BusyButton extends StatelessWidget {
     final c = BrookieColors.of(context);
     final onPressed = this.onPressed;
     final icon = this.icon;
+    // The spinner never checks reduced motion itself. The hourglass takes
+    // ink-soft from the busy style's iconColor.
     final Widget? iconWidget = busy
-        ? SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: c.inkSoft))
+        ? (MediaQuery.disableAnimationsOf(context)
+            ? const Icon(Icons.hourglass_empty, size: 16)
+            : SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: c.inkSoft)))
         : (icon == null ? null : Icon(icon));
     final text = Text(busy ? busyLabel : label, semanticsLabel: busy ? busySemanticsLabel : null);
     // Pressing it again while busy does nothing.

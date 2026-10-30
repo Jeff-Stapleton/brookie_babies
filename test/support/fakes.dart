@@ -123,19 +123,25 @@ class FakeBookingService implements BookingService {
 }
 
 /// [GalleryService] whose downloads stay pending until the test calls
-/// [complete] or [fail].
+/// [complete] or [fail]; [progress] reports how the zip's build is going.
 class FakeGalleryService implements GalleryService {
   final requested = <String>[];
 
   // Created per call rather than up front, so it belongs to the test's
   // fake-async zone and completing it reaches the widget.
   Completer<GalleryDownload>? _pending;
+  GalleryProgressCallback? _onProgress;
 
   @override
-  Future<GalleryDownload> prepareDownload(String bookingId) {
+  Future<GalleryDownload> prepareDownload(String bookingId, {GalleryProgressCallback? onProgress}) {
     requested.add(bookingId);
+    _onProgress = onProgress;
     return (_pending = Completer()).future;
   }
+
+  /// Hands [p] to the latest download's onProgress, as a chunk from the
+  /// function would be.
+  void progress(GalleryProgress p) => _onProgress!(p);
 
   void complete(GalleryDownload download) => _pending!.complete(download);
 
@@ -166,7 +172,12 @@ class FakePortfolioService implements PortfolioService {
 class FakeUrlOpener {
   final opened = <({Uri url, String? windowName})>[];
 
+  /// Called with each URL before it's recorded: how things stand as the
+  /// browser is handed it.
+  void Function(Uri url)? onOpen;
+
   Future<bool> call(Uri url, {String? webOnlyWindowName}) async {
+    onOpen?.call(url);
     opened.add((url: url, windowName: webOnlyWindowName));
     return true;
   }

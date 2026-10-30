@@ -1,4 +1,4 @@
-// Dates as the site writes them, and the window families can book in.
+// Dates and sizes as the site writes them, and the window families can book in.
 //
 // The site is English only, and package:intl isn't a direct dependency, so
 // the names are spelled out here.
@@ -41,3 +41,14 @@ DateTime firstBookableDay(DateTime now) => DateTime(now.year, now.month, now.day
 
 /// The last day families can book, about three months out.
 DateTime lastBookableDay(DateTime now) => DateTime(now.year, now.month + 3, now.day);
+
+/// A file's size for families, in 1000-based units as their iPhone, Mac and
+/// Safari count: whole MB (at least "1 MB") below 1000 MB, then GB with one
+/// decimal: "850 MB", "4.8 GB". (PhotoRules' admin limits are 1024-based on
+/// purpose: they mirror storage.rules.)
+String formatFileSize(int bytes) {
+  const mb = 1000 * 1000;
+  final megabytes = (bytes / mb).round();
+  if (megabytes < 1000) return '${megabytes < 1 ? 1 : megabytes} MB';
+  return '${(bytes / (1000 * mb)).toStringAsFixed(1)} GB';
+}

@@ -52,6 +52,37 @@ void main() {
     });
   }
 
+  testWidgets('busy under reduced motion: a still hourglass instead of the spinner', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: brookieTheme(Brightness.light),
+      home: MediaQuery(
+        data: const MediaQueryData(disableAnimations: true),
+        child: Scaffold(
+          body: Center(
+            child: BusyButton(
+              label: 'Save changes',
+              busyLabel: 'Saving changes…',
+              busy: true,
+              icon: Icons.check,
+              onPressed: () => presses++,
+            ),
+          ),
+        ),
+      ),
+    ));
+
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    final hourglass = find.byIcon(Icons.hourglass_empty);
+    expect(hourglass, findsOneWidget);
+    expect(find.byIcon(Icons.check), findsNothing);
+    // Ink-soft, like the busy label.
+    final glyph = tester.widget<RichText>(find.descendant(of: hourglass, matching: find.byType(RichText)));
+    expect(glyph.text.style!.color, BrookieColors.light.inkSoft);
+    expect(find.text('Saving changes…'), findsOneWidget);
+    // Nothing moves, so the frames settle.
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('the filled kind is the theme’s FilledButton; null onPressed disables it', (tester) async {
     await pumpButton(tester, busy: false, enabled: false);
 

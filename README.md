@@ -25,7 +25,7 @@ and later download their edited photos. The site is hosted on Firebase.
 - **Your sessions**: signed-in customers see their upcoming and past sessions,
   including ad hoc sessions shared with their Google email, and download every
   photo from a session as one zip, through a private link that expires after
-  an hour.
+  an hour. While a zip is prepared, the page shows how it's going.
 - **Admin portal** (`/#/admin`, or **Admin** in the account menu, shown only to
   admins): every session; ad hoc sessions for family and friends, shared by
   email; uploading a session's photos; **Make photos available**; a message to
@@ -115,7 +115,7 @@ Storage bucket has files under `_admin/gallery` and CORS is configured (see belo
 ```
 lib/
   main.dart          App entry point, Firebase init, theme, routes, the
-                     browser's leave-page warning
+                     browser's leave-page warning and screen wake lock
   theme/             The design system: colors, type, spacing, Material theme
   models/            Data types (signed-in user, booking, packages, session times,
                      ad hoc session details, picked and stored photos)
@@ -131,8 +131,8 @@ lib/
                      cards, upload progress, home page photo order and library)
   widgets/           Reusable widgets (top bar, package card, session slot,
                      status tags, focus ring, photos, dialogs, busy button)
-  utilities/         Date and browser helpers, the upload queue, the file picker,
-                     the leave-page warning
+  utilities/         Date, file size and browser helpers, the upload queue, the
+                     file picker, the leave-page warning, keeping the screen on
 assets/              Logo and fonts
 web/                 Web shell (index.html, manifest, icons)
 functions/           Cloud Functions (TypeScript, Node 24): getGalleryDownloadUrl
@@ -232,7 +232,9 @@ Families download their photos from **Your sessions** once the session's `photos
 3. **Make photos available.** It becomes the page's main button once there are photos and nothing is still uploading or failed, and it asks first, saying how many photos and who can download them. **Hide photos** stops downloads again. **Delete all photos** on a session whose photos are available hides them first, so a family never downloads a half-deleted gallery.
 4. **Tell the family.** Under **Share with the family**, **Copy message** copies a note with the link to Your sessions and the Google account to sign in with, ready to paste into an email or a text. The site doesn't email families itself.
 
-The first download builds a zip of the whole folder, which can take a few minutes for a large gallery. Later downloads reuse it. If you add, replace or delete photos afterwards, the next download rebuilds the zip automatically; families who already downloaded need to download again to get the changes. (If you replace a photo while a family's download is being built, that one download may contain the old version.)
+The first download builds a zip of the whole folder, which can take a few minutes for a large gallery. While it's built, the family sees which photo is being added ("Adding photo 38 of 150"), a progress bar and the zip's size. On a computer the page asks before it's closed or reloaded, and on a phone it keeps the screen from locking where the browser allows. When the zip is ready, the download starts by itself and the card says "Your download has started", with the number of photos and the size. A family with several sessions ready downloads them one at a time: pressing another session's button while one is being prepared asks them to wait for it. Closing or reloading the page doesn't stop the build, so the next download is usually quick. Later downloads reuse the zip. If you add, replace or delete photos afterwards, the next download rebuilds the zip automatically; families who already downloaded need to download again to get the changes. (If you replace a photo while a family's download is being built, that one download may contain the old version.)
+
+A gallery that takes more than 9 minutes to zip fails every time. The function logs a "built the zip" line for every build, saying how long it took; from 500 seconds it's a warning, which means that gallery is close to the limit. A build stopped by the limit logs no "built the zip" line, though it may log a "caller left" warning at about 540,000 ms. The limit can be raised in code (`timeoutSeconds` in `functions/src/index.ts`, together with `kGalleryDownloadTimeLimit` in `lib/services/gallery_service.dart`, which must stay above it).
 
 ### Ad hoc sessions
 
@@ -357,7 +359,8 @@ Deploy the rules and the function **before** (or with) the site that relies on t
 - the query for ad hoc sessions shared by email is refused, so families see only their own bookings (it's logged, nothing breaks);
 - reading `site/home` is refused, so the home page falls back to the first seven photos by name;
 - admins' reads and writes are refused, so the admin pages say they couldn't load or save;
-- with the new rules but the old function, guests see their ad hoc session but its download fails ("We couldn’t find this session’s photos").
+- with the new rules but the old function, guests see their ad hoc session but its download fails ("We couldn’t find this session’s photos");
+- with the new site but the old function, downloads work as before, showing only "Preparing your photos…" until they start (no progress or size).
 
 On pushes to `main`, CI deploys the backend before the site, but only once `BACKEND_DEPLOY_LIVE` is `true` (see below). Until then, deploy backend changes by hand from their branch before merging it (see "Deploying by hand").
 
@@ -436,9 +439,11 @@ The functions run as `375587092017-compute@developer.gserviceaccount.com`, which
 
 Signing also needs the **IAM Service Account Credentials API**, which is turned on.
 
-If downloads fail with "We couldn't get your photos ready just now", check the function's log:
+If downloads fail with "We couldn’t get your photos ready", check the function's log:
 - **A Firestore or Storage permission error:** re-run the script.
 - **A `signBlob` error:** check the Token Creator grant and the API.
+- **A "built the zip" warning:** that build took 500 seconds or more, close to the function's 9-minute limit (see "Delivering photos").
+- **"caller left … finishing it anyway":** the family's page closed, reloaded or lost its connection (a phone locking does this) while the zip was being built. The build carries on, so their next download is usually quick. If it's a warning at about 540,000 ms or more, it was probably the function's 9-minute limit instead: that gallery is too big to zip in time, and the next download will fail the same way (see "Delivering photos").
 
 The same account also **builds** the functions. Since 2024 Cloud Build uses the default compute account for projects like this one (it has no organization, so the old Cloud Build account can't be chosen, and neither firebase-tools nor firebase-functions can name another build account). The first deploy only worked because the account still had the Editor role Google grants it by default; removing Editor on 2026-10-17 left it unable to build. The script gives it Google's documented minimum for a build account, each as narrow as it can be:
 

@@ -712,7 +712,8 @@ void main() {
 
       expect(find.text('Sign out now?'), findsOneWidget);
       expect(
-        find.text('Uploads still running will stop, and changes you haven’t saved will be lost.'),
+        find.text('Uploads still running will stop, downloads being prepared won’t start, and changes you '
+            'haven’t saved will be lost.'),
         findsOneWidget,
       );
       expect(auth.currentUser, isNotNull);

@@ -1,6 +1,6 @@
 # TODO
 
-Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-24 (custom domain).
+Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-25 (download progress).
 
 ## 1. Ship the admin portal
 
@@ -103,7 +103,25 @@ left is one real download, on the live site: https://brookestapletonphoto.com
       instead open the booking in **Admin** and **Upload photos** there.)
 - [ ] **Download:** open the avatar menu → **Your sessions**.
       The booking shows under **Past**. Click **Download all photos**: you
-      should see "Preparing your photos…", then a zip downloads.
+      should see "Preparing your photos…", then "Adding photo 1 of 3" (for 3
+      photos) with a bar (with only a few photos it may just flash), then a
+      zip downloads and the card says "Your download has started".
+- [ ] **What the tests can't check** (they don't run in a browser), with a
+      gallery big enough to take a minute (a few hundred photos). Every
+      build is cached, even one you leave, so before each check below
+      delete the gallery's zip from `gallery-zips/` in Storage; otherwise
+      the download starts at once and there's nothing to watch.
+      - In Chrome and Safari on a computer, "Adding photo N of M" counts up
+        while you wait, rather than jumping to the end.
+      - Reloading the page mid-build asks first.
+      - On an iPhone with Auto-Lock at 30 seconds, the screen stays on
+        through the build. Then press the side button mid-build to lock it:
+        back on the page, the card says the page may have been in the
+        background, and **Download all photos** works again.
+      - With the test booking also on **Your sessions**, start the big
+        gallery's download, then press the test booking's button while it's
+        still counting: the test booking says to wait. When the big zip
+        downloads, the browser doesn't ask "Leave site?".
 - [ ] **Privacy check:** sign in with a second Google account; it should
       show no sessions.
 - [ ] Optional: delete the test booking and its `galleries/` folder.

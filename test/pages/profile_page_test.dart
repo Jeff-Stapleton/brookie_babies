@@ -1,3 +1,4 @@
+import 'package:brookie_babies/components/booking_card.dart';
 import 'package:brookie_babies/components/sign_in_dialog.dart';
 import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/models/booking.dart';
@@ -6,7 +7,9 @@ import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/leave_warning.dart';
+import 'package:brookie_babies/utilities/screen_awake.dart';
 import 'package:brookie_babies/widgets/brookie_dialog.dart';
+import 'package:brookie_babies/widgets/busy_button.dart';
 import 'package:brookie_babies/widgets/empty_state.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
@@ -89,6 +92,8 @@ void main() {
     gallery = FakeGalleryService();
     urlOpener = FakeUrlOpener();
   });
+  tearDown(LeaveWarning.reset);
+  tearDown(ScreenAwake.reset);
 
   testWidgets('signed out: asks the visitor to sign in', (tester) async {
     await pumpProfile(tester, signedIn: false);
@@ -266,6 +271,15 @@ void main() {
     expect(urlOpener.opened.single.url, zip);
     expect(urlOpener.opened.single.windowName, '_self');
     expect(find.text('Download all photos'), findsOneWidget);
+    // A function too old to say how big it is: no size.
+    expect(
+      find.widgetWithText(
+        InlineMessage,
+        'Your download has started: 42 photos. If your browser asks, allow it; if nothing happens, choose '
+        '“Download all photos” again.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('past session: shows why a download failed', (tester) async {
@@ -490,6 +504,13 @@ void main() {
     await tester.pump();
     expect(gallery.requested, ['b1']);
 
+    // The progress below never takes focus.
+    for (final done in [0, 1, 3]) {
+      gallery.progress(GalleryProgress(photosDone: done, photoCount: 3));
+      await tester.pump();
+      expect(hasFocus(tester, find.text('Preparing your photos…')), isTrue, reason: '$done of 3');
+    }
+
     gallery.complete(GalleryDownload(url: Uri.parse('https://example.com/b1.zip'), photoCount: 3));
     await tester.pumpAndSettle();
     expect(hasFocus(tester, find.text('Download all photos')), isTrue);
@@ -547,6 +568,321 @@ void main() {
     expect(shape.side, BorderSide(color: BrookieColors.light.line, width: 1.5));
     gallery.complete(GalleryDownload(url: Uri.parse('https://example.com/b1.zip'), photoCount: 3));
     await tester.pumpAndSettle();
+  });
+
+  group('while the zip is prepared', () {
+    final zip = Uri.parse('https://storage.googleapis.com/bucket/gallery-zips/b1.zip?X-Goog-Signature=abc');
+    const size = 4800000000;
+
+    GalleryProgress at(int done, {int of = 150, int? totalBytes = size}) =>
+        GalleryProgress(photosDone: done, photoCount: of, totalBytes: totalBytes);
+
+    Finder bar() => find.byType(LinearProgressIndicator);
+
+    double? barValue(WidgetTester tester) => tester.widget<LinearProgressIndicator>(bar()).value;
+
+    Future<void> startDownload(WidgetTester tester, {Brightness brightness = Brightness.light}) async {
+      await pumpProfile(tester, brightness: brightness, bookings: FakeBookingService([_booking('b1')]));
+      await tester.tap(find.text('Download all photos'));
+      // pump, not pumpAndSettle: the busy button's spinner turns.
+      await tester.pump();
+    }
+
+    /// The page goes into the background (another tab, a locked phone) and
+    /// comes back, through the states the engine reports.
+    void hideAndShow(WidgetTester tester) {
+      for (final state in [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]) {
+        tester.binding.handleAppLifecycleStateChanged(state);
+      }
+    }
+
+    testWidgets('says which photo is going in, with a bar and the size, then hands the zip over', (tester) async {
+      final asOpened = <String>[];
+      urlOpener.onOpen = (_) =>
+          asOpened.add('leave warning ${LeaveWarning.active.value}, screen awake ${ScreenAwake.active.value}');
+      await startDownload(tester);
+
+      expect(LeaveWarning.active.value, isTrue);
+      expect(ScreenAwake.active.value, isTrue);
+      // Nothing to show until the build starts.
+      expect(bar(), findsNothing);
+
+      gallery.progress(at(0));
+      await tester.pump();
+      expect(find.text('Adding photo 1 of 150'), findsOneWidget);
+      expect(barValue(tester), 0);
+      expect(
+        find.text('This can take a few minutes. Your 4.8 GB zip file starts downloading by itself when it’s ready, '
+            'so keep this page open and on screen.'),
+        findsOneWidget,
+      );
+      // Still one primary button.
+      expect(find.byType(FilledButton), findsOneWidget);
+
+      gallery.progress(at(37));
+      await tester.pump();
+      expect(find.text('Adding photo 38 of 150'), findsOneWidget);
+      expect(barValue(tester), closeTo(37 / 150, 1e-9));
+
+      gallery.progress(at(150));
+      await tester.pump();
+      expect(find.text('Finishing your zip file'), findsOneWidget);
+      expect(barValue(tester), 1);
+
+      gallery.complete(GalleryDownload(url: zip, photoCount: 150, totalBytes: size));
+      await tester.pumpAndSettle();
+      expect(bar(), findsNothing);
+      expect(find.textContaining('This can take a few minutes'), findsNothing);
+      expect(urlOpener.opened.single.url, zip);
+      expect(urlOpener.opened.single.windowName, '_self');
+      // Both off before the hand-off, or the download would ask "Leave site?".
+      expect(asOpened, ['leave warning false, screen awake false']);
+      expect(
+        find.widgetWithText(
+          InlineMessage,
+          'Your download has started: 150 photos, 4.8 GB. If your browser asks, allow it; if nothing happens, '
+          'choose “Download all photos” again.',
+        ),
+        findsOneWidget,
+      );
+      expect(tester.widget<InlineMessage>(find.byType(InlineMessage)).tone, StatusTone.success);
+      expect(find.text('Download all photos'), findsOneWidget);
+    });
+
+    testWidgets('a zip already built: no bar, just the download and its size', (tester) async {
+      await startDownload(tester);
+      expect(bar(), findsNothing);
+
+      gallery.complete(GalleryDownload(url: zip, photoCount: 150, totalBytes: size));
+      await tester.pumpAndSettle();
+
+      expect(bar(), findsNothing);
+      expect(find.textContaining('Your download has started: 150 photos, 4.8 GB.'), findsOneWidget);
+    });
+
+    testWidgets('a size it couldn’t list is left out', (tester) async {
+      await startDownload(tester);
+
+      gallery.progress(at(0, of: 3, totalBytes: null));
+      await tester.pump();
+      expect(find.textContaining('This can take a few minutes. Your zip file starts downloading'), findsOneWidget);
+
+      gallery.complete(GalleryDownload(url: zip, photoCount: 3));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Your download has started: 3 photos. If your browser asks'), findsOneWidget);
+    });
+
+    testWidgets('a failure mid-build: the panel goes, the error shows, the button is ready again', (tester) async {
+      await startDownload(tester);
+      gallery.progress(at(37));
+      await tester.pump();
+
+      gallery.fail(const GalleryException(kGalleryErrorFallback));
+      await tester.pumpAndSettle();
+
+      expect(bar(), findsNothing);
+      expect(find.text('Adding photo 38 of 150'), findsNothing);
+      expect(find.widgetWithText(InlineMessage, kGalleryErrorFallback), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Download all photos'), findsOneWidget);
+      expect(urlOpener.opened, isEmpty);
+      expect(LeaveWarning.active.value, isFalse);
+      expect(ScreenAwake.active.value, isFalse);
+    });
+
+    group('hidden while it waited', () {
+      testWidgets('a failure with no stated cause says the page was in the background', (tester) async {
+        await startDownload(tester);
+        gallery.progress(at(37));
+        await tester.pump();
+
+        hideAndShow(tester);
+        gallery.fail(const GalleryException(kGalleryErrorFallback));
+        await tester.pumpAndSettle();
+
+        expect(find.widgetWithText(InlineMessage, kDownloadInterruptedMessage), findsOneWidget);
+        expect(find.text(kGalleryErrorFallback), findsNothing);
+      });
+
+      testWidgets('a failure the function explained keeps its own message', (tester) async {
+        await startDownload(tester);
+
+        hideAndShow(tester);
+        gallery.fail(const GalleryException('Your photos aren’t ready yet.'));
+        await tester.pumpAndSettle();
+
+        expect(find.widgetWithText(InlineMessage, 'Your photos aren’t ready yet.'), findsOneWidget);
+      });
+
+      testWidgets('not hidden: the usual message', (tester) async {
+        await startDownload(tester);
+
+        gallery.fail(const GalleryException(kGalleryErrorFallback));
+        await tester.pumpAndSettle();
+
+        expect(find.widgetWithText(InlineMessage, kGalleryErrorFallback), findsOneWidget);
+        expect(find.text(kDownloadInterruptedMessage), findsNothing);
+      });
+
+      testWidgets('hidden before the press doesn’t count', (tester) async {
+        await pumpProfile(tester, bookings: FakeBookingService([_booking('b1')]));
+        hideAndShow(tester);
+        await tester.tap(find.text('Download all photos'));
+        await tester.pump();
+
+        gallery.fail(const GalleryException(kGalleryErrorFallback));
+        await tester.pumpAndSettle();
+
+        expect(find.widgetWithText(InlineMessage, kGalleryErrorFallback), findsOneWidget);
+      });
+    });
+
+    testWidgets('one at a time: another session waits, so the hand-off never asks "Leave site?"', (tester) async {
+      final asOpened = <bool>[];
+      urlOpener.onOpen = (_) => asOpened.add(LeaveWarning.active.value);
+      await pumpProfile(tester, bookings: FakeBookingService([_booking('a'), _booking('b', date: '2001-05-07')]));
+      // The more recent session's button comes first (Past, nearest first).
+      Future<void> press(int index) async {
+        final button = find.byType(BusyButton).at(index);
+        await tester.ensureVisible(button);
+        await tester.tap(button);
+        await tester.pump();
+      }
+
+      await press(0);
+      await press(1);
+
+      expect(gallery.requested, ['b']);
+      final wait = find.widgetWithText(InlineMessage, kOneDownloadAtATimeMessage);
+      expect(wait, findsOneWidget);
+      expect(tester.widget<InlineMessage>(wait).tone, StatusTone.neutral);
+      expect(find.text('Preparing your photos…'), findsOneWidget);
+
+      gallery.complete(GalleryDownload(url: zip, photoCount: 3));
+      await tester.pumpAndSettle();
+      // No other card has its warning on as the browser is handed the zip.
+      expect(asOpened, [false]);
+
+      await press(1);
+      expect(gallery.requested, ['b', 'a']);
+      expect(wait, findsNothing);
+      gallery.complete(GalleryDownload(url: zip, photoCount: 3));
+      await tester.pumpAndSettle();
+      expect(asOpened, [false, false]);
+      expect(find.textContaining('Your download has started'), findsNWidgets(2));
+    });
+
+    testWidgets('one at a time: a page left mid-build doesn’t hold up the next', (tester) async {
+      await startDownload(tester);
+      await tester.pumpWidget(const SizedBox());
+
+      await startDownload(tester);
+
+      expect(gallery.requested, ['b1', 'b1']);
+      expect(find.text(kOneDownloadAtATimeMessage), findsNothing);
+      gallery.complete(GalleryDownload(url: zip, photoCount: 3));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('pressing again clears the last message and asks again', (tester) async {
+      await startDownload(tester);
+      gallery.complete(GalleryDownload(url: zip, photoCount: 150, totalBytes: size));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Your download has started'), findsOneWidget);
+
+      await tester.tap(find.text('Download all photos'));
+      await tester.pump();
+
+      expect(find.textContaining('Your download has started'), findsNothing);
+      expect(gallery.requested, ['b1', 'b1']);
+      gallery.complete(GalleryDownload(url: zip, photoCount: 150, totalBytes: size));
+      await tester.pumpAndSettle();
+      expect(urlOpener.opened, hasLength(2));
+    });
+
+    testWidgets('leaving the page: nothing opens, and nothing is left asking', (tester) async {
+      await startDownload(tester);
+      gallery.progress(at(37));
+      await tester.pump();
+
+      await tester.pumpWidget(const SizedBox());
+      expect(LeaveWarning.active.value, isFalse);
+      expect(ScreenAwake.active.value, isFalse);
+
+      // The request goes on without the page.
+      gallery.progress(at(150));
+      gallery.complete(GalleryDownload(url: zip, photoCount: 150, totalBytes: size));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(urlOpener.opened, isEmpty);
+      expect(LeaveWarning.active.value, isFalse);
+      expect(ScreenAwake.active.value, isFalse);
+    });
+
+    testWidgets('screen readers hear the hint once, then each quarter, then the finishing', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await startDownload(tester);
+      final button = find.byType(FilledButton);
+
+      void expectButton(String label, String reason) => expect(
+            tester.getSemantics(button),
+            isSemantics(label: label, isButton: true, isEnabled: true, isLiveRegion: true),
+            reason: reason,
+          );
+
+      for (final (done, heard) in [
+        (0, 'Preparing your photos…'),
+        // 24.7%
+        (37, 'Preparing your photos…'),
+        (38, 'Preparing your photos… 25% done'),
+        (150, 'Preparing your photos… finishing up'),
+      ]) {
+        gallery.progress(at(done));
+        await tester.pump();
+        expectButton(heard, '$done of 150');
+        if (done == 37) {
+          expect(tester.getSemantics(bar()), isSemantics(label: 'Photos added', value: '25%'));
+          // The hint is its own live region; the line that changes at every
+          // photo isn't one.
+          expect(
+            tester.getSemantics(find.textContaining('This can take a few minutes')),
+            isSemantics(label: zipProgressHint(at(37)), isLiveRegion: true),
+          );
+          expect(
+            tester.getSemantics(find.text('Adding photo 38 of 150')),
+            isSemantics(label: 'Adding photo 38 of 150', isLiveRegion: false),
+          );
+          // Nor is the card around them.
+          expect(tester.getSemantics(find.text('Premium session')), isSemantics(isLiveRegion: false));
+        }
+      }
+
+      gallery.complete(GalleryDownload(url: zip, photoCount: 150, totalBytes: size));
+      await tester.pumpAndSettle();
+      expectButton('Download all photos', 'done');
+      // The message is heard on its own, not with the whole card.
+      final started = downloadStartedMessage(GalleryDownload(url: zip, photoCount: 150, totalBytes: size));
+      expect(tester.getSemantics(find.text(started)), isSemantics(label: started, isLiveRegion: true));
+      semantics.dispose();
+    });
+
+    testWidgets('renders in Darkroom, building and done', (tester) async {
+      await startDownload(tester, brightness: Brightness.dark);
+      gallery.progress(at(37));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Adding photo 38 of 150'), findsOneWidget);
+
+      gallery.complete(GalleryDownload(url: zip, photoCount: 150, totalBytes: size));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('Your download has started'), findsOneWidget);
+    });
   });
 
   group('a session the photographer added (ad hoc)', () {

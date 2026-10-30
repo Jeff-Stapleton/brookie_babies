@@ -3,9 +3,12 @@
 // every glyph a full em wide, which would overflow where the site doesn't).
 
 import 'package:brookie_babies/components/account_button.dart';
+import 'package:brookie_babies/components/booking_card.dart';
 import 'package:brookie_babies/models/booking.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
+import 'package:brookie_babies/utilities/leave_warning.dart';
+import 'package:brookie_babies/utilities/screen_awake.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -65,6 +68,9 @@ void main() {
   late FakeGalleryService gallery;
 
   setUp(() => gallery = FakeGalleryService());
+  // A download being prepared sets both.
+  tearDown(LeaveWarning.reset);
+  tearDown(ScreenAwake.reset);
 
   Future<void> pump(WidgetTester tester, Widget home, {required double width, bool signedIn = true, FakeBookingService? bookings}) async {
     tester.view.physicalSize = Size(width, 800);
@@ -105,6 +111,50 @@ void main() {
       gallery.fail(const GalleryException('Your photos aren’t ready yet.'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a zip being built at ${width.toInt()}px: nothing overflows, building or done', (tester) async {
+      await pump(tester, const ProfilePage(), width: width, bookings: sample);
+      final download = find.text('Download all photos').first;
+      await tester.ensureVisible(download);
+      await tester.pumpAndSettle();
+      await tester.tap(download);
+      await tester.pump();
+
+      gallery.progress(const GalleryProgress(photosDone: 37, photoCount: 150, totalBytes: 4800000000));
+      await tester.pump();
+      expect(find.text('Adding photo 38 of 150'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      // Another session's button waits its turn.
+      final other = find.text('Download all photos').first;
+      await tester.ensureVisible(other);
+      await tester.pump();
+      await tester.tap(other);
+      await tester.pump();
+      final wait = find.text(kOneDownloadAtATimeMessage);
+      expect(wait.hitTestable(), findsOneWidget);
+      expect(_breaksAWord(tester, wait), isFalse);
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(find.text('Adding photo 38 of 150'));
+      await tester.pump();
+
+      gallery.progress(const GalleryProgress(photosDone: 150, photoCount: 150, totalBytes: 4800000000));
+      await tester.pump();
+      expect(find.text('Finishing your zip file'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      gallery.complete(GalleryDownload(
+        url: Uri.parse('https://storage.googleapis.com/bucket/gallery-zips/b1.zip'),
+        photoCount: 150,
+        totalBytes: 4800000000,
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final started = find.textContaining('Your download has started: 150 photos, 4.8 GB.');
+      await tester.ensureVisible(started);
+      await tester.pumpAndSettle();
+      expect(started.hitTestable(), findsOneWidget);
     });
 
     testWidgets('signed out at ${width.toInt()}px: nothing overflows', (tester) async {

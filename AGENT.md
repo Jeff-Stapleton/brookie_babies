@@ -57,7 +57,8 @@ lib/
   models/
     app_user.dart         AppUser: the signed-in customer (uid, email, name)
     booking.dart          Booking: one session (paid booking or ad hoc), parsed from a Firestore `bookings`
-                          document; title, familyTitle, isAdHoc, canDeliverPhotos; problemWith() says why one
+                          document; title, familyTitle, isAdHoc, canDeliverPhotos, guestEmails (an ad hoc
+                          session's `emails`, or an older one's single `email`); problemWith() says why one
                           can't be read
     picked_photo.dart     PickedPhoto: a file chosen in the browser's picker (name, size, type, the File itself)
     session_details.dart  SessionDetails: what the session form saves for an ad hoc session
@@ -94,7 +95,7 @@ lib/
                           (upcoming, past, unreadable); AdminPage.open(), AdminPage.returnWithNotice()
     admin_session_page.dart  One session: details, who can download and the share message, "Make photos
                           available" / "Hide photos", uploads, the photo list; edit and delete for ad hoc ones
-    session_form_page.dart   Add or edit an ad hoc session (name, email, package, date, time, location)
+    session_form_page.dart   Add or edit an ad hoc session (name, up to ten emails, package, date, time, location)
     home_photos_admin_page.dart  "Home page photos": the chosen photos in order, the public library, uploads,
                           "Save home page"
   components/             Page sections
@@ -143,8 +144,9 @@ lib/
     account_avatar.dart   The butter initial disc
     brookie_logo.dart     BrookieLogo: assets/logo.png at its fixed aspect, so nothing moves when it loads
   utilities/
-    utils.dart            Date formatters ("Saturday, October 24", "Sat, Oct 24"), the booking window, and file
-                          sizes for families (formatFileSize: "4.8 GB", 1000-based)
+    utils.dart            Date formatters ("Saturday, October 24", "Sat, Oct 24"), the booking window, file
+                          sizes for families (formatFileSize: "4.8 GB", 1000-based), and lists in a sentence
+                          (formatList: "a, b or c")
     keyboard_input.dart   KeyboardInput: whether the last input was a key (like :focus-visible)
     embedded_browser.dart Detects in-app browsers (Instagram, Facebook, TikTok, Pinterest, Android WebViews, ...)
     site_domain.dart      siteDomain (brookestapletonphoto.com) and withSiteAuthDomain: sign-in through
@@ -172,7 +174,7 @@ test/                     Widget and unit tests; mirrors lib/
 functions/                Cloud Functions, TypeScript on Node 24 (own package.json; not a Dart package)
   src/index.ts            Function definitions (region us-central1); getGalleryDownloadUrl
   src/gallery.ts          Core logic with injected Firestore/Storage, so tests use in-memory fakes; canDownload():
-                          the booking's uid, or an ad hoc session's verified email; progressSender: progress
+                          the booking's uid, or one of an ad hoc session's emails, verified; progressSender: progress
                           chunks to the caller, at most one per 500 ms (the first and last always)
   src/gallery.test.ts     node:test unit tests
 firestore.rules           bookings: customers read their own (uid), guests ad hoc sessions shared with their
@@ -218,16 +220,18 @@ scripts/
 4. Account menu → "Your sessions" (`ProfilePage`, also at `/#/profile`) lists the
    user's `bookings`, split into upcoming and past: `watchBookings(user)` merges
    `where('uid', isEqualTo: uid)` with, when the user has an email,
-   `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <lowercased email>)`
-   (ad hoc sessions shared with them; that query failing counts as none). With
+   `where('status', isEqualTo: 'adhoc').where('emails', arrayContains: <lowercased email>)`
+   and, for sessions from before several emails, the same with
+   `.where('email', isEqualTo: <lowercased email>)` (ad hoc sessions shared with
+   them; each of those failing counts as none). With
    none, the empty state names the email they're signed in as, for a guest on
    the wrong Google account. A paid booking's card is titled by its package
    ("Premium session"); an ad hoc session's by the name the admin gave it, the
    one the admin pages show, with its package below. A paid or ad hoc session with
    `photosReady: true` has "Download all photos" (past ones without it
    say the photos are being edited; ad hoc ones have no payment tag): `getGalleryDownloadUrl`
-   checks the booking belongs to the caller (its uid, or an ad hoc session's
-   email matching the caller's verified Google email), zips `galleries/<bookingId>/` (cached
+   checks the booking belongs to the caller (its uid, or one of an ad hoc
+   session's emails matching the caller's verified Google email), zips `galleries/<bookingId>/` (cached
    in `gallery-zips/`), streaming its progress while it builds a new zip (the
    card shows photo N of M and a bar; a caller who leaves doesn't stop the
    build), and returns a signed link that expires after an hour, opened in the
@@ -245,8 +249,9 @@ Admin flows (accounts with the `admin: true` claim, from `scripts/grant-admin.sh
    checks `isAdmin()` per uid (and `isAdmin(refresh: true)` only after a
    "no", so moving between admin pages needs no network) and otherwise asks
    to sign in or says the account isn't an admin.
-6. "Add a session" → `SessionFormPage` → `AdminService.createSession` (an ad
-   hoc `bookings` doc: `status: 'adhoc'`, name, email, date, ...) → replaced by
+6. "Add a session" → `SessionFormPage` (one email field, and "Add another
+   email" for up to ten) → `AdminService.createSession` (an ad
+   hoc `bookings` doc: `status: 'adhoc'`, name, emails, date, ...) → replaced by
    `AdminSessionPage` for the new id. A session card on Admin opens the same page.
 7. `AdminSessionPage`: "Upload photos" → `pickPhotos(accept: 'image/*')` →
    `UploadQueue` (three at a time, names already there skipped, checked with
@@ -448,16 +453,28 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   `galleries/<bookingId>/` and are only handed out as signed URLs; never put
   them under `_admin/gallery/`, which is public.
 - Rules aren't filters: the bookings queries must be exactly
-  `where('uid', isEqualTo: uid)` and
-  `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <email trimmed and lowercased>)`
+  `where('uid', isEqualTo: uid)`,
+  `where('status', isEqualTo: 'adhoc').where('emails', arrayContains: <email trimmed and lowercased>)`
+  and `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <the same>)`
   (and the guest's token must have `email_verified`), or Firestore rejects the
-  whole query. Sort on the client; an `orderBy` would need a composite index
+  whole query. Equality and `arrayContains` filters combine without an index;
+  sort on the client, because an `orderBy` would need a composite index
   (there's no `firestore.indexes.json`).
 - `status: 'adhoc'` is matched exactly (no trimming or case folding) by the
   rules, `canDownload` in `functions/src/gallery.ts` and `Booking.fromMap`; a
   hand-typed `" adhoc"` or `"Adhoc"` is unreadable in the app and shared with
-  nobody. Ad hoc sessions are made in the portal, which writes the email
+  nobody. Ad hoc sessions are made in the portal, which writes the emails
   trimmed and lowercase.
+- Ad hoc sessions added before there could be several emails have `email` (a
+  string) instead of `emails`. The rules, `canDownload`, `Booking.guestEmails`
+  and the second guest query above still read it, the rules still accept it
+  from sites that old (`validGuests`: one or the other, never both), and any
+  portal edit moves it into `emails` (`sessionChanges` deletes `email`). On a
+  paid booking `email` is only a note and `guestEmails` is empty.
+- Rules can't loop, so `validEmailList` in `firestore.rules` checks each of
+  the ten places in turn (`validEmailAt`). Raising
+  `SessionRules.emailListMaxLength` means adding places there too;
+  `rules_mirror_test.dart` fails until they agree.
 - Admin access is the `admin` claim in the caller's ID token. `isAdmin()`
   refreshes the token on its first check per uid in a page load, so a grant
   shows after a refresh. Revoking (`--revoke`) can't end a token already
@@ -473,9 +490,10 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   same time, and a late answer that differs calls `onLateChoice` (HomePage
   reloads its photos). An empty `photos` list means
   no photos, not the fallback.
-- Hiding photos, deleting a photo, and changing an ad hoc session's email
+- Hiding photos, deleting a photo, and taking an email off an ad hoc session
   delete the cached `gallery-zips/<id>.zip` (admins may only delete it), so
   signed links already handed out stop working; the next download rebuilds it.
+  Adding an email leaves it: everyone it was handed to still has access.
   Best effort: a zip that won't delete is logged and the change still succeeds
   (links then expire within the hour), except in `deleteSession`, which stops
   so the document is never deleted ahead of its zip. "Delete all photos"

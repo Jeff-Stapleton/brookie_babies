@@ -1,6 +1,6 @@
 # TODO
 
-Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-25 (download progress).
+Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-11-01 (several emails per ad hoc session).
 
 ## 1. Ship the admin portal
 
@@ -26,7 +26,7 @@ version of the download function. Do these in order.
       ```bash
       npm ci --prefix functions
       firebase deploy --only firestore:rules,storage --dry-run   # compiles the rules; changes nothing
-      bash scripts/test-rules.sh   # read-only: expect "149 of 149" and "65 of 65" cases to pass
+      bash scripts/test-rules.sh   # read-only: expect "202 of 202" and "65 of 65" cases to pass
       firebase deploy --only functions,firestore:rules,storage
       ```
       The site that's live now keeps working with them. Without them, the new
@@ -51,7 +51,9 @@ version of the download function. Do these in order.
   - [ ] Open https://brookestapletonphoto.com/#/admin, or the account menu →
         **Admin**.
   - [ ] **Add a session** for a second Google account of yours: a name, its
-        Gmail address and today's date.
+        Gmail address and today's date. **Add another email** with a third
+        account (or someone willing to check), as a couple's session would
+        have both.
   - [ ] **Upload photos**: pick 3 or 4 photos. Pick the same ones again:
         they're listed as skipped. Start a bigger upload and press **Cancel
         uploads** part way. While photos are uploading, closing the tab or
@@ -60,8 +62,11 @@ version of the download function. Do these in order.
   - [ ] In another browser or a private window, sign in as the second account
         and open the link from the message: the session is under **Your
         sessions**, and **Download all photos** downloads a zip of the photos.
-  - [ ] Back in the session, **Edit details** and change the email (it asks
-        first): the second account no longer sees the session.
+        Then the same as the third account.
+  - [ ] Back in the session, **Edit details** and take the third email off
+        (it asks first): that account no longer sees the session, and the
+        second still does. Then change the second email: the second account
+        no longer sees it either.
   - [ ] **Delete session**: Admin says it's deleted, and Firebase console →
         Storage → `galleries` no longer has its folder.
   - [ ] **Edit home page photos**: upload 2 or 3 JPEGs, and an iPhone HEIC if
@@ -198,7 +203,6 @@ Functions → getGalleryDownloadUrl → Logs.
     that aren't on the home page can't be found that way.
   - Sign-in without Google for ad hoc guests (for example an email link), for
     families without a Google account.
-  - Several emails per ad hoc session, such as both parents.
   - Editing paid bookings in the portal (date, time, name). Today that's the
     Firestore console; the rules only let the portal change `photosReady`.
 

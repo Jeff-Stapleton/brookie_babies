@@ -204,6 +204,7 @@ const ZIP_NAME = "gallery-zips/b1.zip";
 const GUEST_UID = "guest-uid";
 const GUEST_EMAIL = "harper@example.com";
 const GUEST_TOKEN = {email: GUEST_EMAIL, email_verified: true};
+const SECOND_GUEST_EMAIL = "pat@example.com";
 
 let db: FakeFirestore;
 let bucket: FakeBucket;
@@ -229,13 +230,19 @@ function addAdHocSession(id: string, fields: Record<string, unknown> = {}): void
   db.docs.set(`bookings/${id}`, {
     status: "adhoc",
     name: "The Harper family",
-    email: GUEST_EMAIL,
+    emails: [GUEST_EMAIL, SECOND_GUEST_EMAIL],
     date: "2026-09-01",
     photosReady: true,
     createdAt: NOW,
     createdBy: "admin-uid",
     ...fields,
   });
+}
+
+/** An ad hoc session from before there could be several emails: one `email`. */
+function addOneEmailSession(id: string, fields: Record<string, unknown> = {}): void {
+  addAdHocSession(id, {email: GUEST_EMAIL, ...fields});
+  delete db.docs.get(`bookings/${id}`)!.emails;
 }
 
 /** Calls as UID; with no arguments, for BOOKING_ID. */
@@ -412,14 +419,28 @@ describe("getGalleryDownload: access checks", {timeout: 10_000}, () => {
 });
 
 describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000}, () => {
-  test("a guest signed in with the session's verified email can download", async () => {
+  test("a guest signed in with one of the session's emails, verified, can download", async () => {
     addAdHocSession(BOOKING_ID);
     bucket.put("galleries/b1/a.jpg", "photo");
-    // The session's email is saved lowercase; Google may report capitals.
+    // The session's emails are saved lowercase; Google may report capitals.
+    for (const email of [GUEST_EMAIL, "Harper@Example.COM", SECOND_GUEST_EMAIL]) {
+      const result = await callAsGuest({email, email_verified: true});
+      assert.equal(result.photoCount, 1);
+    }
+  });
+
+  test("a session from before several emails opens for its one email", async () => {
+    addOneEmailSession(BOOKING_ID);
+    bucket.put("galleries/b1/a.jpg", "photo");
     for (const email of [GUEST_EMAIL, "Harper@Example.COM"]) {
       const result = await callAsGuest({email, email_verified: true});
       assert.equal(result.photoCount, 1);
     }
+    await assertHttpsError(
+      callAsGuest({email: SECOND_GUEST_EMAIL, email_verified: true}),
+      "not-found",
+      MESSAGES.notFound,
+    );
   });
 
   test("another verified email is not found", async () => {
@@ -432,7 +453,9 @@ describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000
     );
     // A session email typed with capitals in the console matches no one, as
     // in firestore.rules.
-    addAdHocSession(BOOKING_ID, {email: "Harper@example.com"});
+    addAdHocSession(BOOKING_ID, {emails: ["Harper@example.com"]});
+    await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+    addOneEmailSession(BOOKING_ID, {email: "Harper@example.com"});
     await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
     assert.equal(bucket.writeStreamsOpened, 0);
     assert.equal(bucket.signedUrlConfigs.length, 0);
@@ -456,9 +479,13 @@ describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000
     addBooking(BOOKING_ID, {email: GUEST_EMAIL});
     bucket.put("galleries/b1/a.jpg", "photo");
     await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+    addBooking(BOOKING_ID, {emails: [GUEST_EMAIL]});
+    await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
     // Nor does a status that is only nearly "adhoc".
     for (const status of ["Adhoc", " adhoc", "ADHOC", undefined]) {
       addAdHocSession(BOOKING_ID, {status});
+      await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+      addOneEmailSession(BOOKING_ID, {status});
       await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
     }
     assert.equal(bucket.writeStreamsOpened, 0);
@@ -479,10 +506,25 @@ describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000
     }
   });
 
+  test("session emails that aren't a list of strings are not found", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const emails of [
+      undefined,
+      null,
+      GUEST_EMAIL,
+      [[GUEST_EMAIL]],
+      [{toLowerCase: () => GUEST_EMAIL}],
+      {0: GUEST_EMAIL, length: 1},
+    ]) {
+      addAdHocSession(BOOKING_ID, {emails});
+      await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+    }
+  });
+
   test("a session email that isn't a string is not found", async () => {
     bucket.put("galleries/b1/a.jpg", "photo");
     for (const email of [undefined, null, 42, [GUEST_EMAIL], {toLowerCase: () => GUEST_EMAIL}]) {
-      addAdHocSession(BOOKING_ID, {email});
+      addOneEmailSession(BOOKING_ID, {email});
       await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
     }
   });

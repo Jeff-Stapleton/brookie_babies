@@ -334,9 +334,10 @@ export function progressSender(
 /**
  * Whether the caller may download this booking's photos: it carries their
  * uid, or it's an ad hoc session (status exactly "adhoc", as only the admin
- * pages write it) shared with the email the caller verified with Google.
- * Like the bookings read rule in firestore.rules, which compares the stored
- * email (saved lowercase) with the token's email lowercased.
+ * pages write it) whose `emails` include the email the caller verified with
+ * Google (or whose `email` is it, for a session from before there could be
+ * several). Like the bookings read rule in firestore.rules, which compares
+ * the stored emails (saved lowercase) with the token's email lowercased.
  *
  * Booking fields and claims are checked with typeof first, so odd values
  * typed into the console mean "not theirs", never a TypeError ('internal').
@@ -346,13 +347,13 @@ export function canDownload(
   caller: CallerAuth,
 ): boolean {
   if (booking.uid === caller.uid) return true;
-  const email = caller.token?.email;
+  const token = caller.token;
+  if (token?.email_verified !== true || typeof token.email !== "string") return false;
+  const email = token.email.toLowerCase();
   return (
     booking.status === "adhoc" &&
-    caller.token?.email_verified === true &&
-    typeof email === "string" &&
-    typeof booking.email === "string" &&
-    booking.email === email.toLowerCase()
+    ((Array.isArray(booking.emails) && booking.emails.includes(email)) ||
+      booking.email === email)
   );
 }
 

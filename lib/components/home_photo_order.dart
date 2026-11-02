@@ -45,7 +45,7 @@ class HomePhotoOrder extends StatefulWidget {
   static const heroLabel = 'Full-screen photo, behind the logo: keep faces clear of the middle';
 
   /// Where the rest go.
-  static const featuredLabel = 'Below the introduction';
+  static const featuredLabel = 'Below the full-screen photo';
 
   @override
   State<HomePhotoOrder> createState() => _HomePhotoOrderState();
@@ -210,7 +210,7 @@ class _OrderRow extends StatelessWidget {
     final textScaler = MediaQuery.textScalerOf(context);
     final sideBySideWidth = textScaler.scale(_sideBySideWidth);
 
-    // One node: "2. IMG_2.jpg. Below the introduction".
+    // One node: "2. IMG_2.jpg. Below the full-screen photo".
     final about = MergeSemantics(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -678,18 +678,19 @@ const kHomeUploadsGoLiveNote = 'Until the home page is saved, the site shows the
 String homePhotosShownNote(int count) {
   if (count == 0) return 'With no photos, the home page shows the logo on a plain band.';
   final featured = count - 1;
-  if (featured == 0) return 'Just the full-screen photo. Add more to show photos below the introduction.';
+  if (featured == 0) return 'Just the full-screen photo. Add more to show photos below it.';
   final wide = FeaturedPhotos.shownCount(featured, wide: true);
   final phone = FeaturedPhotos.shownCount(featured, wide: false);
   if (wide == 0 && phone == 0) {
-    return 'One photo below the introduction is left out: it takes two to fill a row. Add another to show them.';
+    return 'One photo below the full-screen photo is left out: it takes two to fill a row. Add another to show '
+        'them.';
   }
   if (wide == featured && phone == featured) {
     final all = featured == 2 ? 'both photos' : 'all $featured photos';
-    return 'Wide screens and phones show $all below the introduction.';
+    return 'Wide screens and phones show $all below the full-screen photo.';
   }
   String shown(int n) => n == featured ? 'all $featured' : 'the first $n of $featured';
-  return 'Photos below the introduction fill whole rows, so wide screens show ${shown(wide)} and phones '
+  return 'Photos below the full-screen photo fill whole rows, so wide screens show ${shown(wide)} and phones '
       'show ${shown(phone)}.';
 }
 

@@ -34,8 +34,9 @@ function realDeps(): GalleryDeps {
 /**
  * Callable: {bookingId} -> {url, photoCount, expiresAt, totalBytes}, a signed
  * URL (valid for 60 minutes) to a zip of every photo of the caller's paid
- * booking, or of an ad hoc session shared with the caller's verified Google
- * email. While it builds a zip, streaming callers (the site) get
+ * booking, of an ad hoc session shared with the caller's verified Google
+ * email, or of a session its owner shared with that email. While it builds a
+ * zip, streaming callers (the site) get
  * GalleryProgress chunks; others get only the result. A caller who leaves
  * doesn't stop the build, so the next download can reuse it.
  *

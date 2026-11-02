@@ -1,15 +1,16 @@
-// Core logic of the getGalleryDownloadUrl callable: checks that the caller
-// may download a booking whose photos are ready (their own paid booking, an
-// ad hoc session shared with their verified Google email, or a session its
-// owner shared with that email), zips the
-// photos in galleries/{bookingId}/ into gallery-zips/{bookingId}.zip
-// (reusing the zip while the photos are unchanged) and returns a short-lived
-// signed URL for it. While it builds a zip, it streams its progress to callers
-// that ask for it (the site).
+// Core logic shared by the session gallery and its zip download: checks that
+// the caller may see a booking whose photos are ready (their own paid
+// booking, an ad hoc session shared with their verified Google email, or a
+// session its owner shared with that email), then lists the photos in
+// galleries/{bookingId}/. getGalleryPhotoUrls returns short-lived signed URLs
+// for the individual photos. getGalleryDownloadUrl zips them into
+// gallery-zips/{bookingId}.zip (reusing the zip while the photos are
+// unchanged) and returns a short-lived signed URL for it. While it builds a
+// zip, it streams its progress to callers that ask for it (the site).
 //
-// Who may download mirrors who may read the booking in firestore.rules
+// Who may see the photos mirrors who may read the booking in firestore.rules
 // (admins aside: they read every booking but download none), so the app only
-// ever shows a download the caller can get.
+// ever shows a gallery or download the caller can get.
 //
 // Firestore and Storage are injected as the small interfaces below, so the
 // unit tests can use in-memory fakes. index.ts passes the real Admin SDK
@@ -25,6 +26,7 @@ export const GALLERY_PREFIX = "galleries/";
 export const ZIP_PREFIX = "gallery-zips/";
 export const SIGNED_URL_TTL_MS = 60 * 60 * 1000;
 export const BOOKING_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+export const PHOTO_URL_CONCURRENCY = 12;
 
 // Bump when the zip layout changes (entry naming, options) so zips cached by
 // an older version are rebuilt.
@@ -79,6 +81,20 @@ export interface GalleryDownload {
   totalBytes: number | null;
 }
 
+/** One private session photo, available through its short-lived URL. */
+export interface GalleryPhoto {
+  /** Safe relative name, stable for the life of this version of the photo. */
+  name: string;
+  url: string;
+}
+
+/** Response of getGalleryPhotoUrls, shared with the Flutter client. */
+export interface GalleryPhotoList {
+  photos: GalleryPhoto[];
+  /** ISO 8601; every URL has this expiry. */
+  expiresAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Injected dependencies (subsets of the Admin SDK's Firestore and Bucket).
 // ---------------------------------------------------------------------------
@@ -107,7 +123,7 @@ export interface SignedUrlConfig {
   version: "v4";
   action: "read";
   expires: Date;
-  responseDisposition: string;
+  responseDisposition?: string;
 }
 
 export interface ZipWriteStreamOptions {
@@ -204,6 +220,49 @@ export async function handleGalleryDownloadRequest(
 }
 
 /**
+ * Thin wrapper used by getGalleryPhotoUrls: the same authorization and
+ * customer-safe error behavior as the zip callable.
+ */
+export async function handleGalleryPhotosRequest(
+  deps: GalleryDeps & {logError: (message: string, error: unknown) => void},
+  request: CallableRequestLike,
+): Promise<GalleryPhotoList> {
+  const auth = request.auth;
+  if (!auth?.uid) {
+    throw new HttpsError("unauthenticated", MESSAGES.unauthenticated);
+  }
+  try {
+    return await getGalleryPhotos(deps, auth, request.data);
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    const bookingId = (request.data as {bookingId?: unknown} | null)?.bookingId;
+    deps.logError(
+      `getGalleryPhotoUrls failed for booking ${String(bookingId)} (uid ${auth.uid})`,
+      error,
+    );
+    throw new HttpsError("internal", MESSAGES.internal);
+  }
+}
+
+/**
+ * Returns short-lived URLs for every photo in a gallery the caller may see.
+ * Signing is bounded rather than fully parallel, so a large gallery neither
+ * serializes hundreds of network calls nor bursts all of them at IAM.
+ */
+export async function getGalleryPhotos(
+  deps: GalleryDeps,
+  caller: CallerAuth,
+  data: unknown,
+): Promise<GalleryPhotoList> {
+  const {photos} = await authorizedGallery(deps, caller, data);
+  const expires = new Date(deps.now().getTime() + SIGNED_URL_TTL_MS);
+  return {
+    photos: await signGalleryPhotos(deps.bucket, photos, expires),
+    expiresAt: expires.toISOString(),
+  };
+}
+
+/**
  * Returns a signed download URL for the zip of all photos of a booking the
  * caller may download, building (or rebuilding) the zip if needed. While it
  * builds one, it sends GalleryProgress to `stream`; nothing is sent before
@@ -215,35 +274,11 @@ export async function getGalleryDownload(
   data: unknown,
   stream?: ProgressStream,
 ): Promise<GalleryDownload> {
-  const bookingId = parseBookingId(data);
-
-  const snapshot = await deps.db.doc(`bookings/${bookingId}`).get();
-  const booking = snapshot.exists ? snapshot.data() : undefined;
-  // Same error for "doesn't exist" and "someone else's", and before any
-  // status or readiness check, so booking IDs can't be probed.
-  if (!booking || !canDownload(booking, caller)) {
-    throw new HttpsError("not-found", MESSAGES.notFound);
-  }
-  // Bookings are typed in by hand; accept " Paid " the same way the Flutter
-  // client (Booking.fromMap) does, so it never shows a download that fails.
-  // Ad hoc sessions need no payment.
-  const status =
-    typeof booking.status === "string"
-      ? booking.status.trim().toLowerCase()
-      : undefined;
-  if (status !== "paid" && status !== "adhoc") {
-    throw new HttpsError("failed-precondition", MESSAGES.notPaid);
-  }
-  if (booking.photosReady !== true) {
-    throw new HttpsError("failed-precondition", MESSAGES.notReady);
-  }
-
-  const prefix = `${GALLERY_PREFIX}${bookingId}/`;
-  const [listed] = await deps.bucket.getFiles({prefix});
-  const photos = selectPhotos(listed, prefix);
-  if (photos.length === 0) {
-    throw new HttpsError("failed-precondition", MESSAGES.notReady);
-  }
+  const {bookingId, booking, photos} = await authorizedGallery(
+    deps,
+    caller,
+    data,
+  );
 
   const fingerprint = computeFingerprint(photos);
   const zipObject = deps.bucket.file(`${ZIP_PREFIX}${bookingId}.zip`);
@@ -299,6 +334,80 @@ export async function getGalleryDownload(
     ),
   });
   return {url, photoCount: photos.length, expiresAt: expires.toISOString(), totalBytes};
+}
+
+interface AuthorizedGallery {
+  bookingId: string;
+  booking: Record<string, unknown>;
+  photos: Photo[];
+}
+
+/**
+ * Checks access, deliverability and readiness before listing a gallery.
+ * Access is checked before any state that could reveal a booking ID.
+ */
+async function authorizedGallery(
+  deps: GalleryDeps,
+  caller: CallerAuth,
+  data: unknown,
+): Promise<AuthorizedGallery> {
+  const bookingId = parseBookingId(data);
+  const snapshot = await deps.db.doc(`bookings/${bookingId}`).get();
+  const booking = snapshot.exists ? snapshot.data() : undefined;
+  // Same error for "doesn't exist" and "someone else's", and before any
+  // status or readiness check, so booking IDs can't be probed.
+  if (!booking || !canDownload(booking, caller)) {
+    throw new HttpsError("not-found", MESSAGES.notFound);
+  }
+  // Bookings are typed in by hand; accept " Paid " the same way the Flutter
+  // client (Booking.fromMap) does, so it never shows a gallery that fails.
+  // Ad hoc sessions need no payment.
+  const status =
+    typeof booking.status === "string"
+      ? booking.status.trim().toLowerCase()
+      : undefined;
+  if (status !== "paid" && status !== "adhoc") {
+    throw new HttpsError("failed-precondition", MESSAGES.notPaid);
+  }
+  if (booking.photosReady !== true) {
+    throw new HttpsError("failed-precondition", MESSAGES.notReady);
+  }
+
+  const prefix = `${GALLERY_PREFIX}${bookingId}/`;
+  const [listed] = await deps.bucket.getFiles({prefix});
+  const photos = selectPhotos(listed, prefix);
+  if (photos.length === 0) {
+    throw new HttpsError("failed-precondition", MESSAGES.notReady);
+  }
+  return {bookingId, booking, photos};
+}
+
+/**
+ * Signs [photos] in order, with at most [concurrency] requests in flight.
+ */
+export async function signGalleryPhotos(
+  bucket: BucketLike,
+  photos: readonly Photo[],
+  expires: Date,
+  concurrency = PHOTO_URL_CONCURRENCY,
+): Promise<GalleryPhoto[]> {
+  const signed = new Array<GalleryPhoto>(photos.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < photos.length) {
+      const index = next++;
+      const photo = photos[index];
+      const [url] = await bucket.file(photo.name).getSignedUrl({
+        version: "v4",
+        action: "read",
+        expires,
+      });
+      signed[index] = {name: photo.entryName, url};
+    }
+  };
+  const workers = Math.min(Math.max(1, concurrency), photos.length);
+  await Promise.all(Array.from({length: workers}, worker));
+  return signed;
 }
 
 /**

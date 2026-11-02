@@ -9,8 +9,10 @@ import {onCall} from "firebase-functions/https";
 import * as logger from "firebase-functions/logger";
 import {
   handleGalleryDownloadRequest,
+  handleGalleryPhotosRequest,
   type GalleryDeps,
   type GalleryDownload,
+  type GalleryPhotoList,
   type GalleryProgress,
 } from "./gallery";
 
@@ -61,5 +63,26 @@ export const getGalleryDownloadUrl = onCall<
       },
       request,
       response,
+    ),
+);
+
+/**
+ * Callable: {bookingId} -> {photos: [{name, url}], expiresAt}. Each URL
+ * displays one photo from a gallery the caller may download and expires after
+ * 60 minutes. Access, payment and readiness checks are the same as the zip
+ * callable above.
+ */
+export const getGalleryPhotoUrls = onCall<
+  unknown,
+  Promise<GalleryPhotoList>
+>(
+  {timeoutSeconds: 120},
+  (request) =>
+    handleGalleryPhotosRequest(
+      {
+        ...realDeps(),
+        logError: (message, error) => logger.error(message, error),
+      },
+      request,
     ),
 );

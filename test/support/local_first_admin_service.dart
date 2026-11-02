@@ -40,6 +40,7 @@ class LocalFirstAdminService extends FakeAdminService {
         uid: s.uid,
         email: s.email,
         emails: s.emails,
+        sharedWith: s.sharedWith,
         name: s.name,
       );
 }

@@ -154,7 +154,12 @@ class _SessionsState extends State<_Sessions> {
                 ),
               );
             }
-            return _BookingSections(bookings: data.bookings, unreadable: data.unreadable, email: widget.user.email);
+            return _BookingSections(
+              bookings: data.bookings,
+              unreadable: data.unreadable,
+              sharedWithUser: data.sharedWithUser,
+              email: widget.user.email,
+            );
           },
         ),
       ],
@@ -206,10 +211,18 @@ class _AccountHeader extends StatelessWidget {
 }
 
 class _BookingSections extends StatelessWidget {
-  const _BookingSections({required this.bookings, required this.unreadable, required this.email});
+  const _BookingSections({
+    required this.bookings,
+    required this.unreadable,
+    required this.sharedWithUser,
+    required this.email,
+  });
 
   final List<Booking> bookings;
   final int unreadable;
+
+  /// The ids of the sessions shared with them by their owner.
+  final Set<String> sharedWithUser;
 
   /// The email they're signed in as, which shared sessions are matched by.
   final String? email;
@@ -239,10 +252,22 @@ class _BookingSections extends StatelessWidget {
         ],
         if (bookings.isEmpty && unreadable == 0) _NoSessions(email: email),
         if (upcoming.isNotEmpty)
-          _Section(title: 'Upcoming', bookings: upcoming, isPast: false, primaryDownload: primaryDownload),
+          _Section(
+            title: 'Upcoming',
+            bookings: upcoming,
+            isPast: false,
+            primaryDownload: primaryDownload,
+            sharedWithUser: sharedWithUser,
+          ),
         if (upcoming.isNotEmpty && past.isNotEmpty) SizedBox(height: sectionGap),
         if (past.isNotEmpty)
-          _Section(title: 'Past', bookings: past, isPast: true, primaryDownload: primaryDownload),
+          _Section(
+            title: 'Past',
+            bookings: past,
+            isPast: true,
+            primaryDownload: primaryDownload,
+            sharedWithUser: sharedWithUser,
+          ),
       ],
     );
   }
@@ -254,6 +279,7 @@ class _Section extends StatelessWidget {
     required this.bookings,
     required this.isPast,
     required this.primaryDownload,
+    required this.sharedWithUser,
   });
 
   final String title;
@@ -262,6 +288,8 @@ class _Section extends StatelessWidget {
 
   /// The id of the booking whose download is the page's primary button.
   final String? primaryDownload;
+
+  final Set<String> sharedWithUser;
 
   @override
   Widget build(BuildContext context) {
@@ -282,6 +310,7 @@ class _Section extends StatelessWidget {
             booking: booking,
             isPast: isPast,
             primaryDownload: booking.id == primaryDownload,
+            sharedWithYou: sharedWithUser.contains(booking.id),
           ),
         ],
       ],

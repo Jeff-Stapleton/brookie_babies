@@ -20,6 +20,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
+import '../support/hidden_sections.dart';
 
 /// Dates far from today, so the tests don't depend on the clock.
 const _future = '2999-03-04';
@@ -133,7 +134,13 @@ void main() {
     // With the email, for the sessions shared with it.
     expect(bookings.watchedUsers.single.email, testUser.email);
     expect(find.textContaining('No sessions yet.'), findsOneWidget);
-    expect(find.widgetWithText(OutlinedButton, 'See packages'), findsOneWidget);
+  });
+
+  testWidgets('with no sessions, while there are no packages: no "See packages"', (tester) async {
+    await pumpProfile(tester);
+
+    expect(find.textContaining('No sessions yet.'), findsOneWidget);
+    expect(find.text('See packages'), findsNothing);
   });
 
   group('with no sessions, names the email they’re signed in as', () {
@@ -461,6 +468,7 @@ void main() {
   });
 
   testWidgets('the empty state is the shared band, its sentence held to the reading width', (tester) async {
+    offerPackages();
     await pumpProfile(tester, size: const Size(1440, 900));
 
     final band = find.byType(EmptyState);
@@ -474,6 +482,7 @@ void main() {
   });
 
   testWidgets('"See packages" goes back home and shows the packages', (tester) async {
+    offerPackages();
     tester.view.physicalSize = const Size(1440, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);

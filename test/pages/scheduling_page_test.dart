@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
+import '../support/hidden_sections.dart';
 
 /// Saturday, October 17, 2026, before the first session of the day.
 final saturdayMorning = DateTime(2026, 10, 17, 8);
@@ -150,7 +151,21 @@ void main() {
     expect(urlOpener.opened, isEmpty);
   });
 
+  testWidgets('unknown package, while there are no packages: says so, never sign-in or payment', (tester) async {
+    final auth = FakeAuthService();
+    await pumpPage(tester, auth, packageName: '');
+
+    final band = find.byType(EmptyState);
+    expect(find.descendant(of: band, matching: find.text('Sessions can’t be booked online yet.')), findsOneWidget);
+    expect(find.text('See packages'), findsNothing);
+    expect(continueButton(), findsNothing);
+    expect(find.byType(SessionSlot), findsNothing);
+    expect(auth.signInCalls, 0);
+    expect(urlOpener.opened, isEmpty);
+  });
+
   testWidgets('unknown package: offers the packages, never sign-in or payment', (tester) async {
+    offerPackages();
     final auth = FakeAuthService();
     await pumpPage(tester, auth, packageName: '');
 
@@ -167,6 +182,7 @@ void main() {
   });
 
   testWidgets('unknown package: "See packages" goes back to the first page', (tester) async {
+    offerPackages();
     await tester.pumpWidget(testApp(
       auth: FakeAuthService(),
       urlOpener: urlOpener,
@@ -191,6 +207,7 @@ void main() {
   });
 
   testWidgets('unknown package: "See packages" goes home and scrolls to the packages', (tester) async {
+    offerPackages();
     tester.view.physicalSize = const Size(1440, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);

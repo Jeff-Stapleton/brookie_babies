@@ -6,6 +6,7 @@ import 'package:brookie_babies/components/sign_in_dialog.dart';
 import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/models/booking.dart';
 import 'package:brookie_babies/pages/home_page.dart';
+import 'package:brookie_babies/pages/session_gallery_page.dart';
 import 'package:brookie_babies/services/app_services.dart';
 import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
@@ -20,7 +21,7 @@ import 'package:flutter/material.dart';
 const _listWidth = 720.0;
 
 /// "Your sessions": the signed-in family's account, their upcoming and past
-/// sessions, and photo downloads.
+/// sessions, private galleries and photo downloads.
 ///
 /// Framed like Booking, so the page title sits in the same place on both:
 /// the page's content column, s7 below the top bar from 900px wide (s6 on
@@ -142,8 +143,7 @@ class _SessionsState extends State<_Sessions> {
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               log('Loading bookings failed: ${snapshot.error}');
-              return const InlineMessage(
-                  message: 'We couldn’t load your sessions. Refresh the page to try again.');
+              return const InlineMessage(message: 'We couldn’t load your sessions. Refresh the page to try again.');
             }
             final data = snapshot.data;
             if (data == null) {
@@ -230,15 +230,13 @@ class _BookingSections extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final upcoming = bookings.where((b) => !b.isPast(now)).toList()
-      ..sort((a, b) => a.compareTo(b));
-    final past = bookings.where((b) => b.isPast(now)).toList()
-      ..sort((a, b) => b.compareTo(a));
+    final upcoming = bookings.where((b) => !b.isPast(now)).toList()..sort((a, b) => a.compareTo(b));
+    final past = bookings.where((b) => b.isPast(now)).toList()..sort((a, b) => b.compareTo(a));
     final sectionGap = BrookieLayout.sectionGap(context);
     // One primary button per view: the newest session with photos ready gets
-    // the ink "Download all photos"; any others get the outlined one.
+    // the ink "View photos"; any others get the outlined one.
     final ready = bookings.where((b) => b.canDeliverPhotos && b.photosReady);
-    final primaryDownload = ready.isEmpty ? null : ready.reduce((a, b) => b.compareTo(a) > 0 ? b : a).id;
+    final primaryGallery = ready.isEmpty ? null : ready.reduce((a, b) => b.compareTo(a) > 0 ? b : a).id;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -256,7 +254,7 @@ class _BookingSections extends StatelessWidget {
             title: 'Upcoming',
             bookings: upcoming,
             isPast: false,
-            primaryDownload: primaryDownload,
+            primaryGallery: primaryGallery,
             sharedWithUser: sharedWithUser,
           ),
         if (upcoming.isNotEmpty && past.isNotEmpty) SizedBox(height: sectionGap),
@@ -265,7 +263,7 @@ class _BookingSections extends StatelessWidget {
             title: 'Past',
             bookings: past,
             isPast: true,
-            primaryDownload: primaryDownload,
+            primaryGallery: primaryGallery,
             sharedWithUser: sharedWithUser,
           ),
       ],
@@ -278,7 +276,7 @@ class _Section extends StatelessWidget {
     required this.title,
     required this.bookings,
     required this.isPast,
-    required this.primaryDownload,
+    required this.primaryGallery,
     required this.sharedWithUser,
   });
 
@@ -286,8 +284,8 @@ class _Section extends StatelessWidget {
   final List<Booking> bookings;
   final bool isPast;
 
-  /// The id of the booking whose download is the page's primary button.
-  final String? primaryDownload;
+  /// The id of the booking whose gallery is the page's primary button.
+  final String? primaryGallery;
 
   final Set<String> sharedWithUser;
 
@@ -309,8 +307,15 @@ class _Section extends StatelessWidget {
             key: ValueKey(booking.id),
             booking: booking,
             isPast: isPast,
-            primaryDownload: booking.id == primaryDownload,
+            primaryPhotoAction: booking.id == primaryGallery,
             sharedWithYou: sharedWithUser.contains(booking.id),
+            onViewPhotos: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (context) => SessionGalleryPage(booking: booking),
+                ),
+              );
+            },
           ),
         ],
       ],

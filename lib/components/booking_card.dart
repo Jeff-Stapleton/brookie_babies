@@ -21,27 +21,28 @@ import 'package:flutter/services.dart';
 
 /// One session on the "Your sessions" page: its title (an ad hoc session's
 /// name, with its package below), payment status, date, time and place, and
-/// for sessions whose photos can be delivered (paid or ad hoc), the photo
-/// download: the zip's progress while it's built, and a message once the
-/// browser has it (or, once past, a note that the photos are being edited).
-/// The family's own such sessions can be shared from here; one shared with
-/// them says so.
+/// for sessions whose photos can be delivered (paid or ad hoc), the private
+/// gallery and zip download: the zip's progress while it's built, and a
+/// message once the browser has it (or, once past, a note that the photos are
+/// being edited). The family's own such sessions can be shared from here; one
+/// shared with them says so.
 class BookingCard extends StatelessWidget {
   const BookingCard({
     super.key,
     required this.booking,
     required this.isPast,
-    this.primaryDownload = true,
+    required this.onViewPhotos,
+    this.primaryPhotoAction = true,
     this.sharedWithYou = false,
   });
 
   final Booking booking;
   final bool isPast;
+  final VoidCallback onViewPhotos;
 
-  /// Whether "Download all photos" is the page's primary (ink) button. The
-  /// page has one: on the newest session with photos ready. Others are
-  /// outlined.
-  final bool primaryDownload;
+  /// Whether "View photos" is the page's primary (ink) button. The page has
+  /// one: on the newest session with photos ready. Others are outlined.
+  final bool primaryPhotoAction;
 
   /// Whether the family sees it only because its owner shared it with them
   /// (UserBookings.sharedWithUser): it isn't theirs to share.
@@ -101,7 +102,11 @@ class BookingCard extends StatelessWidget {
               const SizedBox(height: BrookieSpace.s5),
               const Divider(),
               const SizedBox(height: BrookieSpace.s5),
-              _PhotoDownload(booking: booking, primary: primaryDownload),
+              _PhotoDownload(
+                booking: booking,
+                primary: primaryPhotoAction,
+                onViewPhotos: onViewPhotos,
+              ),
             ],
             // Shared before the photos are ready, it's there for whoever it's
             // shared with when they are.
@@ -409,10 +414,15 @@ class _ShareDialogState extends State<_ShareDialog> {
 /// its progress below once the server starts building it (which photo, a
 /// bar, the size), then a success or error message.
 class _PhotoDownload extends StatefulWidget {
-  const _PhotoDownload({required this.booking, required this.primary});
+  const _PhotoDownload({
+    required this.booking,
+    required this.primary,
+    required this.onViewPhotos,
+  });
 
   final Booking booking;
   final bool primary;
+  final VoidCallback onViewPhotos;
 
   @override
   State<_PhotoDownload> createState() => _PhotoDownloadState();
@@ -547,17 +557,35 @@ class _PhotoDownloadState extends State<_PhotoDownload> {
       children: [
         const StatusTag(label: 'Ready to download', tone: StatusTone.success),
         const SizedBox(height: BrookieSpace.s3),
-        // Keeps keyboard focus while busy (a disabled button would drop it
-        // onto "Sign out", where a second Enter would sign the family out);
-        // another press just waits for the same download.
-        BusyButton(
-          kind: widget.primary ? BusyButtonKind.filled : BusyButtonKind.outlined,
-          icon: Icons.download_outlined,
-          label: 'Download all photos',
-          busyLabel: _preparingLabel,
-          busySemanticsLabel: progress == null ? null : zipProgressAnnouncement(progress),
-          busy: _preparing,
-          onPressed: _download,
+        Wrap(
+          spacing: BrookieSpace.s2,
+          runSpacing: BrookieSpace.s2,
+          children: [
+            if (widget.primary)
+              FilledButton.icon(
+                onPressed: widget.onViewPhotos,
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const Text('View photos'),
+              )
+            else
+              OutlinedButton.icon(
+                onPressed: widget.onViewPhotos,
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const Text('View photos'),
+              ),
+            // Keeps keyboard focus while busy (a disabled button would drop
+            // it onto the next action); another press waits for the same
+            // download.
+            BusyButton(
+              kind: BusyButtonKind.text,
+              icon: Icons.download_outlined,
+              label: 'Download all photos',
+              busyLabel: _preparingLabel,
+              busySemanticsLabel: progress == null ? null : zipProgressAnnouncement(progress),
+              busy: _preparing,
+              onPressed: _download,
+            ),
+          ],
         ),
         if (_preparing && progress != null) ...[
           const SizedBox(height: BrookieSpace.s3),

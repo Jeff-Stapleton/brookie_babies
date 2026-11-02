@@ -2,7 +2,8 @@
 
 A Flutter web app for Brooke Stapleton Photography. Families can see Brooke's
 photographs, choose a session package, pick a date and time, pay through Stripe,
-and later download their edited photos. The site is hosted on Firebase.
+and later view and download their edited photos. The site is hosted on
+Firebase.
 
 > Status: early MVP. The session times and the package inclusions are still
 > placeholders (`lib/models/session_time.dart`, `lib/models/session_package.dart`).
@@ -26,11 +27,14 @@ and later download their edited photos. The site is hosted on Firebase.
   Stripe Payment Link, tagged with the customer's account so the payment can be
   matched to them.
 - **Your sessions**: signed-in customers see their upcoming and past sessions,
-  including ad hoc sessions shared with their Google email, and download every
-  photo from a session as one zip, through a private link that expires after
-  an hour. While a zip is prepared, the page shows how it's going. Families
-  can share a session with others, such as grandparents, by Google email: it
-  shows under their Your sessions too, and they can download its photos.
+  including ad hoc sessions shared with their Google email. Once photos are
+  ready, **View photos** opens a private, full-bleed session gallery with its
+  title and date, a responsive grid and a full-screen photo viewer. They can
+  also download every photo as one zip. The gallery and zip use private links
+  that expire after an hour. While a zip is prepared, the page shows how it's
+  going. Families can share a session with others, such as grandparents, by
+  Google email: it shows under their Your sessions too, with the same gallery
+  and download.
 - **Admin portal** (`/#/admin`, or **Admin** in the account menu, shown only to
   admins): every session; ad hoc sessions for family and friends, shared with
   one or more emails (both of a couple, say); uploading a session's photos;
@@ -124,12 +128,12 @@ lib/
   theme/             The design system: colors, type, spacing, Material theme
   models/            Data types (signed-in user, booking, packages, session times,
                      ad hoc session details, picked and stored photos)
-  services/          Auth, bookings, photo downloads, home page photos, the admin
+  services/          Auth, bookings, private photo galleries and downloads, home page photos, the admin
                      service and the rules' limits in Dart (photo_rules.dart),
                      app-wide services, Stripe Payment Links
-  pages/             Home, Book a session and Your sessions screens, and the
-                     admin pages (Admin, one session, the session form, Home
-                     page photos)
+  pages/             Home, Book a session, Your sessions and one family's
+                     photo gallery, and the admin pages (Admin, one session,
+                     the session form, Home page photos)
   components/        Page sections (hero, featured photos, packages, calendar,
                      session times, footer, account button, sign-in dialog,
                      booking card, and for the admin pages: the gate, session
@@ -140,7 +144,8 @@ lib/
                      file picker, the leave-page warning, keeping the screen on
 assets/              Logo and fonts
 web/                 Web shell (index.html, manifest, icons)
-functions/           Cloud Functions (TypeScript, Node 24): getGalleryDownloadUrl
+functions/           Cloud Functions (TypeScript, Node 24): private photo links
+                     and getGalleryDownloadUrl's zip
 firestore.rules      Firestore security rules (families read their own bookings and
                      sessions shared with their email, and share their own; admins
                      manage sessions and the home page photo choice)
@@ -249,7 +254,24 @@ then.
 
 ## Delivering photos
 
-Families download their photos from **Your sessions** once the session's `photosReady` is `true` and its `status` is `paid` or `adhoc`. The **Download all photos** button appears on the session's card even before the session date, so check that the session is right before making its photos available. Photos are never public through the site: families get a zip download link that expires after one hour. Hiding the photos, deleting one, or taking an email off an ad hoc session also deletes the cached zip, so links already handed out stop working at once (if that delete fails, the change still goes through and those links expire within the hour).
+Families view and download their photos from **Your sessions** once the
+session's `photosReady` is `true` and its `status` is `paid` or `adhoc`.
+**View photos** opens the session's private gallery: the first photo by file
+name is its full-bleed cover, followed by the session title and date, then
+every photo in a responsive grid. Selecting one opens a full-screen viewer
+with previous and next controls. **Download all photos** still prepares one
+zip. Both actions appear even before the session date, so check that the
+session is right before making its photos available.
+
+Photos are never public through the site. The gallery gets a separate signed
+read link for each photo, and the download gets a signed zip link; all expire
+after one hour. The server checks the signed-in account, payment status and
+`photosReady` before issuing either kind. Hiding the photos, deleting one, or
+taking an email off an ad hoc session also deletes the cached zip, so zip links
+already handed out stop working at once (if that delete fails, the change
+still goes through and those links expire within the hour). Individual photo
+links already issued remain usable until their one-hour expiry, as any signed
+link does.
 
 ### In the admin portal
 
@@ -380,7 +402,13 @@ Admins are accounts whose ID token carries the custom claim `admin: true` (see "
 - **Sharing.** A session's owner (the customer whose `uid` it carries, or a guest of an ad hoc session) may change its `sharedWith` and nothing else: up to 10 valid emails, each once. Whoever's verified Google email is in it reads the session, whatever its status. Someone it was shared with can't change it, and admins don't either.
 - **`site/home`.** Anyone reads it. Admins save it whole: `photos` (at most seven file names), `updatedAt` and `updatedBy`.
 - **Storage.** `_admin/gallery/` stays publicly readable (get and list). Admins add photos directly in it (JPEG, PNG or WebP, named `.jpg`, `.jpeg`, `.png` or `.webp`, under 20 MiB) and delete them. Under `galleries/<bookingId>/` only admins read, add (any image type, under 100 MiB) and delete. Admins may delete a cached zip in `gallery-zips/`, nothing more. There's no update anywhere, so nothing is ever overwritten.
-- **`getGalleryDownloadUrl`** serves the same people: the booking's `uid`, for an ad hoc session the caller whose verified Google email is one of its emails, and anyone whose verified Google email is in its `sharedWith`. Ad hoc sessions need no payment; a session shared with someone still needs to be paid (or ad hoc) and its photos available.
+- **`getGalleryPhotoUrls` and `getGalleryDownloadUrl`** serve the same people:
+  the booking's `uid`, for an ad hoc session the caller whose verified Google
+  email is one of its emails, and anyone whose verified Google email is in its
+  `sharedWith`. Ad hoc sessions need no payment; a session shared with someone
+  still needs to be paid (or ad hoc) and its photos available. The first
+  callable signs each individual photo for the gallery; the second signs the
+  cached zip.
 
 No new IAM roles, function permissions, APIs or secrets are needed: the function reads the same bookings and bucket as before, and everything admins do goes through the rules.
 
@@ -403,7 +431,10 @@ Deploy the rules and the function **before** (or with) the site that relies on t
 - with the rules from before several emails, sessions saved with `emails` can't be added or edited, and their guests don't see them;
 - with the rules from before sharing, **Share this session** says it couldn't share the session, and sessions shared with someone don't show for them;
 - with the new rules but the old function, guests see their ad hoc session but its download fails ("We couldn’t find this session’s photos");
-- with the new site but the old function, downloads work as before, showing only "Preparing your photos…" until they start (no progress or size).
+- with the new site before `getGalleryPhotoUrls` is deployed, **View photos**
+  shows its retry message; downloads still work. With a still older
+  `getGalleryDownloadUrl`, they show only "Preparing your photos…" until they
+  start (no progress or size).
 
 On pushes to `main`, CI deploys the backend before the site, but only once `BACKEND_DEPLOY_LIVE` is `true` (see below). Until then, deploy backend changes by hand from their branch before merging it (see "Deploying by hand").
 
@@ -474,7 +505,10 @@ firebase deploy --only functions,firestore:rules,storage
 
 #### Function runtime permissions
 
-The functions run as `375587092017-compute@developer.gserviceaccount.com`, which in this project has no broad (Editor) access. `scripts/setup-functions-runtime.sh` (project owner, once, idempotent) gives it exactly what `getGalleryDownloadUrl` needs:
+The functions run as `375587092017-compute@developer.gserviceaccount.com`,
+which in this project has no broad (Editor) access.
+`scripts/setup-functions-runtime.sh` (project owner, once, idempotent) gives
+it exactly what the two gallery functions need:
 
 - **Reading bookings:** read-only Firestore access (`roles/datastore.viewer`).
 - **Reading photos and saving the zips:** object access on the Storage bucket only (`roles/storage.objectUser`).
@@ -494,7 +528,12 @@ The same account also **builds** the functions. Since 2024 Cloud Build uses the 
 - **Saving the built image:** `roles/artifactregistry.writer` on the `gcf-artifacts` repository only.
 - **Writing build logs:** `roles/logging.logWriter` (project; it can't be granted lower).
 
-Never fix a failed build with Editor or `roles/cloudbuild.builds.builder`: this account also runs `getGalleryDownloadUrl`, and those roles reach every bucket, families' photos included. Even these narrow grants let the running function write to `gcf-artifacts`, the next build's image cache; giving the functions their own runtime account (`setGlobalOptions({serviceAccount})`, on the TODO list) would leave the compute account only building.
+Never fix a failed build with Editor or `roles/cloudbuild.builds.builder`: this
+account also runs the gallery functions, and those roles reach every bucket,
+families' photos included. Even these narrow grants let the running function
+write to `gcf-artifacts`, the next build's image cache; giving the functions
+their own runtime account (`setGlobalOptions({serviceAccount})`, on the TODO
+list) would leave the compute account only building.
 
 When a new function needs other data, add the role to this script, scoped as narrowly as possible.
 

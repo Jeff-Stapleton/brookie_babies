@@ -8,10 +8,11 @@ Guidance for AI coding agents (and humans) working in this repository.
 for Brooke Stapleton Photography. Visitors see a full-bleed photograph with the
 logo, a short introduction and a few more photographs, choose a session package
 (Basic / Premium / Ultimate), pick a date and a time, and are sent to a Stripe
-Payment Link to pay. Signed-in families see "Your sessions" and download their
-photos as one zip. Admins (the studio) use an admin portal at `/#/admin` to
-add ad hoc sessions for family and friends, upload photos, make them available
-and choose the home page photos.
+Payment Link to pay. Signed-in families see "Your sessions", open a private
+full-bleed gallery for each finished session and download its photos as one
+zip. Admins (the studio) use an admin portal at `/#/admin` to add ad hoc
+sessions for family and friends, upload photos, make them available and choose
+the home page photos.
 
 For now the home page leaves out the introduction and the packages, and with
 the packages every way into booking, until Brooke settles them
@@ -43,7 +44,7 @@ Always run and build with `-d chrome` / `flutter build web`.
 | Bookings | `cloud_firestore`: `bookings` collection behind `BookingService` (customers read their own by uid, ad hoc sessions shared with their email and sessions their owner shared with them; they write only their own sessions' `sharedWith`) |
 | Admin | `AdminService` + `FirebaseAdminService` (`cloud_firestore`, `firebase_storage`): ad hoc sessions, session photos, the home page library and `site/home`, written straight from the browser and guarded by the rules |
 | File picking | The browser's `<input type=file>` through `package:web` (`lib/utilities/web_photo_picker.dart`), as `AppServices.pickPhotos`; no file-picker package |
-| Photo downloads | `cloud_functions`: `getGalleryDownloadUrl` (in `functions/`), streamed with `HttpsCallable.stream` (progress chunks while a zip is built, then the link), behind `GalleryService` |
+| Private session photos | `cloud_functions`: `getGalleryPhotoUrls` returns one-hour links for the gallery; `getGalleryDownloadUrl` streams progress while it builds the zip, then its one-hour link; both are behind `GalleryService` |
 | Backend | Cloud Functions for Firebase, TypeScript on Node 24 (`functions/`); Firestore and Storage security rules |
 | Lints | `flutter_lints` (`analysis_options.yaml`, default rules) |
 
@@ -80,9 +81,9 @@ lib/
                           with ad hoc sessions shared with their email and sessions shared with them, marked
                           in sharedWithUser; mergeUserBookings); share/stopSharing (arrayUnion/arrayRemove on
                           sharedWith, 20 s limit, SharingException) and sharingProblem, the rules' check
-    gallery_service.dart  GalleryService + FunctionsGalleryService (streams getGalleryDownloadUrl: GalleryProgress
-                          while a zip is built, then GalleryDownload; readGalleryDownload holds the logic and
-                          the 10-minute limit, testable on the VM)
+    gallery_service.dart  GalleryService + FunctionsGalleryService (loads getGalleryPhotoUrls into GalleryPhoto;
+                          streams getGalleryDownloadUrl: GalleryProgress while a zip is built, then
+                          GalleryDownload; parsers and the 10-minute zip limit are testable on the VM)
     portfolio_service.dart PortfolioService + StoragePortfolioService (home page photo links: the names in
                           site/home, or with none chosen or no answer in 3 s, image files in _admin/gallery by
                           name; at most `limit`, each fetched on its own so one failure drops one photo)
@@ -98,6 +99,8 @@ lib/
                           HomePage.reloadPhotos(); showsIntroduction and offersPackages (both off for now)
     scheduling_page.dart  "Book a session": calendar + session times, then sign-in and the Payment Link
     profile_page.dart     "Your sessions": account, upcoming and past sessions (route /profile)
+    session_gallery_page.dart  One private family gallery: full-bleed first photo, session title/date,
+                          responsive print grid and a full-screen previous/next photo viewer
     admin_page.dart       "Admin" (route /admin): home page photos card, "Add a session", every session
                           (upcoming, past, unreadable); AdminPage.open(), AdminPage.returnWithNotice()
     admin_session_page.dart  One session: details, who can download and the share message, "Make photos
@@ -117,9 +120,10 @@ lib/
                           for admins, "Sign out"; MenuAnchor: arrow keys, Escape); signOutWithWarning()
     sign_in_dialog.dart   showSignInDialog(): Google sign-in, or open-in-browser help in in-app browsers
     booking_card.dart     One session on "Your sessions", titled by familyTitle (an ad hoc session's name, as
-                          on the admin pages); paid and ad hoc sessions with photos ready get
-                          "Download all photos", with the zip's progress while it's built (photo N of M, a
-                          bar, its size) and a message once the browser has it; one card prepares at a time.
+                          on the admin pages); paid and ad hoc sessions with photos ready get "View photos"
+                          (the newest is the page's primary action) and "Download all photos", with the zip's
+                          progress while it's built (photo N of M, a bar, its size) and a message once the
+                          browser has it; one card prepares at a time.
                           The family's own paid and ad hoc sessions list who they're shared with ("Stop
                           sharing") and "Share this session" (a dialog: their email, then the message to send,
                           sharedSessionMessage); one shared with them says "Shared with you"
@@ -185,8 +189,9 @@ test/                     Widget and unit tests; mirrors lib/
   support/hidden_sections.dart showIntroduction() and offerPackages(): the hidden home page sections, on for one test
   widget_test.dart        The package cards: layout at many widths (loads the real Jost font), choosing, selection
 functions/                Cloud Functions, TypeScript on Node 24 (own package.json; not a Dart package)
-  src/index.ts            Function definitions (region us-central1); getGalleryDownloadUrl
-  src/gallery.ts          Core logic with injected Firestore/Storage, so tests use in-memory fakes; canDownload():
+  src/index.ts            Function definitions (region us-central1); getGalleryPhotoUrls, getGalleryDownloadUrl
+  src/gallery.ts          Shared gallery access/listing logic with injected Firestore/Storage, so tests use
+                          in-memory fakes; signs individual photo links with bounded concurrency; canDownload():
                           the booking's uid, or a verified email in an ad hoc session's emails or any session's
                           sharedWith; progressSender: progress
                           chunks to the caller, at most one per 500 ms (the first and last always)
@@ -248,15 +253,21 @@ scripts/
    none, the empty state names the email they're signed in as, for a guest on
    the wrong Google account. A paid booking's card is titled by its package
    ("Premium session"); an ad hoc session's by the name the admin gave it, the
-   one the admin pages show, with its package below. A paid or ad hoc session with
-   `photosReady: true` has "Download all photos" (past ones without it
-   say the photos are being edited; ad hoc ones have no payment tag): `getGalleryDownloadUrl`
-   checks the booking belongs to the caller (its uid, or one of an ad hoc
-   session's emails matching the caller's verified Google email), zips `galleries/<bookingId>/` (cached
-   in `gallery-zips/`), streaming its progress while it builds a new zip (the
-   card shows photo N of M and a bar; a caller who leaves doesn't stop the
-   build), and returns a signed link that expires after an hour, opened in the
-   same tab; the card then says the download has started, with its size.
+   one the admin pages show, with its package below. A paid or ad hoc session
+   with `photosReady: true` has "View photos" and "Download all photos" (past
+   ones without them say the photos are being edited; ad hoc ones have no
+   payment tag). Both callables first check that the booking belongs to the
+   caller (its uid, one of an ad hoc session's emails matching the caller's
+   verified Google email, or its `sharedWith`). `getGalleryPhotoUrls` lists
+   `galleries/<bookingId>/` and returns a one-hour signed link per photo.
+   `SessionGalleryPage` uses the first file by name as a full-bleed cover,
+   places the title and date below it, then lazily builds a responsive 4:5
+   print grid; a print opens the original in a full-screen previous/next,
+   keyboard-accessible viewer. `getGalleryDownloadUrl` zips the same files
+   (cached in `gallery-zips/`), streaming its progress while it builds a new
+   zip (the card shows photo N of M and a bar; a caller who leaves doesn't stop
+   the build), and returns a signed link that expires after an hour, opened in
+   the same tab; the card then says the download has started, with its size.
    On the family's own paid or ad hoc sessions (found by uid or as a guest, not
    only by `sharedWith`), "Share this session" opens a dialog for the email to
    share it with (`sharingProblem`, and not their own) →
@@ -465,9 +476,10 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   the `beforeunload` warning and the screen wake lock in `main.dart`, and the
   download stream (`FunctionsGalleryService`; `readGalleryDownload` is
   tested) have no tests: check them by hand in Chrome and Safari (picking,
-  cancelling the picker, closing the tab during an upload; progress arriving
-  while a zip builds, not all at the end; on an iPhone with Auto-Lock, the
-  screen staying on through a build).
+  cancelling the picker, closing the tab during an upload; a private gallery's
+  signed photos loading and its viewer zooming; progress arriving while a zip
+  builds, not all at the end; on an iPhone with Auto-Lock, the screen staying
+  on through a build).
 - Google blocks sign-in inside in-app browsers such as Instagram's, Facebook's,
   TikTok's and Pinterest's ("403 disallowed_useragent"). There the sign-in
   dialog explains how to open the page in Safari or Chrome instead.
@@ -513,8 +525,9 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   found the session (`sharedWithUser`), which matches `isOwner`.
 - Stopping sharing can't delete the cached zip (only admins may), so a link
   handed out in the last hour keeps working until it expires (README,
-  "Families sharing their photos"). The download function re-checks
-  `sharedWith` on every request, so no new link is given out.
+  "Families sharing their photos"). Individual photo links already issued
+  have the same one-hour lifetime. Both gallery functions re-check
+  `sharedWith` on every request, so no new links are given out.
 - The Rules API refuses a test request with a couple of hundred cases or more,
   so `scripts/test-rules.sh` sends `rules-tests/` cases 100 at a time
   (`batches.mjs`) and `report.mjs` adds the batches up.
@@ -541,9 +554,13 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   (links then expire within the hour), except in `deleteSession`, which stops
   so the document is never deleted ahead of its zip. "Delete all photos"
   deletes it once, while hiding, then `deletePhoto(deleteZip: false)` per photo.
-- Download IDs: `getGalleryDownloadUrl` only accepts booking IDs matching
-  `^[A-Za-z0-9_-]{1,128}$` (`BOOKING_ID_PATTERN`); the session page mirrors it
-  and warns instead of offering "Make photos available".
+- Individual gallery links are not cached objects the admin can revoke:
+  hiding or changing a gallery stops new links, but any already issued expire
+  naturally within an hour.
+- Gallery IDs: `getGalleryPhotoUrls` and `getGalleryDownloadUrl` only accept
+  booking IDs matching `^[A-Za-z0-9_-]{1,128}$`
+  (`BOOKING_ID_PATTERN`); the admin session page mirrors it and warns instead
+  of offering "Make photos available".
 - Download progress, the function: while it builds a zip,
   `getGalleryDownloadUrl` streams `{stage: "zipping", photosDone, photoCount,
   totalBytes}` chunks, then the result (none before the build or on a cached
@@ -600,8 +617,9 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   way round, so deploy the backend before (or with) the site. A site that goes
   first gets its guest query and `site/home` read refused (both fall back
   harmlessly) and every admin read and write denied (README, "Deploy order").
-  A new site with the old function still downloads, without progress or a
-  size.
+  A new site before `getGalleryPhotoUrls` exists shows its gallery retry
+  message; with an older `getGalleryDownloadUrl` it still downloads, without
+  progress or a size.
 - CI deploys the backend as `github-deployer`, which deliberately has no
   direct permission to turn on APIs, read secret values or change IAM. The
   code and rules it deploys can still reach all data, so push access to `main`
@@ -620,7 +638,7 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
 - CI deploys `--only functions:default` (the codebase), not bare `functions`: with
   the bare form firebase-tools skips functions whose source hash label matches, and
   a failed update still writes that label, so the old code would stay live.
-- `getGalleryDownloadUrl` signs URLs through the IAM signBlob API, which needs
+- Both gallery callables sign URLs through the IAM signBlob API, which needs
   Service Account Token Creator on the functions' runtime service account
   (README, "Deploying the backend").
 - Placeholder content, owned by the business (TODO.md): the session times

@@ -18,6 +18,7 @@ class Booking {
     this.location,
     this.status = BookingStatus.paid,
     this.photosReady = false,
+    this.mainPhoto,
     this.uid,
     this.email,
     this.emails = const [],
@@ -41,6 +42,11 @@ class Booking {
 
   /// Set by the photographer once every photo is uploaded.
   final bool photosReady;
+
+  /// The session photo the photographer chose for the top of the family’s
+  /// gallery, as a path relative to `galleries/{id}/`. With none, or if that
+  /// photo is gone, the first photo by name is used.
+  final String? mainPhoto;
 
   /// The customer's Firebase Auth uid. Ad hoc sessions have none.
   final String? uid;
@@ -102,6 +108,10 @@ class Booking {
       final value = _text(data, field);
       return value.isEmpty ? null : value;
     }
+    String? exactOptional(String field) {
+      final value = data[field];
+      return value is String && value.isNotEmpty ? value : null;
+    }
 
     final dateMatch = _datePattern.firstMatch(_text(data, 'date'))!;
     final timeMatch = _timePattern.firstMatch(_text(data, 'time'));
@@ -113,6 +123,8 @@ class Booking {
       location: optional('location'),
       status: _status(data)!,
       photosReady: data['photosReady'] == true,
+      // A Storage object name may intentionally begin or end with a space.
+      mainPhoto: exactOptional('mainPhoto'),
       uid: optional('uid'),
       email: optional('email'),
       emails: _texts(data, 'emails'),

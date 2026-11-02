@@ -113,6 +113,14 @@ final _downloadableId = RegExp(r'^[A-Za-z0-9_-]{1,128}$');
 StoredPhoto _storedPhoto(String sessionId, String name) =>
     StoredPhoto(name: name, fullPath: 'galleries/$sessionId/$name');
 
+/// The stored choice when it is still here, otherwise the first photo by
+/// name: the same fallback the gallery function uses.
+String? _mainPhotoOf(Booking booking, List<StoredPhoto> photos) {
+  final chosen = booking.mainPhoto;
+  if (chosen != null && photos.any((photo) => photo.name == chosen)) return chosen;
+  return photos.firstOrNull?.name;
+}
+
 /// The session's page, once AdminGate has let an admin in: it watches the
 /// session and lists its photos only then.
 class _SessionBody extends StatefulWidget {
@@ -164,6 +172,10 @@ class _SessionBodyState extends State<_SessionBody> {
   final _deletingPhotos = <String>{};
   String? _deleteError;
 
+  /// The photo being saved as the main one, by relative name.
+  String? _savingMainPhoto;
+  String? _mainPhotoError;
+
   bool _deletingSession = false;
   String? _sessionError;
 
@@ -176,6 +188,7 @@ class _SessionBodyState extends State<_SessionBody> {
   final _uploadFocus = FocusNode(debugLabel: 'Upload photos');
   final _deleteAllFocus = FocusNode(debugLabel: 'Delete all photos');
   final _photoFocus = <String, FocusNode>{};
+  final _mainPhotoFocus = <String, FocusNode>{};
 
   @override
   void initState() {
@@ -203,6 +216,9 @@ class _SessionBodyState extends State<_SessionBody> {
     _uploadFocus.dispose();
     _deleteAllFocus.dispose();
     for (final node in _photoFocus.values) {
+      node.dispose();
+    }
+    for (final node in _mainPhotoFocus.values) {
       node.dispose();
     }
     // The top bar stops naming a session it no longer shows (after signing
@@ -402,6 +418,9 @@ class _SessionBodyState extends State<_SessionBody> {
   FocusNode _focusFor(StoredPhoto photo) =>
       _photoFocus.putIfAbsent(photo.fullPath, () => FocusNode(debugLabel: 'Delete ${photo.name}'));
 
+  FocusNode _mainFocusFor(StoredPhoto photo) =>
+      _mainPhotoFocus.putIfAbsent(photo.fullPath, () => FocusNode(debugLabel: 'Set ${photo.name} as main photo'));
+
   /// Whether [node] has focus, or gets it back when the confirmation over
   /// the page closes.
   bool _focusIsOn(FocusNode node) => node.hasFocus || FocusScope.of(context).focusedChild == node;
@@ -415,8 +434,8 @@ class _SessionBodyState extends State<_SessionBody> {
     final photos = _photos;
     if (photos == null) return;
     final focused = photos.indexWhere((photo) {
-      final node = _photoFocus[photo.fullPath];
-      return node != null && gone.contains(photo.fullPath) && _focusIsOn(node);
+      final nodes = [_photoFocus[photo.fullPath], _mainPhotoFocus[photo.fullPath]];
+      return gone.contains(photo.fullPath) && nodes.whereType<FocusNode>().any(_focusIsOn);
     });
     final rest = [
       for (final photo in photos)
@@ -437,12 +456,57 @@ class _SessionBodyState extends State<_SessionBody> {
     final nodes = [
       for (final path in gone)
         if (_photoFocus.remove(path) case final node?) node,
+      for (final path in gone)
+        if (_mainPhotoFocus.remove(path) case final node?) node,
     ];
     WidgetsBinding.instance.addPostFrameCallback((_) {
       for (final node in nodes) {
         node.dispose();
       }
     });
+  }
+
+  Future<void> _setMainPhoto(StoredPhoto photo) async {
+    if (_savingMainPhoto != null) return;
+    final focus = _mainFocusFor(photo);
+    final moveFocus = _focusIsOn(focus);
+    var saved = false;
+    setState(() {
+      _savingMainPhoto = photo.name;
+      _mainPhotoError = null;
+    });
+    try {
+      await _admin.setMainPhoto(widget.sessionId, photo.name);
+      saved = true;
+    } catch (e) {
+      if (mounted) setState(() => _mainPhotoError = _messageFor(e, 'The main photo wasn’t saved. Try again.'));
+    } finally {
+      if (mounted) {
+        setState(() => _savingMainPhoto = null);
+        if (saved && moveFocus) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _focusFor(photo).requestFocus();
+          });
+        }
+      }
+    }
+  }
+
+  /// Clears a choice whose object was just deleted. A failure doesn't make
+  /// the deletion fail: the family gallery ignores a stale choice and uses
+  /// the first remaining photo.
+  Future<void> _clearMainPhotoIfDeleted(StoredPhoto photo) async {
+    if (_lastFound?.booking.mainPhoto != photo.name) return;
+    try {
+      await _admin.setMainPhoto(widget.sessionId, null);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _mainPhotoError = 'The photo was deleted, but its main-photo setting wasn’t cleared. '
+              '${_messageFor(e, 'Choose another main photo.')}';
+        });
+      }
+    }
   }
 
   Future<void> _deletePhoto(StoredPhoto photo) async {
@@ -461,6 +525,7 @@ class _SessionBodyState extends State<_SessionBody> {
     });
     try {
       await _admin.deletePhoto(photo);
+      await _clearMainPhotoIfDeleted(photo);
       if (mounted) _removePhotos({photo.fullPath});
     } catch (e) {
       if (mounted) setState(() => _deleteError = _messageFor(e, '${photo.name} wasn’t deleted. Try again.'));
@@ -521,6 +586,7 @@ class _SessionBodyState extends State<_SessionBody> {
           failure ??= e;
           return;
         }
+        await _clearMainPhotoIfDeleted(photo);
         if (!mounted) return;
         _removePhotos({photo.fullPath});
         setState(() => _deletingAll = (done: _deletingAll!.done + 1, total: photos.length));
@@ -759,6 +825,8 @@ class _SessionBodyState extends State<_SessionBody> {
     final photos = _photos;
     final deletingAll = _deletingAll;
     final error = _deleteError;
+    final mainPhotoError = _mainPhotoError;
+    final mainPhoto = photos == null ? null : _mainPhotoOf(booking, photos);
     // Primary until the photos can be made available; then that is.
     final primary = !_shownReady(booking) && _notReadyReason() != null;
     final canUpload = photos != null && deletingAll == null && !_deletingSession;
@@ -834,15 +902,30 @@ class _SessionBodyState extends State<_SessionBody> {
             const SizedBox(height: BrookieSpace.s3),
             InlineMessage(message: error),
           ],
+          if (mainPhotoError != null) ...[
+            const SizedBox(height: BrookieSpace.s3),
+            InlineMessage(message: mainPhotoError),
+          ],
           const SizedBox(height: BrookieSpace.s3),
           for (final photo in photos)
             _PhotoRow(
               key: ValueKey(photo.fullPath),
               photo: photo,
               focusNode: _focusFor(photo),
+              mainPhotoFocusNode: _mainFocusFor(photo),
               deleting: _deletingPhotos.contains(photo.fullPath),
+              isMain: mainPhoto == photo.name,
+              settingMain: _savingMainPhoto == photo.name,
+              onSetMain: deletingAll == null &&
+                      !_deletingSession &&
+                      _savingMainPhoto == null &&
+                      !_deletingPhotos.contains(photo.fullPath)
+                  ? () => _setMainPhoto(photo)
+                  : null,
               // Not while they're all going.
-              onDelete: deletingAll == null && !_deletingSession ? () => _deletePhoto(photo) : null,
+              onDelete: deletingAll == null && !_deletingSession && _savingMainPhoto == null
+                  ? () => _deletePhoto(photo)
+                  : null,
             ),
         ],
       ],
@@ -1057,37 +1140,88 @@ class _PhotoRow extends StatelessWidget {
     super.key,
     required this.photo,
     required this.focusNode,
+    required this.mainPhotoFocusNode,
     required this.deleting,
+    required this.isMain,
+    required this.settingMain,
+    required this.onSetMain,
     required this.onDelete,
   });
 
   final StoredPhoto photo;
   final FocusNode focusNode;
+  final FocusNode mainPhotoFocusNode;
   final bool deleting;
+  final bool isMain;
+  final bool settingMain;
+  final VoidCallback? onSetMain;
   final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
     final c = BrookieColors.of(context);
     final onDelete = this.onDelete;
+    final name = Text(photo.name, maxLines: 2, overflow: TextOverflow.ellipsis);
+    final mainAction = isMain && !settingMain
+        ? Semantics(
+            label: 'Main photo',
+            child: ExcludeSemantics(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.image_outlined, size: 18, color: c.inkSoft),
+                  const SizedBox(width: BrookieSpace.s1),
+                  Text('Main photo', style: BrookieType.small.copyWith(color: c.inkSoft)),
+                ],
+              ),
+            ),
+          )
+        : BusyButton(
+            label: 'Set as main photo',
+            busyLabel: 'Saving main photo…',
+            busy: settingMain,
+            kind: BusyButtonKind.text,
+            icon: Icons.image_outlined,
+            focusNode: mainPhotoFocusNode,
+            onPressed: onSetMain,
+          );
+    // Stays enabled while it works, so focus stays put.
+    final delete = IconButton(
+      focusNode: focusNode,
+      tooltip: 'Delete ${photo.name}',
+      onPressed: onDelete == null ? null : (deleting ? () {} : onDelete),
+      icon: deleting
+          ? SizedBox.square(
+              dimension: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: c.inkSoft),
+            )
+          : const Icon(Icons.delete_outline),
+    );
     return DecoratedBox(
       decoration: BoxDecoration(border: Border(top: BorderSide(color: c.line))),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: BrookieSpace.s1),
-        child: Row(
-          children: [
-            Expanded(child: Text(photo.name)),
-            const SizedBox(width: BrookieSpace.s3),
-            // Stays enabled while it works, so focus stays put.
-            IconButton(
-              focusNode: focusNode,
-              tooltip: 'Delete ${photo.name}',
-              onPressed: onDelete == null ? null : (deleting ? () {} : onDelete),
-              icon: deleting
-                  ? SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: c.inkSoft))
-                  : const Icon(Icons.delete_outline),
-            ),
-          ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 480) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [Expanded(child: name), delete]),
+                  mainAction,
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: name),
+                const SizedBox(width: BrookieSpace.s3),
+                mainAction,
+                const SizedBox(width: BrookieSpace.s1),
+                delete,
+              ],
+            );
+          },
         ),
       ),
     );

@@ -69,7 +69,8 @@ abstract class PhotoUpload {
 }
 
 /// What admins do: add and edit ad hoc sessions, upload and delete session
-/// photos, make them available, and choose the home page photos.
+/// photos, choose each session's main photo, make them available, and choose
+/// the home page photos.
 /// [FirebaseAdminService] is the real implementation; tests use a fake.
 ///
 /// Every write is checked against lib/services/photo_rules.dart (the rules'
@@ -117,6 +118,12 @@ abstract class AdminService {
   /// (names ending in '/') and hidden files (basenames starting with '.').
   /// Session photos never get a [StoredPhoto.url].
   Future<List<StoredPhoto>> listSessionPhotos(String id);
+
+  /// Chooses [name], relative to the session's folder, as the main photo at
+  /// the top of the family's gallery. It must be one of
+  /// [listSessionPhotos]' current results. Null restores the first photo by
+  /// name as the default.
+  Future<void> setMainPhoto(String id, String? name);
 
   /// Uploads [photo] into the session's folder as [name], a
   /// PhotoRules.safeObjectName. Never overwrites: a photo already there
@@ -314,6 +321,29 @@ class FirebaseAdminService implements AdminService {
   }
 
   @override
+  Future<void> setMainPhoto(String id, String? name) async {
+    _signedInUid();
+    final sessionId = _sessionId(id);
+    if (name != null) {
+      _check(_mainPhotoProblem(name));
+      final photos = await listSessionPhotos(sessionId);
+      if (!photos.any((photo) => photo.name == name)) {
+        throw const AdminException(
+          'That photo is no longer in this session. Refresh the page and choose another.',
+          AdminErrorKind.notFound,
+        );
+      }
+    }
+    await _write(
+      'set the main photo of session $sessionId',
+      () => _bookings.doc(sessionId).update({
+        'mainPhoto': name ?? FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }),
+    );
+  }
+
+  @override
   PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name) => _upload(
         photo,
         name,
@@ -465,6 +495,14 @@ class FirebaseAdminService implements AdminService {
   static String? _nameProblem(String name) => name == PhotoRules.safeObjectName(name)
       ? null
       : '$name can’t be used as a file name. Rename it and upload it again.';
+
+  static String? _mainPhotoProblem(String name) {
+    if (name.isEmpty) return 'Choose a photo for the main photo.';
+    if (name.length > SessionRules.mainPhotoMaxLength) {
+      return 'That photo’s name is too long to use as the main photo.';
+    }
+    return null;
+  }
 
   static String? _homePhotosProblem(List<String> names) {
     if (names.length > PhotoRules.homeMaxPhotos) {

@@ -61,6 +61,13 @@ Finder _inDialog(String label) => find.descendant(of: find.byType(BrookieDialog)
 Finder _deleteButton(String name) =>
     find.ancestor(of: find.byTooltip('Delete $name'), matching: find.byType(IconButton));
 
+Finder _photoRow(String name) => find.byKey(ValueKey('galleries/s1/$name'));
+
+Finder _setMainPhotoButton(String name) => find.descendant(
+      of: _photoRow(name),
+      matching: find.widgetWithText(TextButton, 'Set as main photo'),
+    );
+
 /// The photo names listed, in order.
 List<String> _listed(WidgetTester tester) => [
       for (final tooltip in tester.widgetList<Tooltip>(find.byType(Tooltip)))
@@ -462,7 +469,7 @@ void main() {
       expect(find.widgetWithText(OutlinedButton, 'Hide photos'), findsOneWidget);
       expect(find.text('Ready to download'), findsOneWidget);
 
-      await tester.tap(find.text('Hide photos'));
+      await tapInView(tester, find.text('Hide photos'));
       await tester.pump();
 
       expect(admin.sessions['s1']!.photosReady, isFalse);
@@ -804,6 +811,75 @@ void main() {
 
       expect(_listed(tester), ['IMG_1.jpg', 'IMG_2.jpg', 'edits/IMG_3.jpg']);
       expect(find.text('3 photos'), findsOneWidget);
+      expect(
+        find.descendant(of: _photoRow('IMG_1.jpg'), matching: find.text('Main photo')),
+        findsOneWidget,
+      );
+      expect(_setMainPhotoButton('IMG_2.jpg'), findsOneWidget);
+      expect(_setMainPhotoButton('edits/IMG_3.jpg'), findsOneWidget);
+    });
+
+    testWidgets('chooses any stored photo as the main photo', (tester) async {
+      final admin = _service();
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, _setMainPhotoButton('edits/IMG_3.jpg'));
+      await tester.pumpAndSettle();
+
+      expect(admin.calls, contains('setMainPhoto(s1, edits/IMG_3.jpg)'));
+      expect(admin.sessions['s1']!.mainPhoto, 'edits/IMG_3.jpg');
+      expect(
+        find.descendant(
+          of: _photoRow('edits/IMG_3.jpg'),
+          matching: find.text('Main photo'),
+        ),
+        findsOneWidget,
+      );
+      expect(_setMainPhotoButton('IMG_1.jpg'), findsOneWidget);
+    });
+
+    testWidgets('shows the saved main photo instead of the first by name', (tester) async {
+      final admin = FakeAdminService(
+        sessions: [testSession('s1', mainPhoto: 'IMG_2.jpg')],
+        sessionPhotos: {'s1': _photos},
+      );
+
+      await _pumpSession(tester, admin: admin);
+
+      expect(
+        find.descendant(of: _photoRow('IMG_2.jpg'), matching: find.text('Main photo')),
+        findsOneWidget,
+      );
+      expect(_setMainPhotoButton('IMG_1.jpg'), findsOneWidget);
+    });
+
+    testWidgets('a stale saved choice falls back to the first photo by name', (tester) async {
+      final admin = FakeAdminService(
+        sessions: [testSession('s1', mainPhoto: 'gone.jpg')],
+        sessionPhotos: {'s1': _photos},
+      );
+
+      await _pumpSession(tester, admin: admin);
+
+      expect(
+        find.descendant(of: _photoRow('IMG_1.jpg'), matching: find.text('Main photo')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('says why a main-photo choice was not saved', (tester) async {
+      final admin = _service()..errors['setMainPhoto'] = adminError(AdminErrorKind.offline);
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, _setMainPhotoButton('IMG_2.jpg'));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(InlineMessage, kAdminOfflineMessage), findsOneWidget);
+      expect(admin.sessions['s1']!.mainPhoto, isNull);
+      expect(
+        find.descendant(of: _photoRow('IMG_1.jpg'), matching: find.text('Main photo')),
+        findsOneWidget,
+      );
     });
 
     testWidgets('one photo is deleted after asking', (tester) async {
@@ -820,6 +896,27 @@ void main() {
       expect(admin.calls, contains('deletePhoto(galleries/s1/IMG_2.jpg)'));
       expect(_listed(tester), ['IMG_1.jpg', 'edits/IMG_3.jpg']);
       expect(find.text('2 photos'), findsOneWidget);
+    });
+
+    testWidgets('deleting the chosen main photo clears it and falls back to the first remaining photo',
+        (tester) async {
+      final admin = FakeAdminService(
+        sessions: [testSession('s1', mainPhoto: 'IMG_2.jpg')],
+        sessionPhotos: {'s1': _photos},
+      );
+      await _pumpSession(tester, admin: admin);
+
+      await tapInView(tester, find.byTooltip('Delete IMG_2.jpg'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inDialog('Delete photo'));
+      await tester.pumpAndSettle();
+
+      expect(admin.calls, contains('setMainPhoto(s1, first by name)'));
+      expect(admin.sessions['s1']!.mainPhoto, isNull);
+      expect(
+        find.descendant(of: _photoRow('IMG_1.jpg'), matching: find.text('Main photo')),
+        findsOneWidget,
+      );
     });
 
     testWidgets('cancelling keeps the photo', (tester) async {

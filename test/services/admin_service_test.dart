@@ -6,6 +6,7 @@ import 'package:brookie_babies/models/session_details.dart';
 import 'package:brookie_babies/models/session_lookup.dart';
 import 'package:brookie_babies/models/stored_photo.dart';
 import 'package:brookie_babies/services/admin_service.dart';
+import 'package:brookie_babies/services/photo_rules.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -37,6 +38,7 @@ const _adHocUpdateKeys = {
   'time',
   'location',
   'photosReady',
+  'mainPhoto',
   'updatedAt',
 };
 const _removableKeys = {'email', 'packageName', 'time', 'location'};
@@ -1021,6 +1023,66 @@ void main() {
       storage.errors['listAll galleries/s1'] = _storageError('unauthorized');
 
       await expectLater(admin.listSessionPhotos('s1'), throwsA(_adminError(AdminErrorKind.denied)));
+    });
+  });
+
+  group('setMainPhoto', () {
+    setUp(() {
+      addAdHoc('s1');
+      storage.objects.addAll({
+        'galleries/s1/IMG_1.jpg': 'image/jpeg',
+        'galleries/s1/edits/IMG 2.jpg': 'image/jpeg',
+      });
+    });
+
+    test('stores the exact relative name of a photo that is in the session', () async {
+      await admin.setMainPhoto('s1', 'edits/IMG 2.jpg');
+
+      expect(log, [
+        'listAll galleries/s1',
+        'listAll galleries/s1/edits',
+        'update bookings/s1',
+      ]);
+      expect(db.writes.single.data, {
+        'mainPhoto': 'edits/IMG 2.jpg',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      expect(db.docs['bookings/s1']!['mainPhoto'], 'edits/IMG 2.jpg');
+    });
+
+    test('null restores the first-by-name default without listing Storage', () async {
+      db.docs['bookings/s1']!['mainPhoto'] = 'IMG_1.jpg';
+
+      await admin.setMainPhoto('s1', null);
+
+      expect(log, ['update bookings/s1']);
+      expect(db.writes.single.data, {
+        'mainPhoto': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      expect(db.docs['bookings/s1'], isNot(contains('mainPhoto')));
+    });
+
+    test('refuses a photo that is gone, an empty name or a name over the rules limit', () async {
+      await expectLater(
+        admin.setMainPhoto('s1', 'missing.jpg'),
+        throwsA(_adminError(AdminErrorKind.notFound, message: contains('no longer'))),
+      );
+      expect(db.writes, isEmpty);
+
+      log.clear();
+      for (final name in ['', 'x' * (SessionRules.mainPhotoMaxLength + 1)]) {
+        await expectLater(admin.setMainPhoto('s1', name), throwsA(_adminError(AdminErrorKind.invalid)));
+      }
+      expect(log, isEmpty);
+      expect(db.writes, isEmpty);
+    });
+
+    test('signed out: denied before listing or writing', () async {
+      auth.currentUser = null;
+
+      await expectLater(admin.setMainPhoto('s1', 'IMG_1.jpg'), throwsA(_adminError(AdminErrorKind.denied)));
+      expect(log, isEmpty);
     });
   });
 

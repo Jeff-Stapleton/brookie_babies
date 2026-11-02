@@ -38,8 +38,9 @@ Firebase.
 - **Admin portal** (`/#/admin`, or **Admin** in the account menu, shown only to
   admins): every session; ad hoc sessions for family and friends, shared with
   one or more emails (both of a couple, say); uploading a session's photos;
-  **Make photos available**; a message to copy and send to the family; and
-  choosing the home page photos. See "Admin portal".
+  choosing its main gallery photo; **Make photos available**; a message to
+  copy and send to the family; and choosing the home page photos. See "Admin
+  portal".
 
 ## Tech stack
 
@@ -169,8 +170,9 @@ or **Admin** in the account menu (shown only to admins). Admins can:
   to fix in the Firestore console;
 - add, edit and delete ad hoc sessions for family and friends (see "Ad hoc
   sessions");
-- upload and delete a session's photos, make them available or hide them, and
-  copy a message for the family (see "Delivering photos");
+- upload and delete a session's photos, choose the main photo at the top of
+  its gallery, make them available or hide them, and copy a message for the
+  family (see "Delivering photos");
 - choose and order the home page photos, and upload photos to their library or
   delete them (see "Home page photos").
 
@@ -256,12 +258,13 @@ then.
 
 Families view and download their photos from **Your sessions** once the
 session's `photosReady` is `true` and its `status` is `paid` or `adhoc`.
-**View photos** opens the session's private gallery: the first photo by file
-name is its full-bleed cover, followed by the session title and date, then
-every photo in a responsive grid. Selecting one opens a full-screen viewer
-with previous and next controls. **Download all photos** still prepares one
-zip. Both actions appear even before the session date, so check that the
-session is right before making its photos available.
+**View photos** opens the session's private gallery: the main photo chosen in
+the admin portal is its full-bleed cover, followed by the session title and
+date, then every photo in a responsive grid. Until one is chosen—or if that
+photo was removed—the first photo by file name is the cover. Selecting a photo
+opens a full-screen viewer with previous and next controls. **Download all
+photos** still prepares one zip. Both actions appear even before the session
+date, so check that the session is right before making its photos available.
 
 Photos are never public through the site. The gallery gets a separate signed
 read link for each photo, and the download gets a signed zip link; all expire
@@ -276,7 +279,7 @@ link does.
 ### In the admin portal
 
 1. **Open the session** from **Admin**. A paid booking appears there once it's in Firestore (for now you add those by hand; see "Adding a paid booking by hand"). For family and friends, **Add a session** first (see "Ad hoc sessions").
-2. **Upload photos** and pick the edited photos: any image type, each under 100 MB. They upload three at a time; keep the page open until they finish (leaving or closing the tab asks first, and stops them). A photo whose name is already in the session is skipped, never overwritten, so after a problem you can pick the whole folder again. To replace a photo, delete it first. **Retry failed** tries failed ones again.
+2. **Upload photos** and pick the edited photos: any image type, each under 100 MB. They upload three at a time; keep the page open until they finish (leaving or closing the tab asks first, and stops them). A photo whose name is already in the session is skipped, never overwritten, so after a problem you can pick the whole folder again. To replace a photo, delete it first. **Retry failed** tries failed ones again. Under any uploaded photo, **Set as main photo** makes it the full-bleed photo at the top of the family's gallery. With no choice, the first photo by file name is used.
 3. **Make photos available.** It becomes the page's main button once there are photos and nothing is still uploading or failed, and it asks first, saying how many photos and who can download them. **Hide photos** stops downloads again. **Delete all photos** on a session whose photos are available hides them first, so a family never downloads a half-deleted gallery.
 4. **Tell the family.** Under **Share with the family**, **Copy message** copies a note with the link to Your sessions and the Google account to sign in with (any of an ad hoc session's emails), ready to paste into an email or a text. The site doesn't email families itself.
 
@@ -315,6 +318,7 @@ The portal saves these fields:
 | `time` | string | Optional: 24-hour `HH:mm` |
 | `location` | string | Optional: up to 200 characters |
 | `photosReady` | boolean | `false` until you make the photos available |
+| `mainPhoto` | string | Optional: the chosen photo's name relative to the session folder; set in the portal after upload |
 | `createdAt`, `createdBy` | timestamp, string | When it was added, and the admin's uid |
 | `updatedAt` | timestamp | When the portal last changed it (set on any booking it changes) |
 | `sharedWith` | array of strings | Written by the family, not the portal: who they shared it with (see "Families sharing their photos"), up to 10 Google emails, each trimmed and lowercase |
@@ -398,7 +402,7 @@ These files are the source of truth: each deploy **replaces the Firestore and St
 
 Admins are accounts whose ID token carries the custom claim `admin: true` (see "Admin portal"); both rules files check it the same way. The admin pages, and families sharing a session, write straight from the browser, so the rules are the only check on what they write. The app checks the same limits first (`lib/services/photo_rules.dart`, `lib/services/admin_service.dart`, `lib/services/booking_service.dart`), so change them together.
 
-- **Bookings.** A family reads the bookings carrying their `uid`, and ad hoc sessions (`status` exactly `adhoc`) whose `emails` (or single `email`, from before several) include the email they verified with Google, lowercased. Admins read every booking. They create only ad hoc sessions (the fields in "Ad hoc sessions", never a `uid`; `emails` holds 1 to 10 valid addresses, each once, or a single `email` stands in for it), change only `photosReady` on other bookings and only the details and `photosReady` of ad hoc sessions, stamping `updatedAt` each time, and delete only ad hoc sessions. `uid`, `status`, `createdAt` and `createdBy` never change; `email` may only go, as a session moves to `emails`.
+- **Bookings.** A family reads the bookings carrying their `uid`, and ad hoc sessions (`status` exactly `adhoc`) whose `emails` (or single `email`, from before several) include the email they verified with Google, lowercased. Admins read every booking. They create only ad hoc sessions (the fields in "Ad hoc sessions", never a `uid`; `emails` holds 1 to 10 valid addresses, each once, or a single `email` stands in for it), change only `photosReady` and the optional `mainPhoto` on other bookings and only the details, `photosReady` and `mainPhoto` of ad hoc sessions, stamping `updatedAt` each time, and delete only ad hoc sessions. `uid`, `status`, `createdAt` and `createdBy` never change; `email` may only go, as a session moves to `emails`.
 - **Sharing.** A session's owner (the customer whose `uid` it carries, or a guest of an ad hoc session) may change its `sharedWith` and nothing else: up to 10 valid emails, each once. Whoever's verified Google email is in it reads the session, whatever its status. Someone it was shared with can't change it, and admins don't either.
 - **`site/home`.** Anyone reads it. Admins save it whole: `photos` (at most seven file names), `updatedAt` and `updatedBy`.
 - **Storage.** `_admin/gallery/` stays publicly readable (get and list). Admins add photos directly in it (JPEG, PNG or WebP, named `.jpg`, `.jpeg`, `.png` or `.webp`, under 20 MiB) and delete them. Under `galleries/<bookingId>/` only admins read, add (any image type, under 100 MiB) and delete. Admins may delete a cached zip in `gallery-zips/`, nothing more. There's no update anywhere, so nothing is ever overwritten.

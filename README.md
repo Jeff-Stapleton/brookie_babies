@@ -25,7 +25,9 @@ and later download their edited photos. The site is hosted on Firebase.
 - **Your sessions**: signed-in customers see their upcoming and past sessions,
   including ad hoc sessions shared with their Google email, and download every
   photo from a session as one zip, through a private link that expires after
-  an hour. While a zip is prepared, the page shows how it's going.
+  an hour. While a zip is prepared, the page shows how it's going. Families
+  can share a session with others, such as grandparents, by Google email: it
+  shows under their Your sessions too, and they can download its photos.
 - **Admin portal** (`/#/admin`, or **Admin** in the account menu, shown only to
   admins): every session; ad hoc sessions for family and friends, shared with
   one or more emails (both of a couple, say); uploading a session's photos;
@@ -137,8 +139,8 @@ assets/              Logo and fonts
 web/                 Web shell (index.html, manifest, icons)
 functions/           Cloud Functions (TypeScript, Node 24): getGalleryDownloadUrl
 firestore.rules      Firestore security rules (families read their own bookings and
-                     ad hoc sessions shared with their email; admins manage sessions
-                     and the home page photo choice)
+                     sessions shared with their email, and share their own; admins
+                     manage sessions and the home page photo choice)
 storage.rules        Storage security rules (the home page photo library is public;
                      admins upload and delete photos; nothing is overwritten)
 scripts/             Owner scripts: one-time Google Cloud and GitHub setup, and
@@ -234,6 +236,15 @@ Families download their photos from **Your sessions** once the session's `photos
 
 The first download builds a zip of the whole folder, which can take a few minutes for a large gallery. While it's built, the family sees which photo is being added ("Adding photo 38 of 150"), a progress bar and the zip's size. On a computer the page asks before it's closed or reloaded, and on a phone it keeps the screen from locking where the browser allows. When the zip is ready, the download starts by itself and the card says "Your download has started", with the number of photos and the size. A family with several sessions ready downloads them one at a time: pressing another session's button while one is being prepared asks them to wait for it. Closing or reloading the page doesn't stop the build, so the next download is usually quick. Later downloads reuse the zip. If you add, replace or delete photos afterwards, the next download rebuilds the zip automatically; families who already downloaded need to download again to get the changes. (If you replace a photo while a family's download is being built, that one download may contain the old version.)
 
+### Families sharing their photos
+
+A family can share a session with anyone else who should have the photos, such as grandparents: under **Your sessions**, **Share this session** on the session's card, then the Google email they sign in with. The site doesn't email them, so the dialog then offers **Copy message**, a note with the link and the account to sign in with. They see the session under their own Your sessions, marked "Shared with you", and can download its photos once they're available. A session can be shared with up to 10 people, and **Stop sharing** takes someone off.
+
+- **Who can share:** the Google account that booked a paid session, or anyone an ad hoc session is shared with (one of its emails). Someone a session was shared with can download its photos but can't share it on or take anyone off.
+- **What you see:** the session's page in the portal says who the family shared it with, and so does **Make photos available**'s confirmation. The portal doesn't change the list: the family does. (In the Firebase console it's the booking's `sharedWith`.)
+- **Which sessions:** paid and ad hoc ones, before or after their photos are ready (shared early, the photos appear for everyone at once).
+- **Stopping:** the session leaves their Your sessions at once, and they can't start another download. A download link they were given in the last hour still works until it expires, because a family can't delete the cached zip as the portal does. To cut off every link at once, **Hide photos** in the portal (it deletes the zip), then make them available again.
+
 A gallery that takes more than 9 minutes to zip fails every time. The function logs a "built the zip" line for every build, saying how long it took; from 500 seconds it's a warning, which means that gallery is close to the limit. A build stopped by the limit logs no "built the zip" line, though it may log a "caller left" warning at about 540,000 ms. The limit can be raised in code (`timeoutSeconds` in `functions/src/index.ts`, together with `kGalleryDownloadTimeLimit` in `lib/services/gallery_service.dart`, which must stay above it).
 
 ### Ad hoc sessions
@@ -260,6 +271,7 @@ The portal saves these fields:
 | `photosReady` | boolean | `false` until you make the photos available |
 | `createdAt`, `createdBy` | timestamp, string | When it was added, and the admin's uid |
 | `updatedAt` | timestamp | When the portal last changed it (set on any booking it changes) |
+| `sharedWith` | array of strings | Written by the family, not the portal: who they shared it with (see "Families sharing their photos"), up to 10 Google emails, each trimmed and lowercase |
 
 A session added before it could have several emails has a single `email` (a string) instead of `emails`. It works the same, and the first **Edit details** moves it into `emails`. The rules still accept a single `email` from a site that old, so a page left open from before the change keeps working.
 
@@ -279,6 +291,8 @@ Nothing on the site records paid bookings yet. For a payment made through a Stri
 | `status` | string | `paid` |
 | `photosReady` | boolean | `false` until the photos are uploaded |
 | `createdAt` | timestamp | Now |
+
+Leave out `sharedWith`: the family fills it in from Your sessions, and whoever is in it can download the photos.
 
 **Check the uid before saving: the booking gives that account access to the photos.** Anyone can edit `client_reference_id` in a Payment Link address, and the email on the Stripe payment comes from the same editable link (`locked_prefilled_email`), so neither proves who paid. Look up the uid under **Authentication → Users** and compare its email and name with what you know from outside Stripe, such as the email the customer used to arrange the session, and with the cardholder name on the Stripe payment. If they don't match, confirm with the customer before setting `uid`.
 
@@ -332,16 +346,17 @@ the security note in [AGENT.md](AGENT.md).
 
 `functions/` holds the Cloud Functions, and `firestore.rules` and `storage.rules` hold the security rules. They were first deployed by hand on 2026-10-17. CI deploys them on pushes to `main` once the repository variable `BACKEND_DEPLOY_LIVE` is `true` (see "Automatic backend deploys"); until then its backend job is a dry run, so deploy them by hand before merging a site that needs them (see "Deploy order"). Do the one-time setup below **before** the change that added this reaches `main`.
 
-These files are the source of truth: each deploy **replaces the Firestore and Storage rules set in the Firebase console**, so change rules here, not in the console. Only `_admin/gallery/` (the home page photo library) and `site/home` (which of its photos the home page shows) are publicly readable, families can read only their own bookings and the ad hoc sessions shared with them, and only admins can write from the app.
+These files are the source of truth: each deploy **replaces the Firestore and Storage rules set in the Firebase console**, so change rules here, not in the console. Only `_admin/gallery/` (the home page photo library) and `site/home` (which of its photos the home page shows) are publicly readable, families can read only their own bookings and the sessions shared with them, and the only thing a family can write is who their own session is shared with; everything else written from the app is an admin's.
 
 #### What the rules allow
 
-Admins are accounts whose ID token carries the custom claim `admin: true` (see "Admin portal"); both rules files check it the same way. The admin pages write straight from the browser, so the rules are the only check on what they write. The app checks the same limits first (`lib/services/photo_rules.dart`, `lib/services/admin_service.dart`), so change them together.
+Admins are accounts whose ID token carries the custom claim `admin: true` (see "Admin portal"); both rules files check it the same way. The admin pages, and families sharing a session, write straight from the browser, so the rules are the only check on what they write. The app checks the same limits first (`lib/services/photo_rules.dart`, `lib/services/admin_service.dart`, `lib/services/booking_service.dart`), so change them together.
 
 - **Bookings.** A family reads the bookings carrying their `uid`, and ad hoc sessions (`status` exactly `adhoc`) whose `emails` (or single `email`, from before several) include the email they verified with Google, lowercased. Admins read every booking. They create only ad hoc sessions (the fields in "Ad hoc sessions", never a `uid`; `emails` holds 1 to 10 valid addresses, each once, or a single `email` stands in for it), change only `photosReady` on other bookings and only the details and `photosReady` of ad hoc sessions, stamping `updatedAt` each time, and delete only ad hoc sessions. `uid`, `status`, `createdAt` and `createdBy` never change; `email` may only go, as a session moves to `emails`.
+- **Sharing.** A session's owner (the customer whose `uid` it carries, or a guest of an ad hoc session) may change its `sharedWith` and nothing else: up to 10 valid emails, each once. Whoever's verified Google email is in it reads the session, whatever its status. Someone it was shared with can't change it, and admins don't either.
 - **`site/home`.** Anyone reads it. Admins save it whole: `photos` (at most seven file names), `updatedAt` and `updatedBy`.
 - **Storage.** `_admin/gallery/` stays publicly readable (get and list). Admins add photos directly in it (JPEG, PNG or WebP, named `.jpg`, `.jpeg`, `.png` or `.webp`, under 20 MiB) and delete them. Under `galleries/<bookingId>/` only admins read, add (any image type, under 100 MiB) and delete. Admins may delete a cached zip in `gallery-zips/`, nothing more. There's no update anywhere, so nothing is ever overwritten.
-- **`getGalleryDownloadUrl`** serves the same people: the booking's `uid`, or for an ad hoc session the caller whose verified Google email is one of its emails. Ad hoc sessions need no payment.
+- **`getGalleryDownloadUrl`** serves the same people: the booking's `uid`, for an ad hoc session the caller whose verified Google email is one of its emails, and anyone whose verified Google email is in its `sharedWith`. Ad hoc sessions need no payment; a session shared with someone still needs to be paid (or ad hoc) and its photos available.
 
 No new IAM roles, function permissions, APIs or secrets are needed: the function reads the same bookings and bucket as before, and everything admins do goes through the rules.
 
@@ -349,7 +364,7 @@ CI doesn't evaluate the rules (it has no emulator); `flutter test` only checks t
 
 ```bash
 gcloud auth login            # once, as the owner
-bash scripts/test-rules.sh   # "firestore.rules: 202 of 202 cases pass", then storage.rules
+bash scripts/test-rules.sh   # "firestore.rules: 265 of 265 cases pass", then storage.rules
 ```
 
 Both are read-only: the script sends the rules and each case to the Firebase Rules API's test endpoint (`projects/brookie-babies:test`), which deploys nothing and reads no live data, and it never prints your access token. It lists any case that fails and exits with an error. Add cases to `rules-tests/firestore-cases.mjs` or `rules-tests/storage-cases.mjs` for what you change. Never test rules by writing to the live project.
@@ -362,6 +377,7 @@ Deploy the rules and the function **before** (or with) the site that relies on t
 - reading `site/home` is refused, so the home page falls back to the first seven photos by name;
 - admins' reads and writes are refused, so the admin pages say they couldn't load or save;
 - with the rules from before several emails, sessions saved with `emails` can't be added or edited, and their guests don't see them;
+- with the rules from before sharing, **Share this session** says it couldn't share the session, and sessions shared with someone don't show for them;
 - with the new rules but the old function, guests see their ad hoc session but its download fails ("We couldn’t find this session’s photos");
 - with the new site but the old function, downloads work as before, showing only "Preparing your photos…" until they start (no progress or size).
 

@@ -35,7 +35,7 @@ Always run and build with `-d chrome` / `flutter build web`.
 | Calendar | `table_calendar` |
 | Payments | Stripe Payment Links via `url_launcher` |
 | Auth | `firebase_auth`: Google sign-in (popup) behind `AuthService`; admins are accounts with the custom claim `admin: true` (`AuthService.isAdmin`) |
-| Bookings | `cloud_firestore`: `bookings` collection behind `BookingService` (read-only for customers: their own by uid, and ad hoc sessions shared with their email) |
+| Bookings | `cloud_firestore`: `bookings` collection behind `BookingService` (customers read their own by uid, ad hoc sessions shared with their email and sessions their owner shared with them; they write only their own sessions' `sharedWith`) |
 | Admin | `AdminService` + `FirebaseAdminService` (`cloud_firestore`, `firebase_storage`): ad hoc sessions, session photos, the home page library and `site/home`, written straight from the browser and guarded by the rules |
 | File picking | The browser's `<input type=file>` through `package:web` (`lib/utilities/web_photo_picker.dart`), as `AppServices.pickPhotos`; no file-picker package |
 | Photo downloads | `cloud_functions`: `getGalleryDownloadUrl` (in `functions/`), streamed with `HttpsCallable.stream` (progress chunks while a zip is built, then the link), behind `GalleryService` |
@@ -58,8 +58,8 @@ lib/
     app_user.dart         AppUser: the signed-in customer (uid, email, name)
     booking.dart          Booking: one session (paid booking or ad hoc), parsed from a Firestore `bookings`
                           document; title, familyTitle, isAdHoc, canDeliverPhotos, guestEmails (an ad hoc
-                          session's `emails`, or an older one's single `email`); problemWith() says why one
-                          can't be read
+                          session's `emails`, or an older one's single `email`), sharedWith (who its owner
+                          shared it with); problemWith() says why one can't be read
     picked_photo.dart     PickedPhoto: a file chosen in the browser's picker (name, size, type, the File itself)
     session_details.dart  SessionDetails: what the session form saves for an ad hoc session
     session_lookup.dart   SessionLookup (SessionFound / SessionMissing / SessionUnreadable) and UnreadableBooking
@@ -72,7 +72,9 @@ lib/
     auth_service.dart     AuthService interface + FirebaseAuthService (Google popup sign-in; isAdmin() reads
                           the ID token's `admin` claim, refreshing the token on the first check per uid)
     booking_service.dart  BookingService + FirestoreBookingService (live: the user's bookings by uid, merged
-                          with ad hoc sessions shared with their email; mergeUserBookings)
+                          with ad hoc sessions shared with their email and sessions shared with them, marked
+                          in sharedWithUser; mergeUserBookings); share/stopSharing (arrayUnion/arrayRemove on
+                          sharedWith, 20 s limit, SharingException) and sharingProblem, the rules' check
     gallery_service.dart  GalleryService + FunctionsGalleryService (streams getGalleryDownloadUrl: GalleryProgress
                           while a zip is built, then GalleryDownload; readGalleryDownload holds the logic and
                           the 10-minute limit, testable on the VM)
@@ -111,7 +113,10 @@ lib/
     booking_card.dart     One session on "Your sessions", titled by familyTitle (an ad hoc session's name, as
                           on the admin pages); paid and ad hoc sessions with photos ready get
                           "Download all photos", with the zip's progress while it's built (photo N of M, a
-                          bar, its size) and a message once the browser has it; one card prepares at a time
+                          bar, its size) and a message once the browser has it; one card prepares at a time.
+                          The family's own paid and ad hoc sessions list who they're shared with ("Stop
+                          sharing") and "Share this session" (a dialog: their email, then the message to send,
+                          sharedSessionMessage); one shared with them says "Shared with you"
     page_footer.dart      Logo and copyright
     admin_gate.dart       AdminGate: an admin page's body for admins only; otherwise sign in, not an admin,
                           or couldn't check
@@ -149,8 +154,9 @@ lib/
                           (formatList: "a, b or c")
     keyboard_input.dart   KeyboardInput: whether the last input was a key (like :focus-visible)
     embedded_browser.dart Detects in-app browsers (Instagram, Facebook, TikTok, Pinterest, Android WebViews, ...)
-    site_domain.dart      siteDomain (brookestapletonphoto.com) and withSiteAuthDomain: sign-in through
-                          the custom domain when the site is served from it
+    site_domain.dart      siteDomain (brookestapletonphoto.com), sessionsLink (its /#/profile, for messages),
+                          and withSiteAuthDomain: sign-in through the custom domain when the site is served
+                          from it
     leave_warning.dart    LeaveWarning: whether a page has uploads running, a download being prepared or
                           unsaved changes (main.dart's beforeunload, signOutWithWarning)
     screen_awake.dart     ScreenAwake: whether a page needs the screen kept on (a download being prepared;
@@ -174,16 +180,19 @@ test/                     Widget and unit tests; mirrors lib/
 functions/                Cloud Functions, TypeScript on Node 24 (own package.json; not a Dart package)
   src/index.ts            Function definitions (region us-central1); getGalleryDownloadUrl
   src/gallery.ts          Core logic with injected Firestore/Storage, so tests use in-memory fakes; canDownload():
-                          the booking's uid, or one of an ad hoc session's emails, verified; progressSender: progress
+                          the booking's uid, or a verified email in an ad hoc session's emails or any session's
+                          sharedWith; progressSender: progress
                           chunks to the caller, at most one per 500 ms (the first and last always)
   src/gallery.test.ts     node:test unit tests
 firestore.rules           bookings: customers read their own (uid), guests ad hoc sessions shared with their
-                          verified email, admins (claim admin: true) create/edit/delete ad hoc sessions and set
+                          verified email, and anyone a session's sharedWith lists; owners change only
+                          sharedWith; admins (claim admin: true) create/edit/delete ad hoc sessions and set
                           photosReady; site/home: public get, admin writes
 storage.rules             _admin/gallery/: public read, admin add (JPEG/PNG/WebP < 20 MiB) and delete;
                           galleries/: admin only (< 100 MiB); gallery-zips/: admin delete; no overwrites
 rules-tests/              Rules API test cases for both rules files (firestore-cases.mjs, storage-cases.mjs),
-                          and payload.mjs / report.mjs, which scripts/test-rules.sh runs (Node, no packages)
+                          and payload.mjs / report.mjs, which scripts/test-rules.sh runs (Node, no packages),
+                          sending 100 cases a request (batches.mjs: the API refuses a couple of hundred)
 firebase.json             Hosting config (public build/web, SPA rewrite), functions, rules, FlutterFire metadata
 cors.json                 CORS rule for the Storage bucket (GET from any origin)
 scripts/
@@ -223,7 +232,9 @@ scripts/
    `where('status', isEqualTo: 'adhoc').where('emails', arrayContains: <lowercased email>)`
    and, for sessions from before several emails, the same with
    `.where('email', isEqualTo: <lowercased email>)` (ad hoc sessions shared with
-   them; each of those failing counts as none). With
+   them), and `where('sharedWith', arrayContains: <lowercased email>)` (sessions
+   their owner shared with them, which `sharedWithUser` marks); each of those
+   failing counts as none. With
    none, the empty state names the email they're signed in as, for a guest on
    the wrong Google account. A paid booking's card is titled by its package
    ("Premium session"); an ad hoc session's by the name the admin gave it, the
@@ -236,6 +247,13 @@ scripts/
    card shows photo N of M and a bar; a caller who leaves doesn't stop the
    build), and returns a signed link that expires after an hour, opened in the
    same tab; the card then says the download has started, with its size.
+   On the family's own paid or ad hoc sessions (found by uid or as a guest, not
+   only by `sharedWith`), "Share this session" opens a dialog for the email to
+   share it with (`sharingProblem`, and not their own) →
+   `BookingService.share` (`arrayUnion` on `sharedWith`) → the message to send
+   them (`sharedSessionMessage`, "Copy message"); each person listed has "Stop
+   sharing" (asks first) → `stopSharing` (`arrayRemove`). Whoever it's shared
+   with sees it with "Shared with you" and no sharing of their own.
 
 The account control (top right of the hero and of every page's top bar) signs
 in and out at any time.
@@ -454,10 +472,10 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   them under `_admin/gallery/`, which is public.
 - Rules aren't filters: the bookings queries must be exactly
   `where('uid', isEqualTo: uid)`,
-  `where('status', isEqualTo: 'adhoc').where('emails', arrayContains: <email trimmed and lowercased>)`
-  and `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <the same>)`
-  (and the guest's token must have `email_verified`), or Firestore rejects the
-  whole query. Equality and `arrayContains` filters combine without an index;
+  `where('status', isEqualTo: 'adhoc').where('emails', arrayContains: <email trimmed and lowercased>)`,
+  `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <the same>)`
+  and `where('sharedWith', arrayContains: <the same>)` (and the guest's token
+  must have `email_verified`), or Firestore rejects the whole query. Equality and `arrayContains` filters combine without an index;
   sort on the client, because an `orderBy` would need a composite index
   (there's no `firestore.indexes.json`).
 - `status: 'adhoc'` is matched exactly (no trimming or case folding) by the
@@ -475,6 +493,19 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   the ten places in turn (`validEmailAt`). Raising
   `SessionRules.emailListMaxLength` means adding places there too;
   `rules_mirror_test.dart` fails until they agree.
+- Families write to Firestore: a session's owner (`isOwner` in the rules: the
+  booking's uid, or a guest of an ad hoc session) may change its `sharedWith`
+  and nothing else, validated like `emails`. Someone it was shared with can't
+  change it, and the portal doesn't touch it (admin updates leave it out, and
+  the fakes keep it). "Your sessions" decides who may share by which query
+  found the session (`sharedWithUser`), which matches `isOwner`.
+- Stopping sharing can't delete the cached zip (only admins may), so a link
+  handed out in the last hour keeps working until it expires (README,
+  "Families sharing their photos"). The download function re-checks
+  `sharedWith` on every request, so no new link is given out.
+- The Rules API refuses a test request with a couple of hundred cases or more,
+  so `scripts/test-rules.sh` sends `rules-tests/` cases 100 at a time
+  (`batches.mjs`) and `report.mjs` adds the batches up.
 - Admin access is the `admin` claim in the caller's ID token. `isAdmin()`
   refreshes the token on its first check per uid in a page load, so a grant
   shows after a refresh. Revoking (`--revoke`) can't end a token already

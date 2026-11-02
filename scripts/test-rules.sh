@@ -33,17 +33,21 @@ trap 'rm -rf "${WORK}"' EXIT
 
 failed=0
 for kind in firestore storage; do
-  node "${ROOT}/rules-tests/payload.mjs" "${kind}" "${WORK}/${kind}.json"
-  # A user's gcloud credentials need a quota project, hence
-  # x-goog-user-project.
-  status="$(printf 'Authorization: Bearer %s\n' "${TOKEN}" \
-    | curl -sS -X POST "${ENDPOINT}" \
-      -H @- \
-      -H "x-goog-user-project: ${PROJECT_ID}" \
-      -H "Content-Type: application/json" \
-      --data-binary @"${WORK}/${kind}.json" \
-      -o "${WORK}/${kind}-result.json" \
-      -w '%{http_code}')" || status="000"
-  node "${ROOT}/rules-tests/report.mjs" "${kind}" "${WORK}/${kind}-result.json" "${status}" || failed=1
+  # A batch of cases per request: the API refuses too many at once.
+  batches="$(node "${ROOT}/rules-tests/payload.mjs" "${kind}" "${WORK}/${kind}")"
+  for ((i = 0; i < batches; i++)); do
+    # A user's gcloud credentials need a quota project, hence
+    # x-goog-user-project.
+    status="$(printf 'Authorization: Bearer %s\n' "${TOKEN}" \
+      | curl -sS -X POST "${ENDPOINT}" \
+        -H @- \
+        -H "x-goog-user-project: ${PROJECT_ID}" \
+        -H "Content-Type: application/json" \
+        --data-binary @"${WORK}/${kind}-${i}.json" \
+        -o "${WORK}/${kind}-${i}-result.json" \
+        -w '%{http_code}')" || status="000"
+    printf '%s' "${status}" > "${WORK}/${kind}-${i}-status"
+  done
+  node "${ROOT}/rules-tests/report.mjs" "${kind}" "${WORK}/${kind}" || failed=1
 done
 exit "${failed}"

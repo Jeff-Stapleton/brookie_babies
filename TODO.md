@@ -1,6 +1,6 @@
 # TODO
 
-Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-11-01 (several emails per ad hoc session; families sharing sessions).
+Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-11-01 (several emails per ad hoc session; families sharing sessions; the home page's introduction and packages hidden until Brooke settles them).
 
 ## 1. Ship the admin portal
 
@@ -229,9 +229,15 @@ supply. Each lives in one place in the code.
       portal is live, choose a photo with the face clear of the middle and
       move it to the top in **Admin → Edit home page photos** (README, "Home
       page photos"); there's no need to rename files any more.
-- [ ] **What each package includes:** all three list the same inclusions
-      (`lib/models/session_package.dart`), so families would pay more for
-      nothing. Optionally add a one-sentence description per package.
+- [ ] **The packages:** hidden from the site for now, since Brooke hasn't
+      decided what they are (README, "Hidden for now"): no packages, no
+      **Book a session** and no **See packages**, so nothing can be booked
+      online. Needed: each package's name, price and what it includes (all
+      three list the same inclusions today, so families would pay more for
+      nothing), optionally a one-sentence description, and a Stripe Payment
+      Link for each. Then update `lib/models/session_package.dart` and
+      `lib/services/payment_links.dart`, and set `HomePage.offersPackages`
+      to `true`.
 - [ ] **Session times and length:** the booking page offers 9, 10, 11 am, 1 and
       2 pm every day, 30 minutes each (`lib/models/session_time.dart`), while
       the packages say "15-minute session". Which days and times, how long,
@@ -241,9 +247,12 @@ supply. Each lives in one place in the code.
 - [ ] **Contact and social links:** the footer has none, and one error message
       says "Let Brooke know". An email address (and Instagram, if wanted)
       would give families a way to reach the studio.
-- [ ] **Introduction copy:** "Little ones, while they’re little" and "Calm,
-      unhurried sessions for newborns, babies and the people who hold them."
-      are drafts from the design system.
+- [ ] **Introduction copy:** hidden from the home page for now: Brooke
+      didn't like the drafts from the design system ("Little ones, while
+      they’re little" and "Calm, unhurried sessions for newborns, babies and
+      the people who hold them."). Once she has her own words, put them in
+      `_Introduction` (`lib/pages/home_page.dart`) and set
+      `HomePage.showsIntroduction` to `true`.
 - [ ] **Logo for dark backgrounds:** the black brush strokes past the disc
       nearly disappear on the dark theme (footer, loading screen, browser
       tab). A light-ink version would fix that.

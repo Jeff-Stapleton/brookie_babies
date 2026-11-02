@@ -13,6 +13,11 @@ photos as one zip. Admins (the studio) use an admin portal at `/#/admin` to
 add ad hoc sessions for family and friends, upload photos, make them available
 and choose the home page photos.
 
+For now the home page leaves out the introduction and the packages, and with
+the packages every way into booking, until Brooke settles them
+(`HomePage.showsIntroduction` and `HomePage.offersPackages` are false; see
+"Known gaps").
+
 - Firebase project: `brookie-babies` (see `.firebaserc`)
 - Hosting: Firebase Hosting, serving the static `build/web` output
 - Stage: early MVP. Session times and package inclusions are placeholders (see "Known gaps").
@@ -90,7 +95,7 @@ lib/
                           (test/models/session_package_test.dart checks every SessionPackage has one)
   pages/                  Full screens
     home_page.dart        Hero, introduction, featured photos, packages, footer; HomePage.showPackages(),
-                          HomePage.reloadPhotos()
+                          HomePage.reloadPhotos(); showsIntroduction and offersPackages (both off for now)
     scheduling_page.dart  "Book a session": calendar + session times, then sign-in and the Payment Link
     profile_page.dart     "Your sessions": account, upcoming and past sessions (route /profile)
     admin_page.dart       "Admin" (route /admin): home page photos card, "Add a session", every session
@@ -101,7 +106,8 @@ lib/
     home_photos_admin_page.dart  "Home page photos": the chosen photos in order, the public library, uploads,
                           "Save home page"
   components/             Page sections
-    home_hero.dart        Full-bleed photo, the logo, the butter "Book a session" button, the account control
+    home_hero.dart        Full-bleed photo, the logo, the butter "Book a session" button (none without onBook),
+                          the account control
     featured_photos.dart  Up to six more photos as prints, in full rows; FeaturedPhotos.shownCount()
     packages.dart         "Choose your package" and the PackageCards; remembers the chosen package
     booking_calendar.dart TableCalendar restyled as the design system's DateCalendar (showOpenings: false
@@ -176,6 +182,7 @@ test/                     Widget and unit tests; mirrors lib/
   support/fake_photos.dart FakePhotoServer: network photos in widget tests stay loading or fail on cue
   support/fake_firebase.dart  In-memory Firestore, Storage and Auth for FirebaseAdminService's tests (no rules)
   support/admin_test_app.dart pumpAdminPage(): an admin page with a signed-in admin, at a width, theme and text size
+  support/hidden_sections.dart showIntroduction() and offerPackages(): the hidden home page sections, on for one test
   widget_test.dart        The package cards: layout at many widths (loads the real Jost font), choosing, selection
 functions/                Cloud Functions, TypeScript on Node 24 (own package.json; not a Dart package)
   src/index.ts            Function definitions (region us-central1); getGalleryDownloadUrl
@@ -214,9 +221,12 @@ scripts/
    name. `HomeHero` shows the first one
    full-bleed with the logo and a butter "Book a session" button that scrolls to
    the packages; `FeaturedPhotos` shows up to six more below the introduction.
-   With no photos the hero sits on a quiet band with an ink button.
+   With no photos the hero sits on a quiet band with an ink button. For now,
+   with `showsIntroduction` and `offersPackages` off, the hero has only the
+   logo and the photos start a section below it.
 2. `Packages` → `PackageCard` "Choose Premium" → `Navigator.push(SchedulingPage(packageName))`.
    Coming back, that card is selected and reads "Continue with Premium".
+   (Only while `HomePage.offersPackages`; off for now.)
 3. `SchedulingPage` opens on the first day that still has times. The family
    picks a day in `BookingCalendar` and a time in `SessionList`; "Continue to
    payment" (disabled until a time is chosen) calls `navigateCheckout()`.
@@ -297,6 +307,8 @@ sessions are created in the admin portal.
 A named route `/schedule` exists in `main.dart` but the main flow does not use
 it. It has no package, so the page says to choose one first and offers "See
 packages" (`HomePage.showPackages`), which goes home and scrolls to them.
+While `HomePage.offersPackages` is off it says sessions can't be booked online
+yet, with no button.
 
 ## Commands
 
@@ -616,6 +628,16 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   session") and the package inclusions (`SessionPackage.all`, the same on all
   three). Every slot says "Address sent after you book", and nothing marks a
   time as taken. The home page's introduction is draft copy.
+- Hidden until Brooke settles them: Brooke doesn't like the introduction's
+  wording and hasn't decided on her packages, so `HomePage.showsIntroduction`
+  and `HomePage.offersPackages` are false. With packages off, nothing offers
+  booking: no packages section, no "Book a session" in the hero, no "See
+  packages" on Your sessions or `/schedule`. They're plain `static bool`s, not
+  `const`, so tests turn them on with `showIntroduction()` / `offerPackages()`
+  (`test/support/hidden_sections.dart`), which restore them afterwards. To
+  bring a section back, set it to `true` and update the tests that check it's
+  hidden: their names say "while there are no packages" or "while the
+  introduction and the packages are hidden".
 - Selected date and time are not passed to Stripe or stored anywhere, so the
   app doesn't create paid bookings yet; they are entered by hand in the Firestore
   console until server-created Checkout Sessions write them. The admin portal

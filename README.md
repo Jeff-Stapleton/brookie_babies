@@ -6,15 +6,18 @@ and later download their edited photos. The site is hosted on Firebase.
 
 > Status: early MVP. The session times and the package inclusions are still
 > placeholders (`lib/models/session_time.dart`, `lib/models/session_package.dart`).
+> Until Brooke settles the wording and her packages, the home page leaves out
+> its introduction and the packages, and so offers no booking: see "Hidden
+> for now".
 
 ## Features
 
 - **Home page**: one full-bleed photograph with the logo and "Book a session",
   then a short introduction and up to six more photographs, all from Firebase
   Storage (`_admin/gallery`), chosen and ordered in the admin portal (see
-  "Home page photos").
+  "Home page photos"). For now, just the photographs and the logo.
 - **Packages**: Basic ($25), Premium ($50) and Ultimate ($99); choosing one
-  opens booking for it.
+  opens booking for it. Hidden for now.
 - **Scheduling**: a calendar (`table_calendar`) and the session times for the
   chosen day.
 - **Sign-in**: Google sign-in through Firebase Auth. Customers sign in before
@@ -194,13 +197,13 @@ token. It's safe to re-run.
 The home page shows up to seven photos from Storage → `_admin/gallery` (the
 photo library). The **first is the full-screen photo** behind the logo, so
 choose one whose subject's face is clear of the center (the logo covers the
-middle). The next six appear below the introduction, in full rows only (three
+middle). The next six appear below it, in full rows only (three
 across on wider screens, two on phones; a leftover photo is left out).
 
 Choose them in the admin portal: **Admin → Edit home page photos**. Under a
 library photo, **On the home page** adds it (up to seven). **Move up**, **Move
 down** and **Remove** set the order, and the page says how many of the photos
-below the introduction wide screens and phones will show. **Save home page**
+below the full-screen photo wide screens and phones will show. **Save home page**
 saves the choice in Firestore as `site/home` (the file names, in order), and
 the site shows it at once. Saving with none chosen leaves the home page
 without photos.
@@ -222,6 +225,27 @@ upload that sorts first by name changes the live home page at once (the page
 says so by **Upload photos**).
 
 > **Everything in `_admin/gallery` is public.** Anyone can list the folder and download every file in it, whether it's on the home page or not. Don't upload clients' photos there without their permission, and never put a family's session photos there.
+
+## Hidden for now
+
+Brooke doesn't like the home page's introduction ("Little ones, while they’re
+little" and the sentence under it) and hasn't decided on her packages, so the
+site leaves them out. Two switches on `HomePage` (`lib/pages/home_page.dart`)
+bring them back:
+
+- `HomePage.showsIntroduction`: the introduction below the full-screen photo.
+- `HomePage.offersPackages`: "Choose your package" and the package cards, the
+  **Book a session** button on the full-screen photo, which scrolls to them,
+  and **See packages** on Your sessions. While it's off the site offers no
+  booking, and `/#/schedule` says sessions can't be booked online yet.
+
+Both are `false`. Once Brooke has decided, change the wording (`_Introduction`
+in the same file) or the packages (`lib/models/session_package.dart`, with a
+Stripe Payment Link for each in `lib/services/payment_links.dart`), then set
+the switch to `true`. Tests that check the sections turn them on for
+themselves (`test/support/hidden_sections.dart`); the ones that check they're
+hidden say so in their names, and fail once a switch is on, so update them
+then.
 
 ## Delivering photos
 

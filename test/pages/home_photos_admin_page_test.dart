@@ -243,22 +243,22 @@ void main() {
     photoTest('the shown-count note says how many featured photos wide screens and phones show', (tester) async {
       await pumpPage(tester);
 
-      expect(find.text('Wide screens and phones show both photos below the introduction.'), findsOneWidget);
+      expect(find.text('Wide screens and phones show both photos below the full-screen photo.'), findsOneWidget);
     });
 
     test('the shown-count note for every number of photos', () {
       expect([for (var n = 0; n <= 7; n++) homePhotosShownNote(n)], [
         'With no photos, the home page shows the logo on a plain band.',
-        'Just the full-screen photo. Add more to show photos below the introduction.',
-        'One photo below the introduction is left out: it takes two to fill a row. Add another to show them.',
-        'Wide screens and phones show both photos below the introduction.',
-        'Photos below the introduction fill whole rows, so wide screens show all 3 and phones show the first 2 '
-            'of 3.',
-        'Photos below the introduction fill whole rows, so wide screens show the first 3 of 4 and phones show '
-            'all 4.',
-        'Photos below the introduction fill whole rows, so wide screens show the first 3 of 5 and phones show '
-            'the first 4 of 5.',
-        'Wide screens and phones show all 6 photos below the introduction.',
+        'Just the full-screen photo. Add more to show photos below it.',
+        'One photo below the full-screen photo is left out: it takes two to fill a row. Add another to show them.',
+        'Wide screens and phones show both photos below the full-screen photo.',
+        'Photos below the full-screen photo fill whole rows, so wide screens show all 3 and phones show the '
+            'first 2 of 3.',
+        'Photos below the full-screen photo fill whole rows, so wide screens show the first 3 of 4 and phones '
+            'show all 4.',
+        'Photos below the full-screen photo fill whole rows, so wide screens show the first 3 of 5 and phones '
+            'show the first 4 of 5.',
+        'Wide screens and phones show all 6 photos below the full-screen photo.',
       ]);
     });
 

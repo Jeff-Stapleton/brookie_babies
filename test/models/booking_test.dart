@@ -105,7 +105,7 @@ void main() {
     const adHoc = {
       'status': 'adhoc',
       'name': 'The Harper family',
-      'email': 'harper@example.com',
+      'emails': ['harper@example.com', 'pat@example.com'],
       'date': '2026-11-14',
       'photosReady': false,
     };
@@ -119,7 +119,34 @@ void main() {
       expect(booking.uid, isNull);
       expect(booking.title, 'Photo session');
       expect(booking.name, 'The Harper family');
+      expect(booking.emails, ['harper@example.com', 'pat@example.com']);
+      expect(booking.guestEmails, ['harper@example.com', 'pat@example.com']);
+    });
+
+    test('from before several emails, shared with the one email', () {
+      final booking = Booking.fromMap('a1', {...adHoc, 'email': ' harper@example.com '}..remove('emails'))!;
+
       expect(booking.email, 'harper@example.com');
+      expect(booking.emails, isEmpty);
+      expect(booking.guestEmails, ['harper@example.com']);
+    });
+
+    test('with both, shared with each, once', () {
+      expect(Booking.fromMap('a1', {...adHoc, 'email': 'pat@example.com'})!.guestEmails,
+          ['harper@example.com', 'pat@example.com']);
+      expect(Booking.fromMap('a1', {...adHoc, 'email': 'jo@example.com'})!.guestEmails,
+          ['harper@example.com', 'pat@example.com', 'jo@example.com']);
+    });
+
+    test('emails that aren’t a list of text are left out, not the session', () {
+      for (final (emails, read) in [
+        ('harper@example.com', <String>[]),
+        (7, <String>[]),
+        ([' harper@example.com ', 7, '', null, ' '], ['harper@example.com']),
+      ]) {
+        final booking = Booking.fromMap('a1', {...adHoc, 'emails': emails});
+        expect(booking?.emails, read, reason: '$emails');
+      }
     });
 
     test('the family sees the name the admin pages show', () {
@@ -150,6 +177,29 @@ void main() {
 
   test('the family sees a paid booking by its package: its name is for the Admin page', () {
     expect(Booking.fromMap('b1', {...valid, 'name': 'The Harper family'})!.familyTitle, 'Premium session');
+  });
+
+  test('reads who its owner shared it with, leaving out anything but text', () {
+    expect(
+      Booking.fromMap('b1', {
+        ...valid,
+        'sharedWith': [' grandma@example.com ', 7, '', 'aunt@example.com'],
+      })!
+          .sharedWith,
+      ['grandma@example.com', 'aunt@example.com'],
+    );
+    expect(Booking.fromMap('b1', valid)!.sharedWith, isEmpty);
+    expect(Booking.fromMap('b1', {...valid, 'sharedWith': 'grandma@example.com'})!.sharedWith, isEmpty);
+  });
+
+  test('a paid booking has no guests: its email is a note, and emails on it count for nothing', () {
+    final booking = Booking.fromMap('b1', {
+      ...valid,
+      'email': 'parent@example.com',
+      'emails': ['parent@example.com'],
+    })!;
+
+    expect(booking.guestEmails, isEmpty);
   });
 
   test('photos can be delivered for paid and ad hoc sessions only', () {

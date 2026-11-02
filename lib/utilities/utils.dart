@@ -1,4 +1,5 @@
-// Dates and sizes as the site writes them, and the window families can book in.
+// Dates, sizes and lists as the site writes them, and the window families
+// can book in.
 //
 // The site is English only, and package:intl isn't a direct dependency, so
 // the names are spelled out here.
@@ -52,3 +53,11 @@ String formatFileSize(int bytes) {
   if (megabytes < 1000) return '${megabytes < 1 ? 1 : megabytes} MB';
   return '${(bytes / (1000 * mb)).toStringAsFixed(1)} GB';
 }
+
+/// [items] in a sentence, joined by commas and the last by [last]: "a",
+/// "a or b", "a, b or c".
+String formatList(List<String> items, {String last = 'and'}) => switch (items) {
+      [] => '',
+      [final only] => only,
+      [...final rest, final end] => '${rest.join(', ')} $last $end',
+    };

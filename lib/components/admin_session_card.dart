@@ -10,8 +10,9 @@ import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:flutter/material.dart';
 
 /// Who a session is for, as the admin pages name it: the name given to an
-/// ad hoc session, else the booking's email.
-String sessionDisplayName(Booking booking) => booking.name ?? booking.email ?? 'Session';
+/// ad hoc session, else the booking's email (or an ad hoc session's first).
+String sessionDisplayName(Booking booking) =>
+    booking.name ?? booking.email ?? booking.guestEmails.firstOrNull ?? 'Session';
 
 /// Whether the family can download a session's photos, as a tag: "Ready
 /// to download" or "Not ready". Photos made available on a booking that

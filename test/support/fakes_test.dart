@@ -5,6 +5,7 @@ import 'package:brookie_babies/models/session_details.dart';
 import 'package:brookie_babies/models/session_lookup.dart';
 import 'package:brookie_babies/models/stored_photo.dart';
 import 'package:brookie_babies/services/admin_service.dart';
+import 'package:brookie_babies/services/booking_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fakes.dart';
@@ -12,7 +13,7 @@ import 'fakes.dart';
 void main() {
   final harper = SessionDetails(
     name: ' The Harper family ',
-    email: ' Harper@Example.com ',
+    emails: [' Harper@Example.com ', 'Pat@Example.com'],
     date: DateTime(2026, 11, 14, 15),
     packageName: 'Premium',
   );
@@ -52,7 +53,8 @@ void main() {
       final session = admin.sessions[id]!;
       expect(session.status, BookingStatus.adhoc);
       expect(session.name, 'The Harper family');
-      expect(session.email, 'harper@example.com');
+      expect(session.emails, ['harper@example.com', 'pat@example.com']);
+      expect(session.email, isNull);
       expect(session.date, DateTime(2026, 11, 14));
       expect(session.photosReady, isFalse);
       expect(session.uid, isNull);
@@ -62,14 +64,14 @@ void main() {
         () async {
       final admin = FakeAdminService();
       final id = admin.newSessionId();
-      final other = SessionDetails(name: 'Other', email: ' O@Example.com', date: DateTime(2027));
+      final other = SessionDetails(name: 'Other', emails: [' O@Example.com'], date: DateTime(2027));
 
       expect(await admin.createSession(harper, id: id), id);
       expect(await admin.createSession(other, id: id), id);
 
       expect(admin.sessions.keys, [id]);
       expect(admin.sessions[id]!.name, 'Other');
-      expect(admin.sessions[id]!.email, 'o@example.com');
+      expect(admin.sessions[id]!.emails, ['o@example.com']);
       expect(admin.sessions[id]!.packageName, isNull);
       expect(admin.createSessionIds, [id, id]);
     });
@@ -256,6 +258,45 @@ void main() {
 
       expect(admin.calls, ['deletePhoto(galleries/s1/a.jpg)', 'deletePhoto(galleries/s1/b.jpg, deleteZip: false)']);
       expect(admin.sessionPhotos['s1'], isEmpty);
+    });
+  });
+
+  group('FakeBookingService', () {
+    test('live: sharing and stopping change the booking, and the page hears of it', () async {
+      final bookings = FakeBookingService([testSession('b1', status: BookingStatus.paid)], 0, {'b2'});
+      final seen = <List<String>>[];
+      final subscription = bookings.watchBookings(testUser).listen((user) {
+        seen.add(user.bookings.single.sharedWith);
+        expect(user.sharedWithUser, {'b2'});
+      });
+      addTearDown(subscription.cancel);
+      await pumpEventQueue();
+
+      await bookings.share(bookings.bookings.single, ' Grandma@Example.com');
+      await bookings.share(bookings.bookings.single, 'aunt@example.com');
+      await bookings.stopSharing(bookings.bookings.single, 'grandma@example.com');
+      await pumpEventQueue();
+
+      expect(seen, [
+        <String>[],
+        ['grandma@example.com'],
+        ['grandma@example.com', 'aunt@example.com'],
+        ['aunt@example.com'],
+      ]);
+      expect(bookings.calls, [
+        'share(b1, grandma@example.com)',
+        'share(b1, aunt@example.com)',
+        'stopSharing(b1, grandma@example.com)',
+      ]);
+    });
+
+    test('nextError fails one share, then clears', () async {
+      final bookings = FakeBookingService([testSession('b1')])..nextError = const SharingException('No.');
+
+      await expectLater(bookings.share(bookings.bookings.single, 'a@example.com'), throwsA(isA<SharingException>()));
+      await bookings.share(bookings.bookings.single, 'a@example.com');
+
+      expect(bookings.bookings.single.sharedWith, ['a@example.com']);
     });
   });
 

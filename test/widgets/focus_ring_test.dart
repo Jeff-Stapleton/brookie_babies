@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
+import '../support/hidden_sections.dart';
 
 void main() {
   /// [home] in the app as main.dart builds it: the traversal group from
@@ -70,6 +71,7 @@ void main() {
   }
 
   testWidgets('Tab to a package button scrolls it to the middle, with room for its ring', (tester) async {
+    offerPackages();
     await pumpApp(tester, const HomePage());
 
     await tabTo(tester, 'Choose Basic');
@@ -83,6 +85,7 @@ void main() {
   });
 
   testWidgets('it scrolls over the fade duration, easing out', (tester) async {
+    offerPackages();
     await pumpApp(tester, const HomePage());
     await tabTo(tester, 'Book a session');
     final start = pagePosition(tester).pixels;
@@ -104,6 +107,7 @@ void main() {
   testWidgets('with reduced motion it jumps straight there', (tester) async {
     tester.platformDispatcher.accessibilityFeaturesTestValue = FakeAccessibilityFeatures(disableAnimations: true);
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    offerPackages();
     await pumpApp(tester, const HomePage());
 
     await tabTo(tester, 'Choose Basic', settle: false);
@@ -117,6 +121,7 @@ void main() {
   });
 
   testWidgets('a control already comfortably in view leaves the page still', (tester) async {
+    offerPackages();
     await pumpApp(tester, const HomePage());
     await tabTo(tester, 'Choose Basic');
     final offset = pagePosition(tester).pixels;

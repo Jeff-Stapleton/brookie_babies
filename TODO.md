@@ -1,6 +1,6 @@
 # TODO
 
-Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-10-25 (download progress).
+Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-11-01 (several emails per ad hoc session; families sharing sessions; the home page's introduction and packages hidden until Brooke settles them).
 
 ## 1. Ship the admin portal
 
@@ -26,7 +26,7 @@ version of the download function. Do these in order.
       ```bash
       npm ci --prefix functions
       firebase deploy --only firestore:rules,storage --dry-run   # compiles the rules; changes nothing
-      bash scripts/test-rules.sh   # read-only: expect "149 of 149" and "65 of 65" cases to pass
+      bash scripts/test-rules.sh   # read-only: expect "265 of 265" and "65 of 65" cases to pass
       firebase deploy --only functions,firestore:rules,storage
       ```
       The site that's live now keeps working with them. Without them, the new
@@ -51,7 +51,9 @@ version of the download function. Do these in order.
   - [ ] Open https://brookestapletonphoto.com/#/admin, or the account menu →
         **Admin**.
   - [ ] **Add a session** for a second Google account of yours: a name, its
-        Gmail address and today's date.
+        Gmail address and today's date. **Add another email** with a third
+        account (or someone willing to check), as a couple's session would
+        have both.
   - [ ] **Upload photos**: pick 3 or 4 photos. Pick the same ones again:
         they're listed as skipped. Start a bigger upload and press **Cancel
         uploads** part way. While photos are uploading, closing the tab or
@@ -60,8 +62,18 @@ version of the download function. Do these in order.
   - [ ] In another browser or a private window, sign in as the second account
         and open the link from the message: the session is under **Your
         sessions**, and **Download all photos** downloads a zip of the photos.
-  - [ ] Back in the session, **Edit details** and change the email (it asks
-        first): the second account no longer sees the session.
+        Then the same as the third account.
+  - [ ] As the second account, on its **Your sessions**: **Share this
+        session** with a fourth account (or anyone willing to check), and
+        **Copy message**. Signed in as that account, the session is there,
+        marked "Shared with you", with no **Share this session**, and
+        **Download all photos** works. Back as the second account, **Stop
+        sharing**: the fourth account no longer sees it. The session's admin
+        page says who the family shared it with while they do.
+  - [ ] Back in the session, **Edit details** and take the third email off
+        (it asks first): that account no longer sees the session, and the
+        second still does. Then change the second email: the second account
+        no longer sees it either.
   - [ ] **Delete session**: Admin says it's deleted, and Firebase console →
         Storage → `galleries` no longer has its folder.
   - [ ] **Edit home page photos**: upload 2 or 3 JPEGs, and an iPhone HEIC if
@@ -185,7 +197,13 @@ Functions → getGalleryDownloadUrl → Logs.
   - Add a branch ruleset on `main` that blocks force-pushes and deletion.
 - [ ] **Admin portal follow-ups** (not built yet):
   - Email families when their photos are ready. Today you copy the message
-    from the session's page and send it yourself.
+    from the session's page and send it yourself. The same for the people a
+    family shares a session with: today the family copies a message.
+  - When a family stops sharing a session, end the download links already
+    given out at once (a Firestore trigger deleting the cached zip when
+    `sharedWith` loses someone). Today they work until they expire, within
+    the hour.
+  - Let someone a session was shared with take themselves off it.
   - Thumbnails and resizing: the library grid downloads every photo at full
     size, and session photos are listed by name only.
   - Drag and drop from Finder onto the upload buttons.
@@ -198,7 +216,6 @@ Functions → getGalleryDownloadUrl → Logs.
     that aren't on the home page can't be found that way.
   - Sign-in without Google for ad hoc guests (for example an email link), for
     families without a Google account.
-  - Several emails per ad hoc session, such as both parents.
   - Editing paid bookings in the portal (date, time, name). Today that's the
     Firestore console; the rules only let the portal change `photosReady`.
 
@@ -212,9 +229,15 @@ supply. Each lives in one place in the code.
       portal is live, choose a photo with the face clear of the middle and
       move it to the top in **Admin → Edit home page photos** (README, "Home
       page photos"); there's no need to rename files any more.
-- [ ] **What each package includes:** all three list the same inclusions
-      (`lib/models/session_package.dart`), so families would pay more for
-      nothing. Optionally add a one-sentence description per package.
+- [ ] **The packages:** hidden from the site for now, since Brooke hasn't
+      decided what they are (README, "Hidden for now"): no packages, no
+      **Book a session** and no **See packages**, so nothing can be booked
+      online. Needed: each package's name, price and what it includes (all
+      three list the same inclusions today, so families would pay more for
+      nothing), optionally a one-sentence description, and a Stripe Payment
+      Link for each. Then update `lib/models/session_package.dart` and
+      `lib/services/payment_links.dart`, and set `HomePage.offersPackages`
+      to `true`.
 - [ ] **Session times and length:** the booking page offers 9, 10, 11 am, 1 and
       2 pm every day, 30 minutes each (`lib/models/session_time.dart`), while
       the packages say "15-minute session". Which days and times, how long,
@@ -224,9 +247,12 @@ supply. Each lives in one place in the code.
 - [ ] **Contact and social links:** the footer has none, and one error message
       says "Let Brooke know". An email address (and Instagram, if wanted)
       would give families a way to reach the studio.
-- [ ] **Introduction copy:** "Little ones, while they’re little" and "Calm,
-      unhurried sessions for newborns, babies and the people who hold them."
-      are drafts from the design system.
+- [ ] **Introduction copy:** hidden from the home page for now: Brooke
+      didn't like the drafts from the design system ("Little ones, while
+      they’re little" and "Calm, unhurried sessions for newborns, babies and
+      the people who hold them."). Once she has her own words, put them in
+      `_Introduction` (`lib/pages/home_page.dart`) and set
+      `HomePage.showsIntroduction` to `true`.
 - [ ] **Logo for dark backgrounds:** the black brush strokes past the disc
       nearly disappear on the dark theme (footer, loading screen, browser
       tab). A light-ink version would fix that.

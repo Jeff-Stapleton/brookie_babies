@@ -117,6 +117,13 @@ abstract final class SessionRules {
   /// test/services/photo_rules_test.dart checks they agree).
   static const packageNames = ['Basic', 'Premium', 'Ultimate'];
 
+  /// An ad hoc session's `emails` hold 1 to this many addresses, and any
+  /// session's `sharedWith` up to this many.
+  static const emailListMaxLength = 10;
+
+  /// An email is at most this many characters: as long as an address can be.
+  static const emailMaxLength = 254;
+
   /// What the rules take as an email, once [normalizeEmail]ed.
   static final emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
@@ -149,6 +156,21 @@ abstract final class SessionRules {
       return '“${normalized.substring(plus, at)}” isn’t part of a Gmail address: Google signs them in without it. '
           'Take it out.';
     }
+    return null;
+  }
+
+  /// Why the rules would refuse [email], typed into a field, as one of a
+  /// session's emails (validEmail), or why no Google sign-in could match it
+  /// ([googleEmailProblem]); null if neither. An empty field is the caller's
+  /// to word.
+  static String? emailProblem(String email) {
+    final googleProblem = googleEmailProblem(email);
+    if (googleProblem != null) return googleProblem;
+    final normalized = normalizeEmail(email);
+    if (normalized.length > emailMaxLength) {
+      return 'That’s too long for an email address: they have at most $emailMaxLength characters.';
+    }
+    if (!emailPattern.hasMatch(normalized)) return 'That isn’t a whole email address. Check it, like name@gmail.com.';
     return null;
   }
 }

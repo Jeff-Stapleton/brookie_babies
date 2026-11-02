@@ -97,12 +97,19 @@ class FakeAuthService implements AuthService {
   }
 }
 
-/// [BookingService] that returns fixed bookings (or [error]) for any user.
+/// [BookingService] with the same bookings (or [error]) for any user, live:
+/// sharing one changes it, and the page hears of it, as from Firestore.
 class FakeBookingService implements BookingService {
-  FakeBookingService([this.bookings = const [], this.unreadable = 0]);
+  FakeBookingService([List<Booking> bookings = const [], this.unreadable = 0, Set<String> sharedWithUser = const {}])
+      : bookings = [...bookings],
+        sharedWithUser = {...sharedWithUser};
 
+  /// After changing it directly, call [notifyChanged].
   final List<Booking> bookings;
   final int unreadable;
+
+  /// The ids of [bookings] shared with the user by their owner.
+  final Set<String> sharedWithUser;
   Object? error;
 
   /// The uid of each user watched, in order.
@@ -111,26 +118,107 @@ class FakeBookingService implements BookingService {
   /// Each user watched, in order (for their email).
   final watchedUsers = <AppUser>[];
 
+  /// Each share and stop, as 'share(b1, grandma@example.com)'.
+  final calls = <String>[];
+
+  /// Thrown by the next share or stop, then cleared.
+  Object? nextError;
+
+  /// How long each share and stop takes.
+  Duration writeDelay = Duration.zero;
+
+  final _changes = StreamController<void>.broadcast(sync: true);
+
+  /// Has the live streams emit the bookings again.
+  void notifyChanged() => _changes.add(null);
+
   @override
   Stream<UserBookings> watchBookings(AppUser user) {
     watchedUids.add(user.uid);
     watchedUsers.add(user);
     final error = this.error;
-    return error == null
-        ? Stream.value((bookings: bookings, unreadable: unreadable))
-        : Stream.error(error);
+    if (error != null) return Stream.error(error);
+    UserBookings current() =>
+        (bookings: List.of(bookings), unreadable: unreadable, sharedWithUser: {...sharedWithUser});
+    return Stream.multi((controller) {
+      controller.add(current());
+      final changes = _changes.stream.listen((_) => controller.add(current()));
+      controller.onCancel = changes.cancel;
+    });
+  }
+
+  @override
+  Future<void> share(Booking booking, String email) => _changeSharing('share', booking, email);
+
+  @override
+  Future<void> stopSharing(Booking booking, String email) => _changeSharing('stopSharing', booking, email);
+
+  Future<void> _changeSharing(String method, Booking booking, String email) async {
+    final normalized = SessionRules.normalizeEmail(email);
+    calls.add('$method(${booking.id}, $normalized)');
+    if (writeDelay > Duration.zero) await Future<void>.delayed(writeDelay);
+    final error = nextError;
+    if (error != null) {
+      nextError = null;
+      throw error;
+    }
+    final i = bookings.indexWhere((b) => b.id == booking.id);
+    if (i < 0) return;
+    final sharedWith = [
+      for (final shared in bookings[i].sharedWith)
+        if (shared != normalized) shared,
+      if (method == 'share') normalized,
+    ];
+    bookings[i] = withSharedWith(bookings[i], sharedWith);
+    notifyChanged();
   }
 }
 
-/// [GalleryService] whose downloads stay pending until the test calls
-/// [complete] or [fail]; [progress] reports how the zip's build is going.
+/// [b], shared with [sharedWith].
+Booking withSharedWith(Booking b, List<String> sharedWith) => Booking(
+      id: b.id,
+      packageName: b.packageName,
+      date: b.date,
+      time: b.time,
+      location: b.location,
+      status: b.status,
+      photosReady: b.photosReady,
+      uid: b.uid,
+      email: b.email,
+      emails: b.emails,
+      sharedWith: sharedWith,
+      name: b.name,
+    );
+
+/// [GalleryService] with fixed individual [galleryPhotos] (or
+/// [galleryPhotosError]); zip downloads stay pending until the test calls
+/// [complete] or [fail], and [progress] reports how the zip's build is going.
 class FakeGalleryService implements GalleryService {
+  List<GalleryPhoto> galleryPhotos = const [];
+  Object? galleryPhotosError;
+  bool holdGalleryPhotos = false;
+
+  final photoRequests = <String>[];
   final requested = <String>[];
 
   // Created per call rather than up front, so it belongs to the test's
   // fake-async zone and completing it reaches the widget.
+  Completer<List<GalleryPhoto>>? _pendingPhotos;
   Completer<GalleryDownload>? _pending;
   GalleryProgressCallback? _onProgress;
+
+  @override
+  Future<List<GalleryPhoto>> loadPhotos(String bookingId) {
+    photoRequests.add(bookingId);
+    final error = galleryPhotosError;
+    if (error != null) return Future.error(error);
+    if (holdGalleryPhotos) return (_pendingPhotos = Completer()).future;
+    return Future.value(List.of(galleryPhotos));
+  }
+
+  void completePhotos([List<GalleryPhoto>? photos]) => _pendingPhotos!.complete(List.of(photos ?? galleryPhotos));
+
+  void failPhotos(Object error) => _pendingPhotos!.completeError(error);
 
   @override
   Future<GalleryDownload> prepareDownload(String bookingId, {GalleryProgressCallback? onProgress}) {
@@ -207,11 +295,14 @@ PickedPhoto testPhoto(String name, {int size = 2 * 1024 * 1024, String contentTy
     PickedPhoto(name: name, size: size, contentType: contentType, data: Uint8List(0));
 
 /// A session for admin tests: ad hoc unless [status] says otherwise (then
-/// with a package unless one is given).
+/// with a package unless one is given). An ad hoc session is shared with
+/// [emails], harper@example.com unless they or the one [email] of a session
+/// from before several emails are given.
 Booking testSession(
   String id, {
   String? name = 'The Harper family',
-  String? email = 'harper@example.com',
+  List<String>? emails,
+  String? email,
   DateTime? date,
   ({int hour, int minute})? time,
   String? location,
@@ -219,17 +310,21 @@ Booking testSession(
   String? packageName,
   bool photosReady = false,
   String? uid,
+  List<String> sharedWith = const [],
 }) {
+  final adHoc = status == BookingStatus.adhoc;
   return Booking(
     id: id,
-    packageName: packageName ?? (status == BookingStatus.adhoc ? null : 'Premium'),
+    packageName: packageName ?? (adHoc ? null : 'Premium'),
     date: date ?? DateTime(2999, 3, 4),
     time: time,
     location: location,
     status: status,
     photosReady: photosReady,
-    uid: uid ?? (status == BookingStatus.adhoc ? null : 'uid-$id'),
+    uid: uid ?? (adHoc ? null : 'uid-$id'),
     email: email,
+    emails: emails ?? (adHoc && email == null ? const ['harper@example.com'] : const []),
+    sharedWith: sharedWith,
     name: name,
   );
 }
@@ -442,7 +537,14 @@ class FakeAdminService implements AdminService {
     return session;
   }
 
-  static Booking _adHoc(String id, SessionDetails details, {required bool photosReady}) => Booking(
+  /// Admins never change who the family shared it with ([sharedWith]).
+  static Booking _adHoc(
+    String id,
+    SessionDetails details, {
+    required bool photosReady,
+    List<String> sharedWith = const [],
+  }) =>
+      Booking(
         id: id,
         packageName: details.packageName,
         date: DateTime(details.date.year, details.date.month, details.date.day),
@@ -450,7 +552,11 @@ class FakeAdminService implements AdminService {
         location: details.location,
         status: BookingStatus.adhoc,
         photosReady: photosReady,
-        email: SessionRules.normalizeEmail(details.email),
+        emails: [
+          for (final email in details.emails)
+            if (SessionRules.normalizeEmail(email) case final normalized when normalized.isNotEmpty) normalized,
+        ],
+        sharedWith: sharedWith,
         name: details.name.trim(),
       );
 
@@ -479,7 +585,12 @@ class FakeAdminService implements AdminService {
     // Anything else there is refused, as the rules refuse it.
     final saved = sessions[sessionId];
     if (saved != null && (id == null || !saved.isAdHoc)) throw adminError(AdminErrorKind.denied);
-    sessions[sessionId] = _adHoc(sessionId, details, photosReady: saved?.photosReady ?? false);
+    sessions[sessionId] = _adHoc(
+      sessionId,
+      details,
+      photosReady: saved?.photosReady ?? false,
+      sharedWith: saved?.sharedWith ?? const [],
+    );
     notifyChanged();
     return sessionId;
   }
@@ -490,7 +601,8 @@ class FakeAdminService implements AdminService {
     if (!session.isAdHoc) throw StateError('updateSession(${session.id}) is for ad hoc sessions only');
     await _write('updateSession', 'updateSession(${session.id})');
     final current = _session(session.id);
-    sessions[session.id] = _adHoc(session.id, details, photosReady: current.photosReady);
+    sessions[session.id] =
+        _adHoc(session.id, details, photosReady: current.photosReady, sharedWith: current.sharedWith);
     notifyChanged();
   }
 
@@ -508,6 +620,8 @@ class FakeAdminService implements AdminService {
       photosReady: ready,
       uid: s.uid,
       email: s.email,
+      emails: s.emails,
+      sharedWith: s.sharedWith,
       name: s.name,
     );
     notifyChanged();
@@ -532,9 +646,8 @@ class FakeAdminService implements AdminService {
   }
 
   @override
-  PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name) =>
-      _upload('uploadSessionPhoto', 'galleries/$sessionId/$name', photo, name,
-          sessionPhotos.putIfAbsent(sessionId, () => []));
+  PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name) => _upload(
+      'uploadSessionPhoto', 'galleries/$sessionId/$name', photo, name, sessionPhotos.putIfAbsent(sessionId, () => []));
 
   /// One that leaves the zip is logged with ', deleteZip: false' after its
   /// path.

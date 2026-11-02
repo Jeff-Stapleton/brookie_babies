@@ -8,10 +8,16 @@ Guidance for AI coding agents (and humans) working in this repository.
 for Brooke Stapleton Photography. Visitors see a full-bleed photograph with the
 logo, a short introduction and a few more photographs, choose a session package
 (Basic / Premium / Ultimate), pick a date and a time, and are sent to a Stripe
-Payment Link to pay. Signed-in families see "Your sessions" and download their
-photos as one zip. Admins (the studio) use an admin portal at `/#/admin` to
-add ad hoc sessions for family and friends, upload photos, make them available
-and choose the home page photos.
+Payment Link to pay. Signed-in families see "Your sessions", open a private
+full-bleed gallery for each finished session and download its photos as one
+zip. Admins (the studio) use an admin portal at `/#/admin` to add ad hoc
+sessions for family and friends, upload photos, make them available and choose
+the home page photos.
+
+For now the home page leaves out the introduction and the packages, and with
+the packages every way into booking, until Brooke settles them
+(`HomePage.showsIntroduction` and `HomePage.offersPackages` are false; see
+"Known gaps").
 
 - Firebase project: `brookie-babies` (see `.firebaserc`)
 - Hosting: Firebase Hosting, serving the static `build/web` output
@@ -35,10 +41,10 @@ Always run and build with `-d chrome` / `flutter build web`.
 | Calendar | `table_calendar` |
 | Payments | Stripe Payment Links via `url_launcher` |
 | Auth | `firebase_auth`: Google sign-in (popup) behind `AuthService`; admins are accounts with the custom claim `admin: true` (`AuthService.isAdmin`) |
-| Bookings | `cloud_firestore`: `bookings` collection behind `BookingService` (read-only for customers: their own by uid, and ad hoc sessions shared with their email) |
+| Bookings | `cloud_firestore`: `bookings` collection behind `BookingService` (customers read their own by uid, ad hoc sessions shared with their email and sessions their owner shared with them; they write only their own sessions' `sharedWith`) |
 | Admin | `AdminService` + `FirebaseAdminService` (`cloud_firestore`, `firebase_storage`): ad hoc sessions, session photos, the home page library and `site/home`, written straight from the browser and guarded by the rules |
 | File picking | The browser's `<input type=file>` through `package:web` (`lib/utilities/web_photo_picker.dart`), as `AppServices.pickPhotos`; no file-picker package |
-| Photo downloads | `cloud_functions`: `getGalleryDownloadUrl` (in `functions/`), streamed with `HttpsCallable.stream` (progress chunks while a zip is built, then the link), behind `GalleryService` |
+| Private session photos | `cloud_functions`: `getGalleryPhotoUrls` returns one-hour links for the gallery; `getGalleryDownloadUrl` streams progress while it builds the zip, then its one-hour link; both are behind `GalleryService` |
 | Backend | Cloud Functions for Firebase, TypeScript on Node 24 (`functions/`); Firestore and Storage security rules |
 | Lints | `flutter_lints` (`analysis_options.yaml`, default rules) |
 
@@ -57,8 +63,9 @@ lib/
   models/
     app_user.dart         AppUser: the signed-in customer (uid, email, name)
     booking.dart          Booking: one session (paid booking or ad hoc), parsed from a Firestore `bookings`
-                          document; title, familyTitle, isAdHoc, canDeliverPhotos; problemWith() says why one
-                          can't be read
+                          document; title, familyTitle, isAdHoc, canDeliverPhotos, guestEmails (an ad hoc
+                          session's `emails`, or an older one's single `email`), sharedWith (who its owner
+                          shared it with); problemWith() says why one can't be read
     picked_photo.dart     PickedPhoto: a file chosen in the browser's picker (name, size, type, the File itself)
     session_details.dart  SessionDetails: what the session form saves for an ad hoc session
     session_lookup.dart   SessionLookup (SessionFound / SessionMissing / SessionUnreadable) and UnreadableBooking
@@ -71,10 +78,12 @@ lib/
     auth_service.dart     AuthService interface + FirebaseAuthService (Google popup sign-in; isAdmin() reads
                           the ID token's `admin` claim, refreshing the token on the first check per uid)
     booking_service.dart  BookingService + FirestoreBookingService (live: the user's bookings by uid, merged
-                          with ad hoc sessions shared with their email; mergeUserBookings)
-    gallery_service.dart  GalleryService + FunctionsGalleryService (streams getGalleryDownloadUrl: GalleryProgress
-                          while a zip is built, then GalleryDownload; readGalleryDownload holds the logic and
-                          the 10-minute limit, testable on the VM)
+                          with ad hoc sessions shared with their email and sessions shared with them, marked
+                          in sharedWithUser; mergeUserBookings); share/stopSharing (arrayUnion/arrayRemove on
+                          sharedWith, 20 s limit, SharingException) and sharingProblem, the rules' check
+    gallery_service.dart  GalleryService + FunctionsGalleryService (loads getGalleryPhotoUrls into GalleryPhoto;
+                          streams getGalleryDownloadUrl: GalleryProgress while a zip is built, then
+                          GalleryDownload; parsers and the 10-minute zip limit are testable on the VM)
     portfolio_service.dart PortfolioService + StoragePortfolioService (home page photo links: the names in
                           site/home, or with none chosen or no answer in 3 s, image files in _admin/gallery by
                           name; at most `limit`, each fetched on its own so one failure drops one photo)
@@ -87,18 +96,21 @@ lib/
                           (test/models/session_package_test.dart checks every SessionPackage has one)
   pages/                  Full screens
     home_page.dart        Hero, introduction, featured photos, packages, footer; HomePage.showPackages(),
-                          HomePage.reloadPhotos()
+                          HomePage.reloadPhotos(); showsIntroduction and offersPackages (both off for now)
     scheduling_page.dart  "Book a session": calendar + session times, then sign-in and the Payment Link
     profile_page.dart     "Your sessions": account, upcoming and past sessions (route /profile)
+    session_gallery_page.dart  One private family gallery: full-bleed first photo, session title/date,
+                          responsive print grid and a full-screen previous/next photo viewer
     admin_page.dart       "Admin" (route /admin): home page photos card, "Add a session", every session
                           (upcoming, past, unreadable); AdminPage.open(), AdminPage.returnWithNotice()
     admin_session_page.dart  One session: details, who can download and the share message, "Make photos
                           available" / "Hide photos", uploads, the photo list; edit and delete for ad hoc ones
-    session_form_page.dart   Add or edit an ad hoc session (name, email, package, date, time, location)
+    session_form_page.dart   Add or edit an ad hoc session (name, up to ten emails, package, date, time, location)
     home_photos_admin_page.dart  "Home page photos": the chosen photos in order, the public library, uploads,
                           "Save home page"
   components/             Page sections
-    home_hero.dart        Full-bleed photo, the logo, the butter "Book a session" button, the account control
+    home_hero.dart        Full-bleed photo, the logo, the butter "Book a session" button (none without onBook),
+                          the account control
     featured_photos.dart  Up to six more photos as prints, in full rows; FeaturedPhotos.shownCount()
     packages.dart         "Choose your package" and the PackageCards; remembers the chosen package
     booking_calendar.dart TableCalendar restyled as the design system's DateCalendar (showOpenings: false
@@ -108,9 +120,13 @@ lib/
                           for admins, "Sign out"; MenuAnchor: arrow keys, Escape); signOutWithWarning()
     sign_in_dialog.dart   showSignInDialog(): Google sign-in, or open-in-browser help in in-app browsers
     booking_card.dart     One session on "Your sessions", titled by familyTitle (an ad hoc session's name, as
-                          on the admin pages); paid and ad hoc sessions with photos ready get
-                          "Download all photos", with the zip's progress while it's built (photo N of M, a
-                          bar, its size) and a message once the browser has it; one card prepares at a time
+                          on the admin pages); paid and ad hoc sessions with photos ready get "View photos"
+                          (the newest is the page's primary action) and "Download all photos", with the zip's
+                          progress while it's built (photo N of M, a bar, its size) and a message once the
+                          browser has it; one card prepares at a time.
+                          The family's own paid and ad hoc sessions list who they're shared with ("Stop
+                          sharing") and "Share this session" (a dialog: their email, then the message to send,
+                          sharedSessionMessage); one shared with them says "Shared with you"
     page_footer.dart      Logo and copyright
     admin_gate.dart       AdminGate: an admin page's body for admins only; otherwise sign in, not an admin,
                           or couldn't check
@@ -143,12 +159,14 @@ lib/
     account_avatar.dart   The butter initial disc
     brookie_logo.dart     BrookieLogo: assets/logo.png at its fixed aspect, so nothing moves when it loads
   utilities/
-    utils.dart            Date formatters ("Saturday, October 24", "Sat, Oct 24"), the booking window, and file
-                          sizes for families (formatFileSize: "4.8 GB", 1000-based)
+    utils.dart            Date formatters ("Saturday, October 24", "Sat, Oct 24"), the booking window, file
+                          sizes for families (formatFileSize: "4.8 GB", 1000-based), and lists in a sentence
+                          (formatList: "a, b or c")
     keyboard_input.dart   KeyboardInput: whether the last input was a key (like :focus-visible)
     embedded_browser.dart Detects in-app browsers (Instagram, Facebook, TikTok, Pinterest, Android WebViews, ...)
-    site_domain.dart      siteDomain (brookestapletonphoto.com) and withSiteAuthDomain: sign-in through
-                          the custom domain when the site is served from it
+    site_domain.dart      siteDomain (brookestapletonphoto.com), sessionsLink (its /#/profile, for messages),
+                          and withSiteAuthDomain: sign-in through the custom domain when the site is served
+                          from it
     leave_warning.dart    LeaveWarning: whether a page has uploads running, a download being prepared or
                           unsaved changes (main.dart's beforeunload, signOutWithWarning)
     screen_awake.dart     ScreenAwake: whether a page needs the screen kept on (a download being prepared;
@@ -168,20 +186,25 @@ test/                     Widget and unit tests; mirrors lib/
   support/fake_photos.dart FakePhotoServer: network photos in widget tests stay loading or fail on cue
   support/fake_firebase.dart  In-memory Firestore, Storage and Auth for FirebaseAdminService's tests (no rules)
   support/admin_test_app.dart pumpAdminPage(): an admin page with a signed-in admin, at a width, theme and text size
+  support/hidden_sections.dart showIntroduction() and offerPackages(): the hidden home page sections, on for one test
   widget_test.dart        The package cards: layout at many widths (loads the real Jost font), choosing, selection
 functions/                Cloud Functions, TypeScript on Node 24 (own package.json; not a Dart package)
-  src/index.ts            Function definitions (region us-central1); getGalleryDownloadUrl
-  src/gallery.ts          Core logic with injected Firestore/Storage, so tests use in-memory fakes; canDownload():
-                          the booking's uid, or an ad hoc session's verified email; progressSender: progress
+  src/index.ts            Function definitions (region us-central1); getGalleryPhotoUrls, getGalleryDownloadUrl
+  src/gallery.ts          Shared gallery access/listing logic with injected Firestore/Storage, so tests use
+                          in-memory fakes; signs individual photo links with bounded concurrency; canDownload():
+                          the booking's uid, or a verified email in an ad hoc session's emails or any session's
+                          sharedWith; progressSender: progress
                           chunks to the caller, at most one per 500 ms (the first and last always)
   src/gallery.test.ts     node:test unit tests
 firestore.rules           bookings: customers read their own (uid), guests ad hoc sessions shared with their
-                          verified email, admins (claim admin: true) create/edit/delete ad hoc sessions and set
+                          verified email, and anyone a session's sharedWith lists; owners change only
+                          sharedWith; admins (claim admin: true) create/edit/delete ad hoc sessions and set
                           photosReady; site/home: public get, admin writes
 storage.rules             _admin/gallery/: public read, admin add (JPEG/PNG/WebP < 20 MiB) and delete;
                           galleries/: admin only (< 100 MiB); gallery-zips/: admin delete; no overwrites
 rules-tests/              Rules API test cases for both rules files (firestore-cases.mjs, storage-cases.mjs),
-                          and payload.mjs / report.mjs, which scripts/test-rules.sh runs (Node, no packages)
+                          and payload.mjs / report.mjs, which scripts/test-rules.sh runs (Node, no packages),
+                          sending 100 cases a request (batches.mjs: the API refuses a couple of hundred)
 firebase.json             Hosting config (public build/web, SPA rewrite), functions, rules, FlutterFire metadata
 cors.json                 CORS rule for the Storage bucket (GET from any origin)
 scripts/
@@ -203,9 +226,12 @@ scripts/
    name. `HomeHero` shows the first one
    full-bleed with the logo and a butter "Book a session" button that scrolls to
    the packages; `FeaturedPhotos` shows up to six more below the introduction.
-   With no photos the hero sits on a quiet band with an ink button.
+   With no photos the hero sits on a quiet band with an ink button. For now,
+   with `showsIntroduction` and `offersPackages` off, the hero has only the
+   logo and the photos start a section below it.
 2. `Packages` → `PackageCard` "Choose Premium" → `Navigator.push(SchedulingPage(packageName))`.
    Coming back, that card is selected and reads "Continue with Premium".
+   (Only while `HomePage.offersPackages`; off for now.)
 3. `SchedulingPage` opens on the first day that still has times. The family
    picks a day in `BookingCalendar` and a time in `SessionList`; "Continue to
    payment" (disabled until a time is chosen) calls `navigateCheckout()`.
@@ -218,20 +244,37 @@ scripts/
 4. Account menu → "Your sessions" (`ProfilePage`, also at `/#/profile`) lists the
    user's `bookings`, split into upcoming and past: `watchBookings(user)` merges
    `where('uid', isEqualTo: uid)` with, when the user has an email,
-   `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <lowercased email>)`
-   (ad hoc sessions shared with them; that query failing counts as none). With
+   `where('status', isEqualTo: 'adhoc').where('emails', arrayContains: <lowercased email>)`
+   and, for sessions from before several emails, the same with
+   `.where('email', isEqualTo: <lowercased email>)` (ad hoc sessions shared with
+   them), and `where('sharedWith', arrayContains: <lowercased email>)` (sessions
+   their owner shared with them, which `sharedWithUser` marks); each of those
+   failing counts as none. With
    none, the empty state names the email they're signed in as, for a guest on
    the wrong Google account. A paid booking's card is titled by its package
    ("Premium session"); an ad hoc session's by the name the admin gave it, the
-   one the admin pages show, with its package below. A paid or ad hoc session with
-   `photosReady: true` has "Download all photos" (past ones without it
-   say the photos are being edited; ad hoc ones have no payment tag): `getGalleryDownloadUrl`
-   checks the booking belongs to the caller (its uid, or an ad hoc session's
-   email matching the caller's verified Google email), zips `galleries/<bookingId>/` (cached
-   in `gallery-zips/`), streaming its progress while it builds a new zip (the
-   card shows photo N of M and a bar; a caller who leaves doesn't stop the
-   build), and returns a signed link that expires after an hour, opened in the
-   same tab; the card then says the download has started, with its size.
+   one the admin pages show, with its package below. A paid or ad hoc session
+   with `photosReady: true` has "View photos" and "Download all photos" (past
+   ones without them say the photos are being edited; ad hoc ones have no
+   payment tag). Both callables first check that the booking belongs to the
+   caller (its uid, one of an ad hoc session's emails matching the caller's
+   verified Google email, or its `sharedWith`). `getGalleryPhotoUrls` lists
+   `galleries/<bookingId>/` and returns a one-hour signed link per photo.
+   `SessionGalleryPage` uses the first file by name as a full-bleed cover,
+   places the title and date below it, then lazily builds a responsive 4:5
+   print grid; a print opens the original in a full-screen previous/next,
+   keyboard-accessible viewer. `getGalleryDownloadUrl` zips the same files
+   (cached in `gallery-zips/`), streaming its progress while it builds a new
+   zip (the card shows photo N of M and a bar; a caller who leaves doesn't stop
+   the build), and returns a signed link that expires after an hour, opened in
+   the same tab; the card then says the download has started, with its size.
+   On the family's own paid or ad hoc sessions (found by uid or as a guest, not
+   only by `sharedWith`), "Share this session" opens a dialog for the email to
+   share it with (`sharingProblem`, and not their own) →
+   `BookingService.share` (`arrayUnion` on `sharedWith`) → the message to send
+   them (`sharedSessionMessage`, "Copy message"); each person listed has "Stop
+   sharing" (asks first) → `stopSharing` (`arrayRemove`). Whoever it's shared
+   with sees it with "Shared with you" and no sharing of their own.
 
 The account control (top right of the hero and of every page's top bar) signs
 in and out at any time.
@@ -245,8 +288,9 @@ Admin flows (accounts with the `admin: true` claim, from `scripts/grant-admin.sh
    checks `isAdmin()` per uid (and `isAdmin(refresh: true)` only after a
    "no", so moving between admin pages needs no network) and otherwise asks
    to sign in or says the account isn't an admin.
-6. "Add a session" → `SessionFormPage` → `AdminService.createSession` (an ad
-   hoc `bookings` doc: `status: 'adhoc'`, name, email, date, ...) → replaced by
+6. "Add a session" → `SessionFormPage` (one email field, and "Add another
+   email" for up to ten) → `AdminService.createSession` (an ad
+   hoc `bookings` doc: `status: 'adhoc'`, name, emails, date, ...) → replaced by
    `AdminSessionPage` for the new id. A session card on Admin opens the same page.
 7. `AdminSessionPage`: "Upload photos" → `pickPhotos(accept: 'image/*')` →
    `UploadQueue` (three at a time, names already there skipped, checked with
@@ -274,6 +318,8 @@ sessions are created in the admin portal.
 A named route `/schedule` exists in `main.dart` but the main flow does not use
 it. It has no package, so the page says to choose one first and offers "See
 packages" (`HomePage.showPackages`), which goes home and scrolls to them.
+While `HomePage.offersPackages` is off it says sessions can't be booked online
+yet, with no button.
 
 ## Commands
 
@@ -430,9 +476,10 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   the `beforeunload` warning and the screen wake lock in `main.dart`, and the
   download stream (`FunctionsGalleryService`; `readGalleryDownload` is
   tested) have no tests: check them by hand in Chrome and Safari (picking,
-  cancelling the picker, closing the tab during an upload; progress arriving
-  while a zip builds, not all at the end; on an iPhone with Auto-Lock, the
-  screen staying on through a build).
+  cancelling the picker, closing the tab during an upload; a private gallery's
+  signed photos loading and its viewer zooming; progress arriving while a zip
+  builds, not all at the end; on an iPhone with Auto-Lock, the screen staying
+  on through a build).
 - Google blocks sign-in inside in-app browsers such as Instagram's, Facebook's,
   TikTok's and Pinterest's ("403 disallowed_useragent"). There the sign-in
   dialog explains how to open the page in Safari or Chrome instead.
@@ -448,16 +495,42 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   `galleries/<bookingId>/` and are only handed out as signed URLs; never put
   them under `_admin/gallery/`, which is public.
 - Rules aren't filters: the bookings queries must be exactly
-  `where('uid', isEqualTo: uid)` and
-  `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <email trimmed and lowercased>)`
-  (and the guest's token must have `email_verified`), or Firestore rejects the
-  whole query. Sort on the client; an `orderBy` would need a composite index
+  `where('uid', isEqualTo: uid)`,
+  `where('status', isEqualTo: 'adhoc').where('emails', arrayContains: <email trimmed and lowercased>)`,
+  `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: <the same>)`
+  and `where('sharedWith', arrayContains: <the same>)` (and the guest's token
+  must have `email_verified`), or Firestore rejects the whole query. Equality and `arrayContains` filters combine without an index;
+  sort on the client, because an `orderBy` would need a composite index
   (there's no `firestore.indexes.json`).
 - `status: 'adhoc'` is matched exactly (no trimming or case folding) by the
   rules, `canDownload` in `functions/src/gallery.ts` and `Booking.fromMap`; a
   hand-typed `" adhoc"` or `"Adhoc"` is unreadable in the app and shared with
-  nobody. Ad hoc sessions are made in the portal, which writes the email
+  nobody. Ad hoc sessions are made in the portal, which writes the emails
   trimmed and lowercase.
+- Ad hoc sessions added before there could be several emails have `email` (a
+  string) instead of `emails`. The rules, `canDownload`, `Booking.guestEmails`
+  and the second guest query above still read it, the rules still accept it
+  from sites that old (`validGuests`: one or the other, never both), and any
+  portal edit moves it into `emails` (`sessionChanges` deletes `email`). On a
+  paid booking `email` is only a note and `guestEmails` is empty.
+- Rules can't loop, so `validEmailList` in `firestore.rules` checks each of
+  the ten places in turn (`validEmailAt`). Raising
+  `SessionRules.emailListMaxLength` means adding places there too;
+  `rules_mirror_test.dart` fails until they agree.
+- Families write to Firestore: a session's owner (`isOwner` in the rules: the
+  booking's uid, or a guest of an ad hoc session) may change its `sharedWith`
+  and nothing else, validated like `emails`. Someone it was shared with can't
+  change it, and the portal doesn't touch it (admin updates leave it out, and
+  the fakes keep it). "Your sessions" decides who may share by which query
+  found the session (`sharedWithUser`), which matches `isOwner`.
+- Stopping sharing can't delete the cached zip (only admins may), so a link
+  handed out in the last hour keeps working until it expires (README,
+  "Families sharing their photos"). Individual photo links already issued
+  have the same one-hour lifetime. Both gallery functions re-check
+  `sharedWith` on every request, so no new links are given out.
+- The Rules API refuses a test request with a couple of hundred cases or more,
+  so `scripts/test-rules.sh` sends `rules-tests/` cases 100 at a time
+  (`batches.mjs`) and `report.mjs` adds the batches up.
 - Admin access is the `admin` claim in the caller's ID token. `isAdmin()`
   refreshes the token on its first check per uid in a page load, so a grant
   shows after a refresh. Revoking (`--revoke`) can't end a token already
@@ -473,16 +546,21 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   same time, and a late answer that differs calls `onLateChoice` (HomePage
   reloads its photos). An empty `photos` list means
   no photos, not the fallback.
-- Hiding photos, deleting a photo, and changing an ad hoc session's email
+- Hiding photos, deleting a photo, and taking an email off an ad hoc session
   delete the cached `gallery-zips/<id>.zip` (admins may only delete it), so
   signed links already handed out stop working; the next download rebuilds it.
+  Adding an email leaves it: everyone it was handed to still has access.
   Best effort: a zip that won't delete is logged and the change still succeeds
   (links then expire within the hour), except in `deleteSession`, which stops
   so the document is never deleted ahead of its zip. "Delete all photos"
   deletes it once, while hiding, then `deletePhoto(deleteZip: false)` per photo.
-- Download IDs: `getGalleryDownloadUrl` only accepts booking IDs matching
-  `^[A-Za-z0-9_-]{1,128}$` (`BOOKING_ID_PATTERN`); the session page mirrors it
-  and warns instead of offering "Make photos available".
+- Individual gallery links are not cached objects the admin can revoke:
+  hiding or changing a gallery stops new links, but any already issued expire
+  naturally within an hour.
+- Gallery IDs: `getGalleryPhotoUrls` and `getGalleryDownloadUrl` only accept
+  booking IDs matching `^[A-Za-z0-9_-]{1,128}$`
+  (`BOOKING_ID_PATTERN`); the admin session page mirrors it and warns instead
+  of offering "Make photos available".
 - Download progress, the function: while it builds a zip,
   `getGalleryDownloadUrl` streams `{stage: "zipping", photosDone, photoCount,
   totalBytes}` chunks, then the result (none before the build or on a cached
@@ -539,8 +617,9 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   way round, so deploy the backend before (or with) the site. A site that goes
   first gets its guest query and `site/home` read refused (both fall back
   harmlessly) and every admin read and write denied (README, "Deploy order").
-  A new site with the old function still downloads, without progress or a
-  size.
+  A new site before `getGalleryPhotoUrls` exists shows its gallery retry
+  message; with an older `getGalleryDownloadUrl` it still downloads, without
+  progress or a size.
 - CI deploys the backend as `github-deployer`, which deliberately has no
   direct permission to turn on APIs, read secret values or change IAM. The
   code and rules it deploys can still reach all data, so push access to `main`
@@ -559,7 +638,7 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
 - CI deploys `--only functions:default` (the codebase), not bare `functions`: with
   the bare form firebase-tools skips functions whose source hash label matches, and
   a failed update still writes that label, so the old code would stay live.
-- `getGalleryDownloadUrl` signs URLs through the IAM signBlob API, which needs
+- Both gallery callables sign URLs through the IAM signBlob API, which needs
   Service Account Token Creator on the functions' runtime service account
   (README, "Deploying the backend").
 - Placeholder content, owned by the business (TODO.md): the session times
@@ -567,6 +646,16 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   session") and the package inclusions (`SessionPackage.all`, the same on all
   three). Every slot says "Address sent after you book", and nothing marks a
   time as taken. The home page's introduction is draft copy.
+- Hidden until Brooke settles them: Brooke doesn't like the introduction's
+  wording and hasn't decided on her packages, so `HomePage.showsIntroduction`
+  and `HomePage.offersPackages` are false. With packages off, nothing offers
+  booking: no packages section, no "Book a session" in the hero, no "See
+  packages" on Your sessions or `/schedule`. They're plain `static bool`s, not
+  `const`, so tests turn them on with `showIntroduction()` / `offerPackages()`
+  (`test/support/hidden_sections.dart`), which restore them afterwards. To
+  bring a section back, set it to `true` and update the tests that check it's
+  hidden: their names say "while there are no packages" or "while the
+  introduction and the packages are hidden".
 - Selected date and time are not passed to Stripe or stored anywhere, so the
   app doesn't create paid bookings yet; they are entered by hand in the Firestore
   console until server-created Checkout Sessions write them. The admin portal

@@ -227,7 +227,7 @@ void main() {
       await tester.enterText(_field('Email'), 'novak+photos@example.com');
       await tapInView(tester, find.text('Add session'));
       await tester.pumpAndSettle();
-      expect(admin.sessions.values.single.email, 'novak+photos@example.com');
+      expect(admin.sessions.values.single.emails, ['novak+photos@example.com']);
     });
 
     testWidgets('saves the session and goes straight on to it; back from there skips the form', (tester) async {
@@ -244,7 +244,7 @@ void main() {
       expect(admin.calls, contains('createSession(The Novak family)'));
       final session = admin.sessions['session-1']!;
       expect(session.name, 'The Novak family');
-      expect(session.email, 'novak@example.com');
+      expect(session.emails, ['novak@example.com']);
       expect(session.date, DateTime(now.year, now.month, 15));
       expect(session.packageName, 'Premium');
       expect(session.time, (hour: 6, minute: 30));
@@ -334,7 +334,7 @@ void main() {
       await tapInView(tester, find.text('Add session'));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(InlineMessage, kAdminTimedOutMessage), findsOneWidget);
-      expect(admin.sessions['session-1']!.email, 'novka@example.com');
+      expect(admin.sessions['session-1']!.emails, ['novka@example.com']);
 
       await tester.enterText(_field('Email'), 'novak@example.com');
       await tapInView(tester, find.text('Add session'));
@@ -342,7 +342,7 @@ void main() {
 
       expect(admin.createSessionIds, ['session-1', 'session-1']);
       expect(admin.sessions.keys, ['session-1']);
-      expect(admin.sessions['session-1']!.email, 'novak@example.com');
+      expect(admin.sessions['session-1']!.emails, ['novak@example.com']);
       expect(tester.widget<AdminSessionPage>(find.byType(AdminSessionPage)).sessionId, 'session-1');
     });
 
@@ -356,6 +356,184 @@ void main() {
       expect(find.byType(BrookieDialog), findsNothing);
       expect(find.text('Below'), findsOneWidget);
       expect(admin.calls, isEmpty);
+    });
+  });
+
+  group('several emails', () {
+    /// The remove button in the field labelled [label].
+    Finder removeIn(String label) => find.descendant(of: _field(label), matching: find.byTooltip('Remove this email'));
+
+    bool focused(WidgetTester tester, String label) =>
+        tester.widget<EditableText>(find.descendant(of: _field(label), matching: find.byType(EditableText))).focusNode.hasFocus;
+
+    Future<void> addEmail(WidgetTester tester) async {
+      await tapInView(tester, find.text('Add another email'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('“Add another email” adds a field and focuses it; every email is saved, in order', (tester) async {
+      final admin = FakeAdminService();
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
+      await _fillIn(tester);
+      // With one field, there's none to take away.
+      expect(find.byTooltip('Remove this email'), findsNothing);
+
+      await addEmail(tester);
+      expect(_field('Email 2'), findsOneWidget);
+      expect(focused(tester, 'Email 2'), isTrue);
+      expect(find.byTooltip('Remove this email'), findsNWidgets(2));
+      await tester.enterText(_field('Email 2'), ' Pat.Novak@Example.com ');
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(admin.sessions['session-1']!.emails, ['novak@example.com', 'pat.novak@example.com']);
+    });
+
+    testWidgets('each is checked: a blank one, or the same one twice, says how to fix it', (tester) async {
+      final admin = FakeAdminService();
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
+      await _fillIn(tester);
+      await addEmail(tester);
+      await addEmail(tester);
+      await tester.enterText(_field('Email 3'), 'NOVAK@example.com');
+
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Enter another email, or remove this one.'), findsOneWidget);
+      expect(find.text('That email is already above.'), findsOneWidget);
+      expect(admin.calls, isEmpty);
+      expect(focused(tester, 'Email 2'), isTrue);
+
+      // Checked as they change from now on, each against the ones above it.
+      await tester.enterText(_field('Email 2'), 'pat@example.com');
+      await tester.enterText(_field('Email 3'), 'jo+kids@gmail.com');
+      await tester.pumpAndSettle();
+      expect(find.text('Enter another email, or remove this one.'), findsNothing);
+      expect(find.text('That email is already above.'), findsNothing);
+      expect(find.textContaining('“+kids” isn’t part of a Gmail address'), findsOneWidget);
+    });
+
+    testWidgets('a field can be taken away, and the one in its place gets focus', (tester) async {
+      final admin = FakeAdminService();
+      await pumpAdminPage(tester, SessionFormPage(now: now), admin: admin, size: const Size(1440, 1200));
+      await _fillIn(tester);
+      await addEmail(tester);
+      await tester.enterText(_field('Email 2'), 'pat@example.com');
+
+      await tester.tap(removeIn('Email'));
+      await tester.pumpAndSettle();
+
+      expect(_field('Email 2'), findsNothing);
+      expect(find.descendant(of: _field('Email'), matching: find.text('pat@example.com')), findsOneWidget);
+      expect(find.byTooltip('Remove this email'), findsNothing);
+      expect(focused(tester, 'Email'), isTrue);
+      await tapInView(tester, find.text('Add session'));
+      await tester.pumpAndSettle();
+      expect(admin.sessions['session-1']!.emails, ['pat@example.com']);
+    });
+
+    testWidgets('at most ten', (tester) async {
+      await pumpAdminPage(tester, SessionFormPage(now: now), size: const Size(1440, 1200));
+
+      for (var i = 0; i < 9; i++) {
+        await addEmail(tester);
+      }
+
+      expect(_field('Email 10'), findsOneWidget);
+      expect(tester.widget<TextButton>(find.widgetWithText(TextButton, 'Add another email')).onPressed, isNull);
+      expect(find.text('A session can have up to 10 emails.'), findsOneWidget);
+    });
+
+    testWidgets('editing: starts with every email the session has', (tester) async {
+      final session = testSession('s1', emails: ['harper@example.com', 'pat@example.com']);
+      await pumpAdminPage(tester, SessionFormPage(now: now, session: session), size: const Size(1440, 1200));
+
+      expect(find.descendant(of: _field('Email'), matching: find.text('harper@example.com')), findsOneWidget);
+      expect(find.descendant(of: _field('Email 2'), matching: find.text('pat@example.com')), findsOneWidget);
+      expect(LeaveWarning.active.value, isFalse);
+    });
+
+    testWidgets('editing one from before several emails: starts from its email, and saves emails', (tester) async {
+      final old = testSession('s1', email: 'harper@example.com');
+      final admin = FakeAdminService(sessions: [old]);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: old));
+      expect(find.descendant(of: _field('Email'), matching: find.text('harper@example.com')), findsOneWidget);
+      expect(LeaveWarning.active.value, isFalse);
+
+      await addEmail(tester);
+      await tester.enterText(_field('Email 2'), 'pat@example.com');
+      await tapInView(tester, find.text('Save changes'));
+      await tester.pumpAndSettle();
+
+      expect(admin.sessions['s1']!.emails, ['harper@example.com', 'pat@example.com']);
+      expect(find.text('Below'), findsOneWidget);
+    });
+
+    testWidgets('photos available: adding someone asks, saying who will also be able to download', (tester) async {
+      final ready = testSession('s1', photosReady: true);
+      final admin = FakeAdminService(sessions: [ready]);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: ready));
+
+      await addEmail(tester);
+      await tester.enterText(_field('Email 2'), 'Pat@Example.com');
+      await tapInView(tester, find.text('Save changes'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Change who can download?'), findsOneWidget);
+      expect(
+        find.text('Anyone signed in with Google as pat@example.com will also be able to download these photos.'),
+        findsOneWidget,
+      );
+      await tester.tap(_inDialog('Save changes'));
+      await tester.pumpAndSettle();
+      expect(admin.sessions['s1']!.emails, ['harper@example.com', 'pat@example.com']);
+    });
+
+    testWidgets('photos available: taking someone off asks, saying who won’t', (tester) async {
+      final ready = testSession('s1', emails: ['harper@example.com', 'pat@example.com', 'jo@example.com'], photosReady: true);
+      final admin = FakeAdminService(sessions: [ready]);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: ready));
+
+      await tester.tap(removeIn('Email 3'));
+      await tester.pumpAndSettle();
+      await tester.tap(removeIn('Email 2'));
+      await tester.pumpAndSettle();
+      await tapInView(tester, find.text('Save changes'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('pat@example.com and jo@example.com won’t be able to download these photos any more.'),
+          findsOneWidget);
+      await tester.tap(_inDialog('Cancel'));
+      await tester.pumpAndSettle();
+      expect(admin.calls, isNot(contains('updateSession(s1)')));
+    });
+
+    testWidgets('photos available: the same people, in other letters, need no asking', (tester) async {
+      final ready = testSession('s1', emails: ['harper@example.com', 'pat@example.com'], photosReady: true);
+      final admin = FakeAdminService(sessions: [ready]);
+      await _pumpOver(tester, admin, SessionFormPage(now: now, session: ready));
+
+      await tester.enterText(_field('Email 2'), ' Pat@Example.COM');
+      await tapInView(tester, find.text('Save changes'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BrookieDialog), findsNothing);
+      expect(admin.calls, contains('updateSession(s1)'));
+    });
+
+    testWidgets('an added field counts as a change; taking it away again needs no asking', (tester) async {
+      await _pumpOver(tester, FakeAdminService(), SessionFormPage(now: now));
+
+      await addEmail(tester);
+      expect(LeaveWarning.active.value, isTrue);
+      await tester.tap(removeIn('Email 2'));
+      await tester.pumpAndSettle();
+      expect(LeaveWarning.active.value, isFalse);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Below'), findsOneWidget);
     });
   });
 
@@ -981,7 +1159,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(_inDialog('Save changes'));
       await tester.pumpAndSettle();
-      expect(admin.sessions['s1']!.email, 'grandma@example.com');
+      expect(admin.sessions['s1']!.emails, ['grandma@example.com']);
       expect(find.text('Below'), findsOneWidget);
     });
 
@@ -1018,6 +1196,9 @@ void main() {
         expect(filledButtons(), 1);
 
         await tester.enterText(_field('Email'), 'not an email');
+        await tapInView(tester, find.text('Add another email'));
+        await tester.pumpAndSettle();
+        await tester.enterText(_field('Email 2'), 'a.very.long.address.for.the.other.parent@example.com');
         await tapInView(tester, find.text('Add session'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);

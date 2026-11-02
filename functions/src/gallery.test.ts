@@ -12,9 +12,11 @@ import {
   DocumentSnapshotLike,
   FirestoreLike,
   getGalleryDownload,
+  getGalleryPhotos,
   GalleryDeps,
   GalleryProgress,
   handleGalleryDownloadRequest,
+  handleGalleryPhotosRequest,
   MESSAGES,
   progressSender,
   ProgressStream,
@@ -204,6 +206,7 @@ const ZIP_NAME = "gallery-zips/b1.zip";
 const GUEST_UID = "guest-uid";
 const GUEST_EMAIL = "harper@example.com";
 const GUEST_TOKEN = {email: GUEST_EMAIL, email_verified: true};
+const SECOND_GUEST_EMAIL = "pat@example.com";
 
 let db: FakeFirestore;
 let bucket: FakeBucket;
@@ -229,13 +232,19 @@ function addAdHocSession(id: string, fields: Record<string, unknown> = {}): void
   db.docs.set(`bookings/${id}`, {
     status: "adhoc",
     name: "The Harper family",
-    email: GUEST_EMAIL,
+    emails: [GUEST_EMAIL, SECOND_GUEST_EMAIL],
     date: "2026-09-01",
     photosReady: true,
     createdAt: NOW,
     createdBy: "admin-uid",
     ...fields,
   });
+}
+
+/** An ad hoc session from before there could be several emails: one `email`. */
+function addOneEmailSession(id: string, fields: Record<string, unknown> = {}): void {
+  addAdHocSession(id, {email: GUEST_EMAIL, ...fields});
+  delete db.docs.get(`bookings/${id}`)!.emails;
 }
 
 /** Calls as UID; with no arguments, for BOOKING_ID. */
@@ -251,6 +260,11 @@ function callAsGuest(token: CallerAuth["token"]) {
 /** Calls as UID for BOOKING_ID, sending progress to `stream`. */
 function callStreaming(stream: FakeStream) {
   return getGalleryDownload(deps, {uid: UID}, {bookingId: BOOKING_ID}, stream);
+}
+
+/** Loads the individual photo links as UID, for BOOKING_ID. */
+function callPhotos() {
+  return getGalleryPhotos(deps, {uid: UID}, {bookingId: BOOKING_ID});
 }
 
 /** Makes deps.now move on a second each time it's read, so no progress is throttled. */
@@ -412,14 +426,28 @@ describe("getGalleryDownload: access checks", {timeout: 10_000}, () => {
 });
 
 describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000}, () => {
-  test("a guest signed in with the session's verified email can download", async () => {
+  test("a guest signed in with one of the session's emails, verified, can download", async () => {
     addAdHocSession(BOOKING_ID);
     bucket.put("galleries/b1/a.jpg", "photo");
-    // The session's email is saved lowercase; Google may report capitals.
+    // The session's emails are saved lowercase; Google may report capitals.
+    for (const email of [GUEST_EMAIL, "Harper@Example.COM", SECOND_GUEST_EMAIL]) {
+      const result = await callAsGuest({email, email_verified: true});
+      assert.equal(result.photoCount, 1);
+    }
+  });
+
+  test("a session from before several emails opens for its one email", async () => {
+    addOneEmailSession(BOOKING_ID);
+    bucket.put("galleries/b1/a.jpg", "photo");
     for (const email of [GUEST_EMAIL, "Harper@Example.COM"]) {
       const result = await callAsGuest({email, email_verified: true});
       assert.equal(result.photoCount, 1);
     }
+    await assertHttpsError(
+      callAsGuest({email: SECOND_GUEST_EMAIL, email_verified: true}),
+      "not-found",
+      MESSAGES.notFound,
+    );
   });
 
   test("another verified email is not found", async () => {
@@ -432,7 +460,9 @@ describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000
     );
     // A session email typed with capitals in the console matches no one, as
     // in firestore.rules.
-    addAdHocSession(BOOKING_ID, {email: "Harper@example.com"});
+    addAdHocSession(BOOKING_ID, {emails: ["Harper@example.com"]});
+    await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+    addOneEmailSession(BOOKING_ID, {email: "Harper@example.com"});
     await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
     assert.equal(bucket.writeStreamsOpened, 0);
     assert.equal(bucket.signedUrlConfigs.length, 0);
@@ -456,9 +486,13 @@ describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000
     addBooking(BOOKING_ID, {email: GUEST_EMAIL});
     bucket.put("galleries/b1/a.jpg", "photo");
     await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+    addBooking(BOOKING_ID, {emails: [GUEST_EMAIL]});
+    await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
     // Nor does a status that is only nearly "adhoc".
     for (const status of ["Adhoc", " adhoc", "ADHOC", undefined]) {
       addAdHocSession(BOOKING_ID, {status});
+      await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+      addOneEmailSession(BOOKING_ID, {status});
       await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
     }
     assert.equal(bucket.writeStreamsOpened, 0);
@@ -479,10 +513,25 @@ describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000
     }
   });
 
+  test("session emails that aren't a list of strings are not found", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const emails of [
+      undefined,
+      null,
+      GUEST_EMAIL,
+      [[GUEST_EMAIL]],
+      [{toLowerCase: () => GUEST_EMAIL}],
+      {0: GUEST_EMAIL, length: 1},
+    ]) {
+      addAdHocSession(BOOKING_ID, {emails});
+      await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
+    }
+  });
+
   test("a session email that isn't a string is not found", async () => {
     bucket.put("galleries/b1/a.jpg", "photo");
     for (const email of [undefined, null, 42, [GUEST_EMAIL], {toLowerCase: () => GUEST_EMAIL}]) {
-      addAdHocSession(BOOKING_ID, {email});
+      addOneEmailSession(BOOKING_ID, {email});
       await assertHttpsError(callAsGuest(GUEST_TOKEN), "not-found", MESSAGES.notFound);
     }
   });
@@ -510,6 +559,127 @@ describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000
       addAdHocSession(BOOKING_ID, {uid: UID, status});
       assert.equal((await call()).photoCount, 1);
     }
+  });
+});
+
+describe("getGalleryDownload: sessions their owner shared", {timeout: 10_000}, () => {
+  const GRANDMA = {email: "grandma@example.com", email_verified: true};
+
+  test("someone a paid booking was shared with can download it", async () => {
+    addBooking(BOOKING_ID, {sharedWith: ["aunt@example.com", "grandma@example.com"]});
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const email of ["grandma@example.com", "Grandma@Example.COM", "aunt@example.com"]) {
+      assert.equal((await callAsGuest({email, email_verified: true})).photoCount, 1);
+    }
+  });
+
+  test("so can someone an ad hoc session was shared with, one email or several", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    addAdHocSession(BOOKING_ID, {sharedWith: ["grandma@example.com"]});
+    assert.equal((await callAsGuest(GRANDMA)).photoCount, 1);
+    addOneEmailSession(BOOKING_ID, {sharedWith: ["grandma@example.com"]});
+    assert.equal((await callAsGuest(GRANDMA)).photoCount, 1);
+  });
+
+  test("not until Google has verified the email, and never another one", async () => {
+    addBooking(BOOKING_ID, {sharedWith: ["grandma@example.com"]});
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const token of [
+      {email: "grandma@example.com", email_verified: false},
+      {email: "grandma@example.com"},
+      {email: "bob@example.com", email_verified: true},
+    ]) {
+      await assertHttpsError(callAsGuest(token), "not-found", MESSAGES.notFound);
+    }
+    assert.equal(bucket.writeStreamsOpened, 0);
+  });
+
+  test("a sharedWith that isn't a list of lowercase strings is not found", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const sharedWith of [
+      "grandma@example.com",
+      ["Grandma@example.com"],
+      [["grandma@example.com"]],
+      {0: "grandma@example.com", length: 1},
+      null,
+    ]) {
+      addBooking(BOOKING_ID, {sharedWith});
+      await assertHttpsError(callAsGuest(GRANDMA), "not-found", MESSAGES.notFound);
+    }
+  });
+
+  test("access first, then the same payment and readiness checks as the owner's", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    addBooking(BOOKING_ID, {sharedWith: ["grandma@example.com"], status: "pending"});
+    await assertHttpsError(callAsGuest(GRANDMA), "failed-precondition", MESSAGES.notPaid);
+    addBooking(BOOKING_ID, {sharedWith: ["grandma@example.com"], photosReady: false});
+    await assertHttpsError(callAsGuest(GRANDMA), "failed-precondition", MESSAGES.notReady);
+  });
+});
+
+describe("getGalleryPhotos", {timeout: 10_000}, () => {
+  test("returns every visible photo in name order through one-hour read URLs", async () => {
+    addBooking(BOOKING_ID);
+    bucket.put("galleries/b1/z-last.jpg", "last");
+    bucket.put("galleries/b1/album/a-first.jpg", "first");
+    bucket.put("galleries/b1/.DS_Store", "junk");
+    bucket.put("galleries/b1/album/", "");
+    bucket.put("galleries/b10/not-this-session.jpg", "other");
+
+    const result = await callPhotos();
+
+    const expires = new Date(NOW.getTime() + 60 * 60 * 1000);
+    assert.deepEqual(result, {
+      photos: [
+        {
+          name: "album/a-first.jpg",
+          url: "https://storage.example/galleries/b1/album/a-first.jpg?signature=1",
+        },
+        {
+          name: "z-last.jpg",
+          url: "https://storage.example/galleries/b1/z-last.jpg?signature=2",
+        },
+      ],
+      expiresAt: expires.toISOString(),
+    });
+    assert.deepEqual(bucket.signedUrlConfigs, [
+      {version: "v4", action: "read", expires},
+      {version: "v4", action: "read", expires},
+    ]);
+    assert.equal(bucket.writeStreamsOpened, 0);
+    assert.equal(bucket.readStreamsOpened, 0);
+  });
+
+  test("uses the same private access and readiness checks as the zip", async () => {
+    addBooking(BOOKING_ID, {uid: "someone-else"});
+    bucket.put("galleries/b1/a.jpg", "photo");
+    await assertHttpsError(callPhotos(), "not-found", MESSAGES.notFound);
+
+    addBooking(BOOKING_ID, {photosReady: false});
+    await assertHttpsError(callPhotos(), "failed-precondition", MESSAGES.notReady);
+    assert.deepEqual(bucket.signedUrlConfigs, []);
+  });
+
+  test("opens ad hoc and owner-shared galleries for their verified guests", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    addAdHocSession(BOOKING_ID);
+    const adHoc = await getGalleryPhotos(
+      deps,
+      {uid: GUEST_UID, token: GUEST_TOKEN},
+      {bookingId: BOOKING_ID},
+    );
+    assert.equal(adHoc.photos.length, 1);
+
+    addBooking(BOOKING_ID, {sharedWith: ["grandma@example.com"]});
+    const shared = await getGalleryPhotos(
+      deps,
+      {
+        uid: GUEST_UID,
+        token: {email: "Grandma@Example.COM", email_verified: true},
+      },
+      {bookingId: BOOKING_ID},
+    );
+    assert.equal(shared.photos.length, 1);
   });
 });
 
@@ -883,6 +1053,17 @@ describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
       request,
       stream,
     );
+  const handlePhotos = (request: CallableRequestLike) =>
+    handleGalleryPhotosRequest(
+      {
+        ...deps,
+        logError: (message, error) => {
+          loggedMessages.push(message);
+          logged.push(error);
+        },
+      },
+      request,
+    );
 
   beforeEach(() => {
     logged = [];
@@ -899,6 +1080,11 @@ describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
         MESSAGES.unauthenticated,
       );
     }
+    await assertHttpsError(
+      handlePhotos({auth: null, data: {bookingId: BOOKING_ID}}),
+      "unauthenticated",
+      MESSAGES.unauthenticated,
+    );
   });
 
   test("returns the download for the signed-in owner", async () => {
@@ -906,6 +1092,16 @@ describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
     bucket.put("galleries/b1/a.jpg", "a");
     const result = await handle({auth: {uid: UID}, data: {bookingId: BOOKING_ID}});
     assert.equal(result.photoCount, 1);
+  });
+
+  test("returns individual photos for the signed-in owner", async () => {
+    addBooking(BOOKING_ID);
+    bucket.put("galleries/b1/a.jpg", "a");
+    const result = await handlePhotos({
+      auth: {uid: UID},
+      data: {bookingId: BOOKING_ID},
+    });
+    assert.deepEqual(result.photos.map((photo) => photo.name), ["a.jpg"]);
   });
 
   test("passes the token's email claims to the access check", async () => {
@@ -936,6 +1132,21 @@ describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
       MESSAGES.internal,
     );
     assert.deepEqual(logged, [bucket.getFilesError]);
+  });
+
+  test("turns an unexpected photo-list error into a logged 'internal' error", async () => {
+    addBooking(BOOKING_ID);
+    bucket.getFilesError = new Error("storage is down");
+    await assertHttpsError(
+      handlePhotos({auth: {uid: UID}, data: {bookingId: BOOKING_ID}}),
+      "internal",
+      MESSAGES.internal,
+    );
+    assert.deepEqual(logged, [bucket.getFilesError]);
+    assert.equal(loggedMessages.length, 1);
+    assert.match(loggedMessages[0], /getGalleryPhotoUrls failed/);
+    assert.match(loggedMessages[0], new RegExp(UID));
+    assert.doesNotMatch(loggedMessages[0], /@/);
   });
 
   test("logs the uid, never the email", async () => {

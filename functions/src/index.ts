@@ -9,8 +9,10 @@ import {onCall} from "firebase-functions/https";
 import * as logger from "firebase-functions/logger";
 import {
   handleGalleryDownloadRequest,
+  handleGalleryPhotosRequest,
   type GalleryDeps,
   type GalleryDownload,
+  type GalleryPhotoList,
   type GalleryProgress,
 } from "./gallery";
 
@@ -34,8 +36,9 @@ function realDeps(): GalleryDeps {
 /**
  * Callable: {bookingId} -> {url, photoCount, expiresAt, totalBytes}, a signed
  * URL (valid for 60 minutes) to a zip of every photo of the caller's paid
- * booking, or of an ad hoc session shared with the caller's verified Google
- * email. While it builds a zip, streaming callers (the site) get
+ * booking, of an ad hoc session shared with the caller's verified Google
+ * email, or of a session its owner shared with that email. While it builds a
+ * zip, streaming callers (the site) get
  * GalleryProgress chunks; others get only the result. A caller who leaves
  * doesn't stop the build, so the next download can reuse it.
  *
@@ -60,5 +63,26 @@ export const getGalleryDownloadUrl = onCall<
       },
       request,
       response,
+    ),
+);
+
+/**
+ * Callable: {bookingId} -> {photos: [{name, url}], expiresAt}. Each URL
+ * displays one photo from a gallery the caller may download and expires after
+ * 60 minutes. Access, payment and readiness checks are the same as the zip
+ * callable above.
+ */
+export const getGalleryPhotoUrls = onCall<
+  unknown,
+  Promise<GalleryPhotoList>
+>(
+  {timeoutSeconds: 120},
+  (request) =>
+    handleGalleryPhotosRequest(
+      {
+        ...realDeps(),
+        logError: (message, error) => logger.error(message, error),
+      },
+      request,
     ),
 );

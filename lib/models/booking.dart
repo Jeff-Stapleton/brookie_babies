@@ -6,8 +6,9 @@ enum BookingStatus { pending, paid, cancelled, refunded, adhoc }
 ///
 /// Paid bookings are written by the server or by hand in the Firebase
 /// console; ad hoc sessions by an admin in the app. Customers can only read
-/// their own (by uid, or ad hoc ones shared with their Google email). See the
-/// README for the fields.
+/// their own (by uid, or ad hoc ones shared with their Google email) and
+/// ones their owner shared with them ([sharedWith]). See the README for the
+/// fields.
 class Booking {
   const Booking({
     required this.id,
@@ -19,6 +20,8 @@ class Booking {
     this.photosReady = false,
     this.uid,
     this.email,
+    this.emails = const [],
+    this.sharedWith = const [],
     this.name,
   }) : assert(packageName != null || status == BookingStatus.adhoc, 'Only ad hoc sessions may have no package.');
 
@@ -42,9 +45,29 @@ class Booking {
   /// The customer's Firebase Auth uid. Ad hoc sessions have none.
   final String? uid;
 
-  /// For ad hoc sessions, the Google email of whoever may download the
-  /// photos; on paid bookings, the email noted when it was entered.
+  /// On paid bookings, the email noted when it was entered. On an ad hoc
+  /// session from before there could be several emails, the Google email of
+  /// whoever may download the photos (see [guestEmails]).
   final String? email;
+
+  /// An ad hoc session's `emails`: the Google emails of whoever may download
+  /// the photos (see [guestEmails]).
+  final List<String> emails;
+
+  /// Who the studio shared an ad hoc session with, by Google email: its
+  /// [emails], and the one [email] of a session from before there could be
+  /// several (the rules and the download function let in both). None for any
+  /// other booking, whose [email] is only a note.
+  List<String> get guestEmails {
+    if (!isAdHoc) return const [];
+    final email = this.email;
+    return [...emails, if (email != null && !emails.contains(email)) email];
+  }
+
+  /// Who the session's owner (the customer who booked it, or a guest of an
+  /// ad hoc one) shared it with from "Your sessions", by Google email: they
+  /// can see it and download its photos too, but not share it on.
+  final List<String> sharedWith;
 
   /// An ad hoc session's name, "The Harper family", which the admin pages
   /// and the family both see as its title. On a paid booking, who it's for,
@@ -92,6 +115,8 @@ class Booking {
       photosReady: data['photosReady'] == true,
       uid: optional('uid'),
       email: optional('email'),
+      emails: _texts(data, 'emails'),
+      sharedWith: _texts(data, 'sharedWith'),
       name: optional('name'),
     );
   }
@@ -112,6 +137,14 @@ class Booking {
 
   static String _text(Map<String, dynamic> data, String field) =>
       data[field] is String ? (data[field] as String).trim() : '';
+
+  /// The text in a list [field], trimmed, without blanks; none if it isn't
+  /// a list.
+  static List<String> _texts(Map<String, dynamic> data, String field) => [
+        if (data[field] case final List<dynamic> values)
+          for (final value in values)
+            if (value is String && value.trim().isNotEmpty) value.trim(),
+      ];
 
   static BookingStatus? _status(Map<String, dynamic> data) {
     // Ad hoc sessions are only written by the app, and the rules and the

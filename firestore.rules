@@ -7,9 +7,10 @@ rules_version = '2';
 // can still create and edit bookings.
 //
 // Admins are accounts with the custom claim `admin: true`, granted by the
-// project owner with scripts/grant-admin.sh. The admin pages write directly
-// from the app, so these rules are the only check on what they write. The app
-// (lib/services/admin_service.dart) checks the same constraints before
+// project owner with scripts/grant-admin.sh. The admin pages, and families
+// sharing their sessions, write directly from the app, so these rules are the
+// only check on what they write. The app (lib/services/admin_service.dart,
+// lib/services/booking_service.dart) checks the same constraints before
 // writing, so a rejection here only ever means a real access problem: change
 // both together.
 service cloud.firestore {
@@ -23,48 +24,64 @@ service cloud.firestore {
     // bookings/{bookingId}. Customers' bookings: {uid, email, packageName,
     // date, time, location, status, photosReady, createdAt}, written only by
     // the server or by the photographer in the console. Ad hoc sessions (for
-    // family and friends, no payment): {status: 'adhoc', name, email,
+    // family and friends, no payment): {status: 'adhoc', name, emails,
     // packageName?, date, time?, location?, photosReady, createdAt,
-    // createdBy}, written by admins; they have no uid, because the guest is
-    // known only by the Google email the session is shared with.
+    // createdBy}, written by admins; they have no uid, because the guests are
+    // known only by the Google emails the session is shared with. One added
+    // before a session could have several emails has a single `email`
+    // instead of `emails` (validGuests). Either kind may also have
+    // `sharedWith`: the emails its owner shared it with (isOwner), written
+    // from "Your sessions".
     //
     // Readers:
     //   - a signed-in customer: bookings carrying their uid;
-    //   - an ad hoc guest: ad hoc sessions whose email is the one they
-    //     verified with Google (the session's email is saved lowercase; the
-    //     token's may have capitals);
+    //   - an ad hoc guest: ad hoc sessions whose emails (or email) include
+    //     the one they verified with Google (the session's are saved
+    //     lowercase; the token's may have capitals);
+    //   - whoever a session was shared with: bookings whose sharedWith
+    //     includes the email they verified with Google;
     //   - admins: everything.
     // getGalleryDownloadUrl (functions/src/gallery.ts) lets the same
-    // customers and guests download the photos. On a booking without a uid
-    // the first check is an error, which counts as false between the ||s, so
-    // the others decide.
+    // customers, guests and people shared with download the photos. A check
+    // on a field the booking doesn't have (a uid, emails, sharedWith) is an
+    // error, which counts as false between the ||s, so the others decide.
     //
     // Rules aren't filters: a query must match one of these on its own, i.e.
-    // `where('uid', isEqualTo: uid)` for customers, and
-    // `where('status', isEqualTo: 'adhoc').where('email', isEqualTo: email)`
-    // (the lowercased email) for guests, or Firestore refuses the whole query
-    // instead of filtering it.
+    // `where('uid', isEqualTo: uid)` for customers,
+    // `where('status', isEqualTo: 'adhoc')` with
+    // `.where('emails', arrayContains: email)` or
+    // `.where('email', isEqualTo: email)` (the lowercased email) for guests,
+    // and `where('sharedWith', arrayContains: email)` for people shared
+    // with, or Firestore refuses the whole query instead of filtering it.
     match /bookings/{bookingId} {
       allow get, list: if (request.auth != null
                            && resource.data.uid == request.auth.uid)
                        || (request.auth != null
                            && resource.data.status == 'adhoc'
                            && request.auth.token.get('email_verified', false) == true
+                           && request.auth.token.email.lower() in resource.data.emails)
+                       || (request.auth != null
+                           && resource.data.status == 'adhoc'
+                           && request.auth.token.get('email_verified', false) == true
                            && resource.data.email == request.auth.token.email.lower())
+                       || (request.auth != null
+                           && request.auth.token.get('email_verified', false) == true
+                           && request.auth.token.email.lower() in resource.data.sharedWith)
                        || isAdmin();
 
       // Admins create ad hoc sessions only, never a booking with a uid:
-      // customers' bookings come from payments.
+      // customers' bookings come from payments. `email` is what a site from
+      // before several emails sends instead of `emails`.
       allow create: if isAdmin()
                     && request.resource.data.keys().hasAll(
-                         ['status', 'name', 'email', 'date', 'photosReady',
-                          'createdAt', 'createdBy'])
+                         ['status', 'name', 'date', 'photosReady', 'createdAt',
+                          'createdBy'])
                     && request.resource.data.keys().hasOnly(
-                         ['status', 'name', 'email', 'packageName', 'date', 'time',
-                          'location', 'photosReady', 'createdAt', 'createdBy'])
+                         ['status', 'name', 'emails', 'email', 'packageName', 'date',
+                          'time', 'location', 'photosReady', 'createdAt', 'createdBy'])
                     && request.resource.data.status == 'adhoc'
                     && validName(request.resource.data)
-                    && validEmail(request.resource.data)
+                    && validGuests(request.resource.data)
                     && validDate(request.resource.data)
                     && (!('packageName' in request.resource.data)
                         || validPackageName(request.resource.data))
@@ -81,12 +98,20 @@ service cloud.firestore {
       // validated: bookings typed into the console may hold odd values in
       // fields nobody touches. uid, status, createdAt and createdBy never
       // change, so a booking never moves between customer and guest.
-      allow update: if isAdmin()
-                    && request.resource.data.updatedAt == request.time
-                    && (resource.data.get('status', null) == 'adhoc'
-                        ? validAdHocUpdate()
-                        : changedKeys().hasOnly(['photosReady', 'updatedAt'])
-                          && validPhotosReadyChange());
+      //
+      // A session's owner changes who it's shared with, and nothing else:
+      // up to 10 valid emails, each listed once (the app adds and removes
+      // them one at a time with arrayUnion and arrayRemove). Admins don't
+      // touch sharedWith.
+      allow update: if (isAdmin()
+                        && request.resource.data.updatedAt == request.time
+                        && (resource.data.get('status', null) == 'adhoc'
+                            ? validAdHocUpdate()
+                            : changedKeys().hasOnly(['photosReady', 'updatedAt'])
+                              && validPhotosReadyChange()))
+                    || (isOwner()
+                        && changedKeys().hasOnly(['sharedWith'])
+                        && validEmailList(request.resource.data.sharedWith, 0));
 
       // Customers' bookings are records of a payment; only ad hoc sessions
       // can be deleted.
@@ -101,10 +126,39 @@ service cloud.firestore {
         && data.name.size() >= 1
         && data.name.size() <= 100;
     }
-    function validEmail(data) {
-      return data.email is string
-        && data.email == data.email.trim().lower()
-        && data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+    // Who an ad hoc session is shared with: `emails`, or the one `email` of
+    // a session from before there could be several (sites from then still
+    // send it). Never both.
+    function validGuests(data) {
+      return ('emails' in data) != ('email' in data)
+        && (!('emails' in data) || validEmailList(data.emails, 1))
+        && (!('email' in data) || validEmail(data.email));
+    }
+    // An email as it's matched against the token's: trimmed, lowercase,
+    // something@something.something, and no longer than an address can be.
+    function validEmail(email) {
+      return email is string
+        && email == email.trim().lower()
+        && email.size() <= 254
+        && email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+    }
+    // [min] to 10 valid emails, each listed once: an ad hoc session's emails,
+    // or who a session is shared with. Rules can't loop, so each place is
+    // checked in turn: one validEmailAt per place up to the most
+    // (SessionRules.emailListMaxLength).
+    function validEmailList(list, min) {
+      return list is list
+        && list.size() >= min
+        && list.size() <= 10
+        && list.toSet().size() == list.size()
+        && validEmailAt(list, 0) && validEmailAt(list, 1)
+        && validEmailAt(list, 2) && validEmailAt(list, 3)
+        && validEmailAt(list, 4) && validEmailAt(list, 5)
+        && validEmailAt(list, 6) && validEmailAt(list, 7)
+        && validEmailAt(list, 8) && validEmailAt(list, 9);
+    }
+    function validEmailAt(list, i) {
+      return list.size() <= i || validEmail(list[i]);
     }
     function validPackageName(data) {
       return data.packageName in ['Basic', 'Premium', 'Ultimate'];
@@ -120,6 +174,18 @@ service cloud.firestore {
       return data.location is string && data.location.size() <= 200;
     }
 
+    // Whose session it is to share: the customer whose uid it carries, or a
+    // guest the studio shared an ad hoc session with. Never someone it was
+    // shared with in turn: they can't pass it on, or take anyone off.
+    function isOwner() {
+      return request.auth != null
+        && (resource.data.get('uid', null) == request.auth.uid
+            || (resource.data.get('status', null) == 'adhoc'
+                && request.auth.token.get('email_verified', false) == true
+                && (request.auth.token.email.lower() in resource.data.get('emails', [])
+                    || resource.data.get('email', null) == request.auth.token.email.lower())));
+    }
+
     function changedKeys() {
       return request.resource.data.diff(resource.data).affectedKeys();
     }
@@ -132,16 +198,17 @@ service cloud.firestore {
     }
 
     // An ad hoc session's details can be edited. Only the optional fields
-    // can be removed (FieldValue.delete()); any field that changes must be
-    // valid, as on create.
+    // can be removed (FieldValue.delete()), and `email`, as a session from
+    // before several emails moves to `emails`; any field that changes must
+    // be valid, as on create.
     function validAdHocUpdate() {
       let data = request.resource.data;
       let changed = changedKeys();
-      return changed.hasOnly(['name', 'email', 'packageName', 'date', 'time',
-                              'location', 'photosReady', 'updatedAt'])
-        && removedKeys().hasOnly(['packageName', 'time', 'location'])
+      return changed.hasOnly(['name', 'emails', 'email', 'packageName', 'date',
+                              'time', 'location', 'photosReady', 'updatedAt'])
+        && removedKeys().hasOnly(['email', 'packageName', 'time', 'location'])
         && (!('name' in changed) || validName(data))
-        && (!('email' in changed) || validEmail(data))
+        && (!(('emails' in changed) || ('email' in changed)) || validGuests(data))
         && (!('date' in changed) || validDate(data))
         && validPhotosReadyChange()
         && (!('packageName' in changed) || !('packageName' in data)

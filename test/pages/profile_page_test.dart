@@ -4,6 +4,8 @@ import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/models/booking.dart';
 import 'package:brookie_babies/pages/home_page.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
+import 'package:brookie_babies/pages/session_gallery_page.dart';
+import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/utilities/leave_warning.dart';
@@ -19,6 +21,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
+import '../support/hidden_sections.dart';
 
 /// Dates far from today, so the tests don't depend on the clock.
 const _future = '2999-03-04';
@@ -32,6 +35,8 @@ Booking _booking(String id, {
   bool photosReady = true,
   String? packageName = 'Premium',
   String? name,
+  List<String> emails = const [],
+  List<String> sharedWith = const [],
 }) {
   return Booking.fromMap(id, {
     'name': name,
@@ -41,6 +46,8 @@ Booking _booking(String id, {
     'location': location,
     'status': status,
     'photosReady': photosReady,
+    'emails': emails,
+    'sharedWith': sharedWith,
   })!;
 }
 
@@ -51,8 +58,19 @@ Booking _adHoc(
   bool photosReady = true,
   String? packageName,
   String name = 'Church Family - Fall 2026',
+  List<String> emails = const ['parent@example.com'],
+  List<String> sharedWith = const [],
 }) =>
-    _booking(id, date: date, status: 'adhoc', photosReady: photosReady, packageName: packageName, name: name);
+    _booking(
+      id,
+      date: date,
+      status: 'adhoc',
+      photosReady: photosReady,
+      packageName: packageName,
+      name: name,
+      emails: emails,
+      sharedWith: sharedWith,
+    );
 
 /// The [StatusTag] labelled [label].
 StatusTag _tag(WidgetTester tester, String label) =>
@@ -117,7 +135,13 @@ void main() {
     // With the email, for the sessions shared with it.
     expect(bookings.watchedUsers.single.email, testUser.email);
     expect(find.textContaining('No sessions yet.'), findsOneWidget);
-    expect(find.widgetWithText(OutlinedButton, 'See packages'), findsOneWidget);
+  });
+
+  testWidgets('with no sessions, while there are no packages: no "See packages"', (tester) async {
+    await pumpProfile(tester);
+
+    expect(find.textContaining('No sessions yet.'), findsOneWidget);
+    expect(find.text('See packages'), findsNothing);
   });
 
   group('with no sessions, names the email they’re signed in as', () {
@@ -217,7 +241,8 @@ void main() {
     final titles = tester
         .widgetList<Text>(find.byType(Text))
         .map((t) => t.data)
-        .where((text) => text == 'Upcoming' || text == 'Past' || (text?.endsWith(' session') ?? false))
+        .where((text) =>
+            text == 'Upcoming' || text == 'Past' || ((text?.endsWith(' session') ?? false) && !text!.startsWith('Share')))
         .toList();
     expect(titles, [
       'Upcoming', 'Basic session', 'Ultimate session',
@@ -235,7 +260,22 @@ void main() {
   testWidgets('an upcoming session whose photos are ready can be downloaded', (tester) async {
     await pumpProfile(tester, bookings: FakeBookingService([_booking('soon', date: _future)]));
 
+    expect(find.text('View photos'), findsOneWidget);
     expect(find.text('Download all photos'), findsOneWidget);
+  });
+
+  testWidgets('View photos opens the session gallery', (tester) async {
+    gallery.galleryPhotos = [
+      GalleryPhoto(name: 'IMG_1.jpg', url: Uri.parse('https://storage.example/b1/IMG_1.jpg')),
+    ];
+    await pumpProfile(tester, bookings: FakeBookingService([_booking('b1')]));
+
+    await tester.tap(find.text('View photos'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SessionGalleryPage), findsOneWidget);
+    expect(gallery.photoRequests, ['b1']);
+    expect(find.text('Photo gallery'), findsOneWidget);
   });
 
   testWidgets('says when some bookings could not be shown', (tester) async {
@@ -300,7 +340,8 @@ void main() {
     expect(_tag(tester, 'Paid').tone, StatusTone.success);
     expect(_tag(tester, 'Paid').icon, Icons.check);
     expect(_tag(tester, 'Ready to download').tone, StatusTone.success);
-    expect(find.widgetWithIcon(FilledButton, Icons.download_outlined), findsOneWidget);
+    expect(find.widgetWithIcon(FilledButton, Icons.photo_library_outlined), findsOneWidget);
+    expect(find.widgetWithIcon(TextButton, Icons.download_outlined), findsOneWidget);
   });
 
   testWidgets('past session without photos yet: explains they are being edited', (tester) async {
@@ -444,6 +485,7 @@ void main() {
   });
 
   testWidgets('the empty state is the shared band, its sentence held to the reading width', (tester) async {
+    offerPackages();
     await pumpProfile(tester, size: const Size(1440, 900));
 
     final band = find.byType(EmptyState);
@@ -457,6 +499,7 @@ void main() {
   });
 
   testWidgets('"See packages" goes back home and shows the packages', (tester) async {
+    offerPackages();
     tester.view.physicalSize = const Size(1440, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -479,8 +522,8 @@ void main() {
 
   testWidgets('keyboard: "Download all photos" keeps focus while the photos are prepared', (tester) async {
     await pumpProfile(tester, bookings: FakeBookingService([_booking('b1')]));
-    // Account menu, "Sign out", then the download.
-    for (var i = 0; i < 3; i++) {
+    // Account menu, "Sign out", "View photos", then the download.
+    for (var i = 0; i < 4; i++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     }
     await tester.pump();
@@ -490,14 +533,16 @@ void main() {
     await tester.pump();
 
     expect(gallery.requested, ['b1']);
-    final busy = find.widgetWithText(FilledButton, 'Preparing your photos…');
+    final busy = find.widgetWithText(TextButton, 'Preparing your photos…');
     expect(hasFocus(tester, find.text('Preparing your photos…')), isTrue);
     expect(hasFocus(tester, find.text('Sign out')), isFalse);
-    expect(tester.widget<FilledButton>(busy).onPressed, isNotNull);
+    expect(tester.widget<TextButton>(busy).onPressed, isNotNull);
     expect(find.descendant(of: busy, matching: find.byType(CircularProgressIndicator)), findsOneWidget);
-    // It looks unavailable while it works.
-    expect(tester.widget<Material>(find.descendant(of: busy, matching: find.byType(Material))).color,
-        BrookieColors.light.surfaceSunk);
+    // It stays a quiet download action while it works.
+    expect(
+      tester.widget<Material>(find.descendant(of: busy, matching: find.byType(Material))).color,
+      Colors.transparent,
+    );
 
     // A second Enter waits for the same download rather than starting another.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -525,7 +570,7 @@ void main() {
     await tester.pump();
 
     expect(
-      tester.getSemantics(find.widgetWithText(FilledButton, 'Preparing your photos…')),
+      tester.getSemantics(find.widgetWithText(TextButton, 'Preparing your photos…')),
       isSemantics(label: 'Preparing your photos…', isButton: true, isEnabled: true, isLiveRegion: true),
     );
     gallery.complete(GalleryDownload(url: Uri.parse('https://example.com/b1.zip'), photoCount: 3));
@@ -533,39 +578,38 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('one primary button: the newest ready session; the others are outlined', (tester) async {
+  testWidgets('one primary gallery button: the newest ready session; the others are outlined', (tester) async {
     await pumpProfile(tester, bookings: FakeBookingService([
       _booking('older', date: '1999-01-01', packageName: 'Basic'),
       _booking('newest', date: _past, packageName: 'Ultimate'),
       _booking('editing', date: '2000-01-01', photosReady: false),
     ]));
 
-    final primary = find.widgetWithText(FilledButton, 'Download all photos');
+    final primary = find.widgetWithText(FilledButton, 'View photos');
     expect(primary, findsOneWidget);
-    expect(find.widgetWithText(OutlinedButton, 'Download all photos'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'View photos'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Download all photos'), findsNWidgets(2));
     expect(find.ancestor(of: primary, matching: find.widgetWithText(Card, 'Ultimate session')), findsOneWidget);
   });
 
-  testWidgets('a busy outlined download keeps its focus ring', (tester) async {
+  testWidgets('a busy quiet download keeps its focus ring', (tester) async {
     await pumpProfile(tester, bookings: FakeBookingService([
       _booking('older', date: '1999-01-01', packageName: 'Basic'),
       _booking('newest', date: _past, packageName: 'Ultimate'),
     ]));
-    final outlined = find.widgetWithText(OutlinedButton, 'Download all photos');
-    await tester.ensureVisible(outlined);
+    final quiet = find.widgetWithText(TextButton, 'Download all photos').last;
+    await tester.ensureVisible(quiet);
     await tester.pumpAndSettle();
-    await tester.tap(outlined);
+    await tester.tap(quiet);
     await tester.pump();
     Focus.of(tester.element(find.text('Preparing your photos…'))).requestFocus();
     await tester.sendKeyEvent(LogicalKeyboardKey.shift); // keyboard highlight mode
     await tester.pump();
 
-    final busy = find.widgetWithText(OutlinedButton, 'Preparing your photos…');
+    final busy = find.widgetWithText(TextButton, 'Preparing your photos…');
     final shape = tester.widget<Material>(find.descendant(of: busy, matching: find.byType(Material))).shape!;
-    // Its own quiet edge, then the gap and the ring.
-    expect(shape, isA<FocusRingBorder>());
-    expect((shape as FocusRingBorder).ring, brookieFocusSide(BrookieColors.light.focus));
-    expect(shape.side, BorderSide(color: BrookieColors.light.line, width: 1.5));
+    expect(shape, isA<OutlinedBorder>());
+    expect((shape as OutlinedBorder).side, brookieFocusSide(BrookieColors.light.focus));
     gallery.complete(GalleryDownload(url: Uri.parse('https://example.com/b1.zip'), photoCount: 3));
     await tester.pumpAndSettle();
   });
@@ -688,7 +732,7 @@ void main() {
       expect(bar(), findsNothing);
       expect(find.text('Adding photo 38 of 150'), findsNothing);
       expect(find.widgetWithText(InlineMessage, kGalleryErrorFallback), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'Download all photos'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Download all photos'), findsOneWidget);
       expect(urlOpener.opened, isEmpty);
       expect(LeaveWarning.active.value, isFalse);
       expect(ScreenAwake.active.value, isFalse);
@@ -827,7 +871,10 @@ void main() {
     testWidgets('screen readers hear the hint once, then each quarter, then the finishing', (tester) async {
       final semantics = tester.ensureSemantics();
       await startDownload(tester);
-      final button = find.byType(FilledButton);
+      final button = find.descendant(
+        of: find.byType(BusyButton),
+        matching: find.byType(TextButton),
+      );
 
       void expectButton(String label, String reason) => expect(
             tester.getSemantics(button),
@@ -898,7 +945,8 @@ void main() {
       expect(find.byType(StatusTag), findsOneWidget);
       expect(_tag(tester, 'Ready to download').tone, StatusTone.success);
       expect(find.text('Ad hoc'), findsNothing);
-      expect(find.widgetWithText(FilledButton, 'Download all photos'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'View photos'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Download all photos'), findsOneWidget);
 
       await tester.tap(find.text('Download all photos'));
       await tester.pump();
@@ -922,16 +970,17 @@ void main() {
       expect(find.textContaining('Your photos are being edited'), findsOneWidget);
     });
 
-    testWidgets('can hold the page’s one primary download', (tester) async {
+    testWidgets('can hold the page’s one primary gallery action', (tester) async {
       await pumpProfile(tester, bookings: FakeBookingService([
         _booking('older', date: '1999-01-01', packageName: 'Basic'),
         _adHoc('newest'),
       ]));
 
-      final primary = find.widgetWithText(FilledButton, 'Download all photos');
+      final primary = find.widgetWithText(FilledButton, 'View photos');
       expect(primary, findsOneWidget);
       expect(find.ancestor(of: primary, matching: find.widgetWithText(Card, 'Church Family - Fall 2026')), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, 'Download all photos'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'View photos'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Download all photos'), findsNWidgets(2));
     });
 
     testWidgets('fits a narrow phone in both themes, even with the longest name', (tester) async {
@@ -959,5 +1008,315 @@ void main() {
 
     expect(find.text('Premium session'), findsOneWidget);
     expect(find.textContaining('Jane Doe'), findsNothing);
+  });
+
+  group('sharing', () {
+    /// [label] inside the open dialog.
+    Finder inDialog(String label) => find.descendant(of: find.byType(BrookieDialog), matching: find.text(label));
+
+    /// [email] in the list of who it's shared with: set with places to break,
+    /// it carries the address as its semantics label.
+    Finder sharedWith(String email) =>
+        find.byWidgetPredicate((widget) => widget is Text && (widget.data == email || widget.semanticsLabel == email));
+
+    /// The dialog's email field.
+    Finder emailField() => find.descendant(of: find.byType(BrookieDialog), matching: find.byType(TextField));
+
+    Future<void> tapInView(WidgetTester tester, Finder finder) async {
+      await tester.ensureVisible(finder);
+      await tester.pumpAndSettle();
+      await tester.tap(finder);
+      await tester.pumpAndSettle();
+    }
+
+    /// Opens "Share this session" and types [email].
+    Future<void> openShare(WidgetTester tester, String email) async {
+      await tapInView(tester, find.widgetWithText(OutlinedButton, 'Share this session'));
+      await tester.enterText(emailField(), email);
+    }
+
+    testWidgets('a session of their own: who it’s shared with, a way to stop each, and “Share this session”',
+        (tester) async {
+      await pumpProfile(tester, bookings: FakeBookingService([
+        _booking('b1', sharedWith: ['grandma@example.com', 'grandpa@example.com']),
+      ]));
+
+      expect(find.text('Shared with'), findsOneWidget);
+      expect(sharedWith('grandma@example.com'), findsOneWidget);
+      expect(sharedWith('grandpa@example.com'), findsOneWidget);
+      expect(find.text('Stop sharing'), findsNWidgets(2));
+      expect(find.widgetWithText(OutlinedButton, 'Share this session'), findsOneWidget);
+      expect(find.text('Shared with you'), findsNothing);
+      // Still one primary button: the gallery.
+      expect(find.byType(FilledButton), findsOneWidget);
+    });
+
+    testWidgets('not shared yet: what sharing does', (tester) async {
+      await pumpProfile(tester, bookings: FakeBookingService([_booking('b1')]));
+
+      expect(find.text('Share it with family, so they can download the photos too.'), findsOneWidget);
+      expect(find.text('Shared with'), findsNothing);
+    });
+
+    testWidgets('before the photos are ready, or before the day, it can be shared all the same', (tester) async {
+      await pumpProfile(tester, bookings: FakeBookingService([
+        _booking('soon', date: _future, photosReady: false),
+        _adHoc('a1', photosReady: false),
+      ]));
+
+      expect(find.widgetWithText(OutlinedButton, 'Share this session'), findsNWidgets(2));
+    });
+
+    testWidgets('sessions that can’t have photos (pending, cancelled, refunded) have no sharing', (tester) async {
+      await pumpProfile(tester, bookings: FakeBookingService([
+        _booking('p', date: _future, status: 'pending'),
+        _booking('c', status: 'cancelled'),
+        _booking('r', status: 'refunded'),
+      ]));
+
+      expect(find.text('Share this session'), findsNothing);
+    });
+
+    testWidgets('sharing: their email, then the message to send them', (tester) async {
+      final bookings = FakeBookingService([_booking('b1')]);
+      await pumpProfile(tester, bookings: bookings, size: const Size(1440, 900));
+      final copied = <String?>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied.add((call.arguments as Map)['text'] as String);
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+
+      await tapInView(tester, find.widgetWithText(OutlinedButton, 'Share this session'));
+      expect(inDialog('Share this session'), findsOneWidget);
+      expect(
+        inDialog('They’ll see it under Your sessions and can download its photos. Enter the email they use to sign '
+            'in to Google.'),
+        findsOneWidget,
+      );
+      // The email field has focus as the dialog opens.
+      expect(tester.widget<TextField>(emailField()).autofocus, isTrue);
+      await tester.enterText(emailField(), ' Grandma@Example.com ');
+      await tester.tap(inDialog('Share'));
+      await tester.pumpAndSettle();
+
+      expect(bookings.calls, ['share(b1, grandma@example.com)']);
+      expect(inDialog('Let them know'), findsOneWidget);
+      expect(
+        inDialog('grandma@example.com can now see this session. The site doesn’t email them, so send them this '
+            'message:'),
+        findsOneWidget,
+      );
+      const message = 'I’ve shared a photo session from Brooke Stapleton Photography with you. To see it and '
+          'download the photos, open https://brookestapletonphoto.com/#/profile and sign in with Google as '
+          'grandma@example.com.';
+      expect(find.widgetWithText(SelectableText, message), findsOneWidget);
+      await tester.tap(inDialog('Copy message'));
+      await tester.pumpAndSettle();
+      expect(copied, [message]);
+      expect(inDialog('Message copied'), findsOneWidget);
+
+      await tester.tap(inDialog('Done'));
+      await tester.pumpAndSettle();
+      expect(find.byType(BrookieDialog), findsNothing);
+      // The card shows them at once.
+      expect(sharedWith('grandma@example.com'), findsOneWidget);
+      expect(find.text('Stop sharing'), findsOneWidget);
+    });
+
+    testWidgets('Enter in the email field shares', (tester) async {
+      final bookings = FakeBookingService([_booking('b1')]);
+      await pumpProfile(tester, bookings: bookings);
+
+      await openShare(tester, 'grandma@example.com');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(bookings.calls, ['share(b1, grandma@example.com)']);
+      expect(inDialog('Let them know'), findsOneWidget);
+    });
+
+    testWidgets('the email is checked before anything is sent, and as it’s fixed', (tester) async {
+      final bookings = FakeBookingService([
+        _adHoc('a1', emails: ['bride@example.com'], sharedWith: ['aunt@example.com']),
+      ]);
+      await pumpProfile(tester, bookings: bookings);
+
+      await openShare(tester, '');
+      for (final (email, says) in [
+        ('', 'Enter the email they use to sign in to Google.'),
+        ('grandma@example', 'That isn’t a whole email address. Check it, like name@gmail.com.'),
+        ('grandma+kids@gmail.com', '“+kids” isn’t part of a Gmail address: Google signs them in without it. Take it out.'),
+        (' Parent@Example.com', 'That’s your own email. Enter the email of the person you’re sharing it with.'),
+        ('AUNT@example.com', 'It’s already shared with aunt@example.com.'),
+        ('bride@example.com', 'bride@example.com can already see this session.'),
+      ]) {
+        await tester.enterText(emailField(), email);
+        await tester.tap(inDialog('Share'));
+        await tester.pumpAndSettle();
+        expect(inDialog(says), findsOneWidget, reason: email);
+      }
+      expect(bookings.calls, isEmpty);
+
+      // Checked as it changes from now on.
+      await tester.enterText(emailField(), 'grandma@example.com');
+      await tester.pumpAndSettle();
+      expect(inDialog('bride@example.com can already see this session.'), findsNothing);
+    });
+
+    testWidgets('a share that fails says why, and stays open to try again', (tester) async {
+      final bookings = FakeBookingService([_booking('b1')])
+        ..nextError = const SharingException(kSharingOfflineMessage);
+      await pumpProfile(tester, bookings: bookings);
+
+      await openShare(tester, 'grandma@example.com');
+      await tester.tap(inDialog('Share'));
+      await tester.pumpAndSettle();
+
+      expect(find.descendant(of: find.byType(BrookieDialog), matching: find.widgetWithText(InlineMessage, kSharingOfflineMessage)),
+          findsOneWidget);
+      expect(inDialog('Share this session'), findsOneWidget);
+      await tester.tap(inDialog('Share'));
+      await tester.pumpAndSettle();
+      expect(inDialog('Let them know'), findsOneWidget);
+      expect(bookings.calls, ['share(b1, grandma@example.com)', 'share(b1, grandma@example.com)']);
+    });
+
+    testWidgets('while it shares, the button says so and keeps focus; another press does nothing', (tester) async {
+      final bookings = FakeBookingService([_booking('b1')])..writeDelay = const Duration(seconds: 1);
+      await pumpProfile(tester, bookings: bookings);
+      await openShare(tester, 'grandma@example.com');
+      Focus.of(tester.element(inDialog('Share'))).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(inDialog('Sharing…'), findsOneWidget);
+      expect(hasFocus(tester, inDialog('Sharing…')), isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(bookings.calls, hasLength(1));
+      expect(inDialog('Let them know'), findsOneWidget);
+    });
+
+    testWidgets('Cancel shares nothing', (tester) async {
+      final bookings = FakeBookingService([_booking('b1')]);
+      await pumpProfile(tester, bookings: bookings);
+
+      await openShare(tester, 'grandma@example.com');
+      await tester.tap(inDialog('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BrookieDialog), findsNothing);
+      expect(bookings.calls, isEmpty);
+    });
+
+    testWidgets('stopping asks first, then takes them off, with focus on “Share this session”', (tester) async {
+      final bookings = FakeBookingService([
+        _booking('b1', sharedWith: ['grandma@example.com', 'grandpa@example.com']),
+      ]);
+      await pumpProfile(tester, bookings: bookings);
+      final stop = find.widgetWithText(TextButton, 'Stop sharing').first;
+      await tester.ensureVisible(stop);
+      await tester.pumpAndSettle();
+      Focus.of(tester.element(find.descendant(of: stop, matching: find.text('Stop sharing')))).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(inDialog('Stop sharing?'), findsOneWidget);
+      expect(
+        inDialog('grandma@example.com won’t see this session or be able to download its photos any more.'),
+        findsOneWidget,
+      );
+      await tester.tap(inDialog('Stop sharing'));
+      await tester.pumpAndSettle();
+
+      expect(bookings.calls, ['stopSharing(b1, grandma@example.com)']);
+      expect(sharedWith('grandma@example.com'), findsNothing);
+      expect(sharedWith('grandpa@example.com'), findsOneWidget);
+      expect(hasFocus(tester, find.text('Share this session')), isTrue);
+    });
+
+    testWidgets('cancelling stops nothing', (tester) async {
+      final bookings = FakeBookingService([_booking('b1', sharedWith: ['grandma@example.com'])]);
+      await pumpProfile(tester, bookings: bookings);
+
+      await tapInView(tester, find.text('Stop sharing'));
+      await tester.tap(inDialog('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(bookings.calls, isEmpty);
+      expect(sharedWith('grandma@example.com'), findsOneWidget);
+    });
+
+    testWidgets('a stop that fails says why, and they stay', (tester) async {
+      final bookings = FakeBookingService([_booking('b1', sharedWith: ['grandma@example.com'])])
+        ..nextError = const SharingException('We couldn’t stop sharing it. Refresh the page and try again.');
+      await pumpProfile(tester, bookings: bookings);
+
+      await tapInView(tester, find.text('Stop sharing'));
+      await tester.tap(inDialog('Stop sharing'));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(InlineMessage, 'We couldn’t stop sharing it. Refresh the page and try again.'),
+          findsOneWidget);
+      expect(sharedWith('grandma@example.com'), findsOneWidget);
+    });
+
+    testWidgets('at ten, it can’t be shared with more', (tester) async {
+      await pumpProfile(tester, bookings: FakeBookingService([
+        _booking('b1', sharedWith: [for (var i = 0; i < 10; i++) 'guest$i@example.com']),
+      ]));
+
+      expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Share this session')).onPressed,
+          isNull);
+      expect(
+        find.text('It’s shared with 10 people, the most it can be. Stop sharing with someone to add another.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a session shared with you says so, and isn’t yours to share', (tester) async {
+      await pumpProfile(tester, bookings: FakeBookingService([
+        _booking('b1', sharedWith: ['parent@example.com', 'aunt@example.com']),
+        _booking('mine', date: '2000-01-01', packageName: 'Basic'),
+      ], 0, {'b1'}));
+
+      final shared = find.ancestor(of: find.text('Premium session'), matching: find.byType(Card));
+      expect(find.descendant(of: shared, matching: find.text('Shared with you')), findsOneWidget);
+      expect(find.descendant(of: shared, matching: find.byIcon(Icons.people_outline)), findsOneWidget);
+      expect(find.descendant(of: shared, matching: find.text('Share this session')), findsNothing);
+      expect(find.descendant(of: shared, matching: sharedWith('aunt@example.com')), findsNothing);
+      expect(find.descendant(of: shared, matching: find.text('Download all photos')), findsOneWidget);
+      // Their own session is still theirs to share.
+      final mine = find.ancestor(of: find.text('Basic session'), matching: find.byType(Card));
+      expect(find.descendant(of: mine, matching: find.text('Share this session')), findsOneWidget);
+      expect(find.descendant(of: mine, matching: find.text('Shared with you')), findsNothing);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('fits a 320px phone in ${brightness.name}: the list, the dialog and the message', (tester) async {
+        const long = 'a.very.long.address.for.the.grandparents@example.com';
+        final bookings = FakeBookingService([
+          _booking('b1', sharedWith: [long]),
+          _booking('s', date: '2000-01-01', packageName: 'Basic'),
+        ], 0, {'s'});
+        await pumpProfile(tester, bookings: bookings, brightness: brightness, size: const Size(320, 640));
+        expect(tester.takeException(), isNull);
+
+        await openShare(tester, 'not an email');
+        await tester.tap(inDialog('Share'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.enterText(emailField(), 'another.long.address.for.an.aunt@example.com');
+        await tester.tap(inDialog('Share'));
+        await tester.pumpAndSettle();
+        expect(inDialog('Let them know'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 }

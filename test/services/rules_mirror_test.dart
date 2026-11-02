@@ -6,8 +6,10 @@
 
 import 'dart:io';
 
+import 'package:brookie_babies/models/booking.dart';
 import 'package:brookie_babies/models/session_details.dart';
 import 'package:brookie_babies/services/admin_service.dart';
+import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/services/photo_rules.dart';
 import 'package:brookie_babies/services/portfolio_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -73,13 +75,13 @@ void main() {
 
     final everything = SessionDetails(
       name: 'The Harper family',
-      email: 'harper@example.com',
+      emails: ['harper@example.com', 'pat@example.com'],
       date: DateTime(2026, 11, 14),
       packageName: 'Premium',
       time: (hour: 9, minute: 0),
       location: 'Liberty Park',
     );
-    final onlyRequired = SessionDetails(name: 'The Harpers', email: 'pat@example.com', date: DateTime(2026, 12, 1));
+    final onlyRequired = SessionDetails(name: 'The Harpers', emails: ['pat@example.com'], date: DateTime(2026, 12, 1));
 
     Set<String> keysOf(Map<Object, Object?> data) => {for (final key in data.keys) key as String};
 
@@ -87,8 +89,12 @@ void main() {
       await admin.createSession(onlyRequired);
       await admin.createSession(everything);
 
-      expect(keysOf(db.writes[0].data), _listAfter(bookings, 'keys().hasAll('));
-      expect(keysOf(db.writes[1].data), _listAfter(bookings, 'keys().hasOnly('));
+      // Who it's shared with besides: validGuests takes `emails`, or the one
+      // `email` that only sites from before several emails send.
+      final guests = _block(firestore, 'function validGuests(data) {');
+      expect(guests, contains("('emails' in data) != ('email' in data)"));
+      expect(keysOf(db.writes[0].data), {..._listAfter(bookings, 'keys().hasAll('), 'emails'});
+      expect(keysOf(db.writes[1].data), _listAfter(bookings, 'keys().hasOnly(').difference({'email'}));
       expect(_find(bookings, r"request\.resource\.data\.status == '(\w+)'"), db.writes[1].data['status']);
     });
 
@@ -106,7 +112,7 @@ void main() {
         session,
         SessionDetails(
           name: 'The Harpers',
-          email: 'pat@example.com',
+          emails: ['pat@example.com'],
           date: DateTime(2026, 12, 1),
           packageName: 'Basic',
           time: (hour: 10, minute: 30),
@@ -115,13 +121,35 @@ void main() {
       );
       await admin.setPhotosReady('s1', true);
       await admin.updateSession(session, onlyRequired);
+      // One from before several emails moves its email to emails.
+      await admin.updateSession(testSession('s1', email: 'harper@example.com'), onlyRequired);
 
-      expect({...keysOf(db.writes[0].data), ...keysOf(db.writes[1].data)}, _listAfter(adHocUpdate, 'changed.hasOnly('));
+      expect(
+        {...keysOf(db.writes[0].data), ...keysOf(db.writes[1].data), ...keysOf(db.writes[3].data)},
+        _listAfter(adHocUpdate, 'changed.hasOnly('),
+      );
       final removed = {
-        for (final MapEntry(:key, :value) in db.writes[2].data.entries)
-          if (value == FieldValue.delete()) key as String,
+        for (final write in db.writes.skip(2))
+          for (final MapEntry(:key, :value) in write.data.entries)
+            if (value == FieldValue.delete()) key as String,
       };
       expect(removed, _listAfter(adHocUpdate, 'removedKeys().hasOnly('));
+    });
+
+    test('sharing a session changes only what the rules let its owner change', () async {
+      db.docs['bookings/b1'] = {'status': 'paid', 'uid': 'customer-uid'};
+      final family = FirestoreBookingService(db);
+      final booking = testSession('b1', status: BookingStatus.paid, uid: 'customer-uid');
+
+      await family.share(booking, 'grandma@example.com');
+      await family.stopSharing(booking, 'grandma@example.com');
+
+      final ownerKeys = _listAfter(bookings, '&& changedKeys().hasOnly(');
+      for (final write in db.writes) {
+        expect(keysOf(write.data), ownerKeys);
+      }
+      // Up to as many as an ad hoc session's emails, and none at all.
+      expect(_find(bookings, r'validEmailList\(request\.resource\.data\.sharedWith, (\d+)\)'), '0');
     });
 
     test('a customer’s booking changes only photosReady (and updatedAt)', () async {
@@ -143,9 +171,22 @@ void main() {
       final package = _block(firestore, 'function validPackageName(data) {');
       expect(_listAfter(package, 'data.packageName in'), SessionRules.packageNames.toSet());
 
-      final email = _block(firestore, 'function validEmail(data) {');
-      expect(_unescape(_find(email, r"data\.email\.matches\('([^']*)'\)")), SessionRules.emailPattern.pattern);
-      expect(email, contains('data.email == data.email.trim().lower()'));
+      final email = _block(firestore, 'function validEmail(email) {');
+      expect(_unescape(_find(email, r"email\.matches\('([^']*)'\)")), SessionRules.emailPattern.pattern);
+      expect(email, contains('email == email.trim().lower()'));
+      expect(int.parse(_find(email, r'email\.size\(\) <= (\d+)')), SessionRules.emailMaxLength);
+
+      final list = _block(firestore, 'function validEmailList(list, min) {');
+      final most = int.parse(_find(list, r'list\.size\(\) <= (\d+)'));
+      expect(most, SessionRules.emailListMaxLength);
+      expect(list, contains('list.toSet().size() == list.size()'));
+      // Rules can't loop, so each place has its own check, up to the most.
+      expect(
+        [for (final at in RegExp(r'validEmailAt\(list, (\d+)\)').allMatches(list)) int.parse(at[1]!)],
+        [for (var i = 0; i < most; i++) i],
+      );
+      final guests = _block(firestore, 'function validGuests(data) {');
+      expect(_find(guests, r'validEmailList\(data\.emails, (\d+)\)'), '1');
     });
 
     test('site/home: exactly the keys saveHomePhotos sets, and at most homeMaxPhotos photos', () async {

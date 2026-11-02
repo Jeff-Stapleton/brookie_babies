@@ -2,19 +2,23 @@
 
 A Flutter web app for Brooke Stapleton Photography. Families can see Brooke's
 photographs, choose a session package, pick a date and time, pay through Stripe,
-and later download their edited photos. The site is hosted on Firebase.
+and later view and download their edited photos. The site is hosted on
+Firebase.
 
 > Status: early MVP. The session times and the package inclusions are still
 > placeholders (`lib/models/session_time.dart`, `lib/models/session_package.dart`).
+> Until Brooke settles the wording and her packages, the home page leaves out
+> its introduction and the packages, and so offers no booking: see "Hidden
+> for now".
 
 ## Features
 
 - **Home page**: one full-bleed photograph with the logo and "Book a session",
   then a short introduction and up to six more photographs, all from Firebase
   Storage (`_admin/gallery`), chosen and ordered in the admin portal (see
-  "Home page photos").
+  "Home page photos"). For now, just the photographs and the logo.
 - **Packages**: Basic ($25), Premium ($50) and Ultimate ($99); choosing one
-  opens booking for it.
+  opens booking for it. Hidden for now.
 - **Scheduling**: a calendar (`table_calendar`) and the session times for the
   chosen day.
 - **Sign-in**: Google sign-in through Firebase Auth. Customers sign in before
@@ -23,14 +27,19 @@ and later download their edited photos. The site is hosted on Firebase.
   Stripe Payment Link, tagged with the customer's account so the payment can be
   matched to them.
 - **Your sessions**: signed-in customers see their upcoming and past sessions,
-  including ad hoc sessions shared with their Google email, and download every
-  photo from a session as one zip, through a private link that expires after
-  an hour. While a zip is prepared, the page shows how it's going.
+  including ad hoc sessions shared with their Google email. Once photos are
+  ready, **View photos** opens a private, full-bleed session gallery with its
+  title and date, a responsive grid and a full-screen photo viewer. They can
+  also download every photo as one zip. The gallery and zip use private links
+  that expire after an hour. While a zip is prepared, the page shows how it's
+  going. Families can share a session with others, such as grandparents, by
+  Google email: it shows under their Your sessions too, with the same gallery
+  and download.
 - **Admin portal** (`/#/admin`, or **Admin** in the account menu, shown only to
-  admins): every session; ad hoc sessions for family and friends, shared by
-  email; uploading a session's photos; **Make photos available**; a message to
-  copy and send to the family; and choosing the home page photos. See "Admin
-  portal".
+  admins): every session; ad hoc sessions for family and friends, shared with
+  one or more emails (both of a couple, say); uploading a session's photos;
+  **Make photos available**; a message to copy and send to the family; and
+  choosing the home page photos. See "Admin portal".
 
 ## Tech stack
 
@@ -119,12 +128,12 @@ lib/
   theme/             The design system: colors, type, spacing, Material theme
   models/            Data types (signed-in user, booking, packages, session times,
                      ad hoc session details, picked and stored photos)
-  services/          Auth, bookings, photo downloads, home page photos, the admin
+  services/          Auth, bookings, private photo galleries and downloads, home page photos, the admin
                      service and the rules' limits in Dart (photo_rules.dart),
                      app-wide services, Stripe Payment Links
-  pages/             Home, Book a session and Your sessions screens, and the
-                     admin pages (Admin, one session, the session form, Home
-                     page photos)
+  pages/             Home, Book a session, Your sessions and one family's
+                     photo gallery, and the admin pages (Admin, one session,
+                     the session form, Home page photos)
   components/        Page sections (hero, featured photos, packages, calendar,
                      session times, footer, account button, sign-in dialog,
                      booking card, and for the admin pages: the gate, session
@@ -135,10 +144,11 @@ lib/
                      file picker, the leave-page warning, keeping the screen on
 assets/              Logo and fonts
 web/                 Web shell (index.html, manifest, icons)
-functions/           Cloud Functions (TypeScript, Node 24): getGalleryDownloadUrl
+functions/           Cloud Functions (TypeScript, Node 24): private photo links
+                     and getGalleryDownloadUrl's zip
 firestore.rules      Firestore security rules (families read their own bookings and
-                     ad hoc sessions shared with their email; admins manage sessions
-                     and the home page photo choice)
+                     sessions shared with their email, and share their own; admins
+                     manage sessions and the home page photo choice)
 storage.rules        Storage security rules (the home page photo library is public;
                      admins upload and delete photos; nothing is overwritten)
 scripts/             Owner scripts: one-time Google Cloud and GitHub setup, and
@@ -192,13 +202,13 @@ token. It's safe to re-run.
 The home page shows up to seven photos from Storage → `_admin/gallery` (the
 photo library). The **first is the full-screen photo** behind the logo, so
 choose one whose subject's face is clear of the center (the logo covers the
-middle). The next six appear below the introduction, in full rows only (three
+middle). The next six appear below it, in full rows only (three
 across on wider screens, two on phones; a leftover photo is left out).
 
 Choose them in the admin portal: **Admin → Edit home page photos**. Under a
 library photo, **On the home page** adds it (up to seven). **Move up**, **Move
 down** and **Remove** set the order, and the page says how many of the photos
-below the introduction wide screens and phones will show. **Save home page**
+below the full-screen photo wide screens and phones will show. **Save home page**
 saves the choice in Firestore as `site/home` (the file names, in order), and
 the site shows it at once. Saving with none chosen leaves the home page
 without photos.
@@ -221,26 +231,73 @@ says so by **Upload photos**).
 
 > **Everything in `_admin/gallery` is public.** Anyone can list the folder and download every file in it, whether it's on the home page or not. Don't upload clients' photos there without their permission, and never put a family's session photos there.
 
+## Hidden for now
+
+Brooke doesn't like the home page's introduction ("Little ones, while they’re
+little" and the sentence under it) and hasn't decided on her packages, so the
+site leaves them out. Two switches on `HomePage` (`lib/pages/home_page.dart`)
+bring them back:
+
+- `HomePage.showsIntroduction`: the introduction below the full-screen photo.
+- `HomePage.offersPackages`: "Choose your package" and the package cards, the
+  **Book a session** button on the full-screen photo, which scrolls to them,
+  and **See packages** on Your sessions. While it's off the site offers no
+  booking, and `/#/schedule` says sessions can't be booked online yet.
+
+Both are `false`. Once Brooke has decided, change the wording (`_Introduction`
+in the same file) or the packages (`lib/models/session_package.dart`, with a
+Stripe Payment Link for each in `lib/services/payment_links.dart`), then set
+the switch to `true`. Tests that check the sections turn them on for
+themselves (`test/support/hidden_sections.dart`); the ones that check they're
+hidden say so in their names, and fail once a switch is on, so update them
+then.
+
 ## Delivering photos
 
-Families download their photos from **Your sessions** once the session's `photosReady` is `true` and its `status` is `paid` or `adhoc`. The **Download all photos** button appears on the session's card even before the session date, so check that the session is right before making its photos available. Photos are never public through the site: families get a zip download link that expires after one hour. Hiding the photos, deleting one, or changing who an ad hoc session is shared with also deletes the cached zip, so links already handed out stop working at once (if that delete fails, the change still goes through and those links expire within the hour).
+Families view and download their photos from **Your sessions** once the
+session's `photosReady` is `true` and its `status` is `paid` or `adhoc`.
+**View photos** opens the session's private gallery: the first photo by file
+name is its full-bleed cover, followed by the session title and date, then
+every photo in a responsive grid. Selecting one opens a full-screen viewer
+with previous and next controls. **Download all photos** still prepares one
+zip. Both actions appear even before the session date, so check that the
+session is right before making its photos available.
+
+Photos are never public through the site. The gallery gets a separate signed
+read link for each photo, and the download gets a signed zip link; all expire
+after one hour. The server checks the signed-in account, payment status and
+`photosReady` before issuing either kind. Hiding the photos, deleting one, or
+taking an email off an ad hoc session also deletes the cached zip, so zip links
+already handed out stop working at once (if that delete fails, the change
+still goes through and those links expire within the hour). Individual photo
+links already issued remain usable until their one-hour expiry, as any signed
+link does.
 
 ### In the admin portal
 
 1. **Open the session** from **Admin**. A paid booking appears there once it's in Firestore (for now you add those by hand; see "Adding a paid booking by hand"). For family and friends, **Add a session** first (see "Ad hoc sessions").
 2. **Upload photos** and pick the edited photos: any image type, each under 100 MB. They upload three at a time; keep the page open until they finish (leaving or closing the tab asks first, and stops them). A photo whose name is already in the session is skipped, never overwritten, so after a problem you can pick the whole folder again. To replace a photo, delete it first. **Retry failed** tries failed ones again.
 3. **Make photos available.** It becomes the page's main button once there are photos and nothing is still uploading or failed, and it asks first, saying how many photos and who can download them. **Hide photos** stops downloads again. **Delete all photos** on a session whose photos are available hides them first, so a family never downloads a half-deleted gallery.
-4. **Tell the family.** Under **Share with the family**, **Copy message** copies a note with the link to Your sessions and the Google account to sign in with, ready to paste into an email or a text. The site doesn't email families itself.
+4. **Tell the family.** Under **Share with the family**, **Copy message** copies a note with the link to Your sessions and the Google account to sign in with (any of an ad hoc session's emails), ready to paste into an email or a text. The site doesn't email families itself.
 
 The first download builds a zip of the whole folder, which can take a few minutes for a large gallery. While it's built, the family sees which photo is being added ("Adding photo 38 of 150"), a progress bar and the zip's size. On a computer the page asks before it's closed or reloaded, and on a phone it keeps the screen from locking where the browser allows. When the zip is ready, the download starts by itself and the card says "Your download has started", with the number of photos and the size. A family with several sessions ready downloads them one at a time: pressing another session's button while one is being prepared asks them to wait for it. Closing or reloading the page doesn't stop the build, so the next download is usually quick. Later downloads reuse the zip. If you add, replace or delete photos afterwards, the next download rebuilds the zip automatically; families who already downloaded need to download again to get the changes. (If you replace a photo while a family's download is being built, that one download may contain the old version.)
+
+### Families sharing their photos
+
+A family can share a session with anyone else who should have the photos, such as grandparents: under **Your sessions**, **Share this session** on the session's card, then the Google email they sign in with. The site doesn't email them, so the dialog then offers **Copy message**, a note with the link and the account to sign in with. They see the session under their own Your sessions, marked "Shared with you", and can download its photos once they're available. A session can be shared with up to 10 people, and **Stop sharing** takes someone off.
+
+- **Who can share:** the Google account that booked a paid session, or anyone an ad hoc session is shared with (one of its emails). Someone a session was shared with can download its photos but can't share it on or take anyone off.
+- **What you see:** the session's page in the portal says who the family shared it with, and so does **Make photos available**'s confirmation. The portal doesn't change the list: the family does. (In the Firebase console it's the booking's `sharedWith`.)
+- **Which sessions:** paid and ad hoc ones, before or after their photos are ready (shared early, the photos appear for everyone at once).
+- **Stopping:** the session leaves their Your sessions at once, and they can't start another download. A download link they were given in the last hour still works until it expires, because a family can't delete the cached zip as the portal does. To cut off every link at once, **Hide photos** in the portal (it deletes the zip), then make them available again.
 
 A gallery that takes more than 9 minutes to zip fails every time. The function logs a "built the zip" line for every build, saying how long it took; from 500 seconds it's a warning, which means that gallery is close to the limit. A build stopped by the limit logs no "built the zip" line, though it may log a "caller left" warning at about 540,000 ms. The limit can be raised in code (`timeoutSeconds` in `functions/src/index.ts`, together with `kGalleryDownloadTimeLimit` in `lib/services/gallery_service.dart`, which must stay above it).
 
 ### Ad hoc sessions
 
-An ad hoc session is for family, friends and anyone not booked on the site: no payment, and no `uid`. It's a `bookings` document with `status` `adhoc`, shared by email: whoever signs in to the site with Google as that email, verified by Google, sees it under **Your sessions** (with no payment tag) and can download its photos once they're available.
+An ad hoc session is for family, friends and anyone not booked on the site: no payment, and no `uid`. It's a `bookings` document with `status` `adhoc`, shared by email: whoever signs in to the site with Google as one of its emails, verified by Google, sees it under **Your sessions** (with no payment tag) and can download its photos once they're available. A wedding can be shared with both of the couple, say, so either can sign in and download the photos.
 
-**Admin → Add a session**: a name (who it's for, such as "The Harper family"; the family sees it as the session's title under Your sessions, as you do on the Admin page), the email they use to sign in to Google (exactly as their Google account shows it: Google sign-in accepts `janedoe@gmail.com` for `jane.doe@gmail.com`, but the site matches the account's own address, dots included; the form refuses addresses no Google sign-in could match, such as ones with angle brackets, `mailto:`, spaces or a Gmail `+tag`), a date, and optionally a package, time and location. **Add session** opens its page, ready for photos. **Edit details** changes them; changing the email of a session whose photos are available asks first, because it hands the photos to the new address. **Delete session** deletes the session and its photos for good. Only ad hoc sessions can be edited or deleted in the portal. A family signed in with a different Google account sees, under Your sessions, which account they're signed in as, so they can switch.
+**Admin → Add a session**: a name (who it's for, such as "The Harper family"; the family sees it as the session's title under Your sessions, as you do on the Admin page), the email they use to sign in to Google, and **Add another email** for each other person who should download the photos (up to 10). Enter each exactly as their Google account shows it: Google sign-in accepts `janedoe@gmail.com` for `jane.doe@gmail.com`, but the site matches the account's own address, dots included. The form refuses addresses no Google sign-in could match, such as ones with angle brackets, `mailto:`, spaces or a Gmail `+tag`, and the same address twice. Then a date, and optionally a package, time and location. **Add session** opens its page, ready for photos. **Edit details** changes them; adding or taking off an email of a session whose photos are available asks first, because it changes who has the photos. **Delete session** deletes the session and its photos for good. Only ad hoc sessions can be edited or deleted in the portal. A family signed in with a different Google account sees, under Your sessions, which account they're signed in as, so they can switch.
 
 **Add ad hoc sessions in the portal, not in the Firebase console.** The portal writes exactly what the rules and the download function check. A session typed in the console with `status` other than exactly `adhoc`, or an email with a capital letter or a space, is shared with nobody.
 
@@ -252,7 +309,7 @@ The portal saves these fields:
 |---|---|---|
 | `status` | string | `adhoc`, exactly |
 | `name` | string | Who it's for, 1 to 100 characters: the session's title for you and the family |
-| `email` | string | The guest's Google email, trimmed and lowercase |
+| `emails` | array of strings | The guests' Google emails: 1 to 10, each trimmed and lowercase, none twice |
 | `packageName` | string | Optional: `Basic`, `Premium` or `Ultimate` |
 | `date` | string | `YYYY-MM-DD` |
 | `time` | string | Optional: 24-hour `HH:mm` |
@@ -260,6 +317,9 @@ The portal saves these fields:
 | `photosReady` | boolean | `false` until you make the photos available |
 | `createdAt`, `createdBy` | timestamp, string | When it was added, and the admin's uid |
 | `updatedAt` | timestamp | When the portal last changed it (set on any booking it changes) |
+| `sharedWith` | array of strings | Written by the family, not the portal: who they shared it with (see "Families sharing their photos"), up to 10 Google emails, each trimmed and lowercase |
+
+A session added before it could have several emails has a single `email` (a string) instead of `emails`. It works the same, and the first **Edit details** moves it into `emails`. The rules still accept a single `email` from a site that old, so a page left open from before the change keeps working.
 
 ### Adding a paid booking by hand
 
@@ -277,6 +337,8 @@ Nothing on the site records paid bookings yet. For a payment made through a Stri
 | `status` | string | `paid` |
 | `photosReady` | boolean | `false` until the photos are uploaded |
 | `createdAt` | timestamp | Now |
+
+Leave out `sharedWith`: the family fills it in from Your sessions, and whoever is in it can download the photos.
 
 **Check the uid before saving: the booking gives that account access to the photos.** Anyone can edit `client_reference_id` in a Payment Link address, and the email on the Stripe payment comes from the same editable link (`locked_prefilled_email`), so neither proves who paid. Look up the uid under **Authentication → Users** and compare its email and name with what you know from outside Stripe, such as the email the customer used to arrange the session, and with the cardholder name on the Stripe payment. If they don't match, confirm with the customer before setting `uid`.
 
@@ -330,16 +392,23 @@ the security note in [AGENT.md](AGENT.md).
 
 `functions/` holds the Cloud Functions, and `firestore.rules` and `storage.rules` hold the security rules. They were first deployed by hand on 2026-10-17. CI deploys them on pushes to `main` once the repository variable `BACKEND_DEPLOY_LIVE` is `true` (see "Automatic backend deploys"); until then its backend job is a dry run, so deploy them by hand before merging a site that needs them (see "Deploy order"). Do the one-time setup below **before** the change that added this reaches `main`.
 
-These files are the source of truth: each deploy **replaces the Firestore and Storage rules set in the Firebase console**, so change rules here, not in the console. Only `_admin/gallery/` (the home page photo library) and `site/home` (which of its photos the home page shows) are publicly readable, families can read only their own bookings and the ad hoc sessions shared with them, and only admins can write from the app.
+These files are the source of truth: each deploy **replaces the Firestore and Storage rules set in the Firebase console**, so change rules here, not in the console. Only `_admin/gallery/` (the home page photo library) and `site/home` (which of its photos the home page shows) are publicly readable, families can read only their own bookings and the sessions shared with them, and the only thing a family can write is who their own session is shared with; everything else written from the app is an admin's.
 
 #### What the rules allow
 
-Admins are accounts whose ID token carries the custom claim `admin: true` (see "Admin portal"); both rules files check it the same way. The admin pages write straight from the browser, so the rules are the only check on what they write. The app checks the same limits first (`lib/services/photo_rules.dart`, `lib/services/admin_service.dart`), so change them together.
+Admins are accounts whose ID token carries the custom claim `admin: true` (see "Admin portal"); both rules files check it the same way. The admin pages, and families sharing a session, write straight from the browser, so the rules are the only check on what they write. The app checks the same limits first (`lib/services/photo_rules.dart`, `lib/services/admin_service.dart`, `lib/services/booking_service.dart`), so change them together.
 
-- **Bookings.** A family reads the bookings carrying their `uid`, and ad hoc sessions (`status` exactly `adhoc`) whose `email` is the email they verified with Google, lowercased. Admins read every booking. They create only ad hoc sessions (the fields in "Ad hoc sessions", never a `uid`), change only `photosReady` on other bookings and only the details and `photosReady` of ad hoc sessions, stamping `updatedAt` each time, and delete only ad hoc sessions. `uid`, `status`, `createdAt` and `createdBy` never change.
+- **Bookings.** A family reads the bookings carrying their `uid`, and ad hoc sessions (`status` exactly `adhoc`) whose `emails` (or single `email`, from before several) include the email they verified with Google, lowercased. Admins read every booking. They create only ad hoc sessions (the fields in "Ad hoc sessions", never a `uid`; `emails` holds 1 to 10 valid addresses, each once, or a single `email` stands in for it), change only `photosReady` on other bookings and only the details and `photosReady` of ad hoc sessions, stamping `updatedAt` each time, and delete only ad hoc sessions. `uid`, `status`, `createdAt` and `createdBy` never change; `email` may only go, as a session moves to `emails`.
+- **Sharing.** A session's owner (the customer whose `uid` it carries, or a guest of an ad hoc session) may change its `sharedWith` and nothing else: up to 10 valid emails, each once. Whoever's verified Google email is in it reads the session, whatever its status. Someone it was shared with can't change it, and admins don't either.
 - **`site/home`.** Anyone reads it. Admins save it whole: `photos` (at most seven file names), `updatedAt` and `updatedBy`.
 - **Storage.** `_admin/gallery/` stays publicly readable (get and list). Admins add photos directly in it (JPEG, PNG or WebP, named `.jpg`, `.jpeg`, `.png` or `.webp`, under 20 MiB) and delete them. Under `galleries/<bookingId>/` only admins read, add (any image type, under 100 MiB) and delete. Admins may delete a cached zip in `gallery-zips/`, nothing more. There's no update anywhere, so nothing is ever overwritten.
-- **`getGalleryDownloadUrl`** serves the same people: the booking's `uid`, or for an ad hoc session the caller whose verified Google email matches. Ad hoc sessions need no payment.
+- **`getGalleryPhotoUrls` and `getGalleryDownloadUrl`** serve the same people:
+  the booking's `uid`, for an ad hoc session the caller whose verified Google
+  email is one of its emails, and anyone whose verified Google email is in its
+  `sharedWith`. Ad hoc sessions need no payment; a session shared with someone
+  still needs to be paid (or ad hoc) and its photos available. The first
+  callable signs each individual photo for the gallery; the second signs the
+  cached zip.
 
 No new IAM roles, function permissions, APIs or secrets are needed: the function reads the same bookings and bucket as before, and everything admins do goes through the rules.
 
@@ -347,7 +416,7 @@ CI doesn't evaluate the rules (it has no emulator); `flutter test` only checks t
 
 ```bash
 gcloud auth login            # once, as the owner
-bash scripts/test-rules.sh   # "firestore.rules: 149 of 149 cases pass", then storage.rules
+bash scripts/test-rules.sh   # "firestore.rules: 265 of 265 cases pass", then storage.rules
 ```
 
 Both are read-only: the script sends the rules and each case to the Firebase Rules API's test endpoint (`projects/brookie-babies:test`), which deploys nothing and reads no live data, and it never prints your access token. It lists any case that fails and exits with an error. Add cases to `rules-tests/firestore-cases.mjs` or `rules-tests/storage-cases.mjs` for what you change. Never test rules by writing to the live project.
@@ -356,11 +425,16 @@ Both are read-only: the script sends the rules and each case to the Firebase Rul
 
 Deploy the rules and the function **before** (or with) the site that relies on them. A site that's already live keeps working with newer rules and function (today's site only asks for what the new ones still allow). If a new site goes live first:
 
-- the query for ad hoc sessions shared by email is refused, so families see only their own bookings (it's logged, nothing breaks);
+- the queries for ad hoc sessions shared by email are refused, so families see only their own bookings (it's logged, nothing breaks);
 - reading `site/home` is refused, so the home page falls back to the first seven photos by name;
 - admins' reads and writes are refused, so the admin pages say they couldn't load or save;
+- with the rules from before several emails, sessions saved with `emails` can't be added or edited, and their guests don't see them;
+- with the rules from before sharing, **Share this session** says it couldn't share the session, and sessions shared with someone don't show for them;
 - with the new rules but the old function, guests see their ad hoc session but its download fails ("We couldn’t find this session’s photos");
-- with the new site but the old function, downloads work as before, showing only "Preparing your photos…" until they start (no progress or size).
+- with the new site before `getGalleryPhotoUrls` is deployed, **View photos**
+  shows its retry message; downloads still work. With a still older
+  `getGalleryDownloadUrl`, they show only "Preparing your photos…" until they
+  start (no progress or size).
 
 On pushes to `main`, CI deploys the backend before the site, but only once `BACKEND_DEPLOY_LIVE` is `true` (see below). Until then, deploy backend changes by hand from their branch before merging it (see "Deploying by hand").
 
@@ -431,7 +505,10 @@ firebase deploy --only functions,firestore:rules,storage
 
 #### Function runtime permissions
 
-The functions run as `375587092017-compute@developer.gserviceaccount.com`, which in this project has no broad (Editor) access. `scripts/setup-functions-runtime.sh` (project owner, once, idempotent) gives it exactly what `getGalleryDownloadUrl` needs:
+The functions run as `375587092017-compute@developer.gserviceaccount.com`,
+which in this project has no broad (Editor) access.
+`scripts/setup-functions-runtime.sh` (project owner, once, idempotent) gives
+it exactly what the two gallery functions need:
 
 - **Reading bookings:** read-only Firestore access (`roles/datastore.viewer`).
 - **Reading photos and saving the zips:** object access on the Storage bucket only (`roles/storage.objectUser`).
@@ -451,7 +528,12 @@ The same account also **builds** the functions. Since 2024 Cloud Build uses the 
 - **Saving the built image:** `roles/artifactregistry.writer` on the `gcf-artifacts` repository only.
 - **Writing build logs:** `roles/logging.logWriter` (project; it can't be granted lower).
 
-Never fix a failed build with Editor or `roles/cloudbuild.builds.builder`: this account also runs `getGalleryDownloadUrl`, and those roles reach every bucket, families' photos included. Even these narrow grants let the running function write to `gcf-artifacts`, the next build's image cache; giving the functions their own runtime account (`setGlobalOptions({serviceAccount})`, on the TODO list) would leave the compute account only building.
+Never fix a failed build with Editor or `roles/cloudbuild.builds.builder`: this
+account also runs the gallery functions, and those roles reach every bucket,
+families' photos included. Even these narrow grants let the running function
+write to `gcf-artifacts`, the next build's image cache; giving the functions
+their own runtime account (`setGlobalOptions({serviceAccount})`, on the TODO
+list) would leave the compute account only building.
 
 When a new function needs other data, add the role to this script, scoped as narrowly as possible.
 

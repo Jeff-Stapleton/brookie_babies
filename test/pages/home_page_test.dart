@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:brookie_babies/components/account_button.dart';
 import 'package:brookie_babies/components/featured_photos.dart';
 import 'package:brookie_babies/components/home_hero.dart';
 import 'package:brookie_babies/components/page_footer.dart';
@@ -8,12 +9,14 @@ import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:brookie_babies/widgets/brookie_logo.dart';
 import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:brookie_babies/widgets/network_photo.dart';
+import 'package:brookie_babies/widgets/package_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fake_photos.dart';
 import '../support/fakes.dart';
+import '../support/hidden_sections.dart';
 
 /// Holds each photoUrls answer until the test gives it: [loads] in order.
 class _HeldPortfolio extends FakePortfolioService {
@@ -70,7 +73,7 @@ void main() {
         for (final photo in tester.widgetList<NetworkPhoto>(photos)) photo.url,
       ];
 
-  homeTest('hero: the first photo with the logo and "Book a session"', (tester) async {
+  homeTest('hero: the first photo with the logo', (tester) async {
     await pumpHome(tester);
 
     final hero = find.byType(HomeHero);
@@ -78,8 +81,47 @@ void main() {
     expect(tester.getSemantics(hero), isSemantics(label: 'Brooke Stapleton Photography'));
     expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).first);
     expect(find.descendant(of: hero, matching: find.image(const AssetImage('assets/logo.png'))), findsOneWidget);
-    expect(bookButton(), findsOneWidget);
     expect(find.text('Sign in'), findsOneWidget);
+  });
+
+  group('while the introduction and the packages are hidden', () {
+    homeTest('the logo alone at the hero’s center, with nothing to book', (tester) async {
+      await pumpHome(tester);
+
+      final hero = find.byType(HomeHero);
+      final logo = find.descendant(of: hero, matching: find.byType(BrookieLogo));
+      expect(tester.getCenter(logo).dy, moreOrLessEquals(tester.getCenter(hero).dy, epsilon: 0.01));
+      expect(find.text('Book a session'), findsNothing);
+    });
+
+    homeTest('no introduction and no packages', (tester) async {
+      await pumpHome(tester);
+
+      expect(find.text('Little ones, while they’re little'), findsNothing);
+      expect(find.textContaining('Calm, unhurried sessions'), findsNothing);
+      expect(find.text('Choose your package'), findsNothing);
+      expect(find.byType(PackageCard), findsNothing);
+    });
+
+    for (final (size, gap) in const [(Size(1440, 900), 64.0), (Size(390, 844), 48.0)]) {
+      homeTest('the featured photos a section below the hero, the footer a section below them '
+          '(${size.width.round()}px)', (tester) async {
+        await pumpHome(tester, size: size);
+
+        expect(tester.getTopLeft(featured().first).dy - tester.getBottomLeft(find.byType(HomeHero)).dy, gap);
+        expect(tester.getTopLeft(find.byType(PageFooter)).dy - tester.getBottomLeft(featured().last).dy, gap);
+      });
+    }
+
+    homeTest('without photos: the logo alone on the quiet band, the footer a section below', (tester) async {
+      await pumpHome(tester, portfolio: FakePortfolioService());
+
+      final hero = find.byType(HomeHero);
+      expect(find.byType(NetworkPhoto), findsNothing);
+      expect(find.descendant(of: hero, matching: find.byType(BrookieLogo)), findsOneWidget);
+      expect(find.byType(FilledButton), findsNothing);
+      expect(tester.getTopLeft(find.byType(PageFooter)).dy - tester.getBottomLeft(hero).dy, 64);
+    });
   });
 
   homeTest('the logo takes its full size before it has loaded, so nothing moves', (tester) async {
@@ -94,6 +136,7 @@ void main() {
   });
 
   homeTest('"Book a session" scrolls to the packages', (tester) async {
+    offerPackages();
     await pumpHome(tester);
     expect(find.text('Choose your package').hitTestable(), findsNothing);
 
@@ -108,6 +151,7 @@ void main() {
   homeTest('with reduced motion, "Book a session" jumps straight there', (tester) async {
     tester.platformDispatcher.accessibilityFeaturesTestValue = FakeAccessibilityFeatures(disableAnimations: true);
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    offerPackages();
     await pumpHome(tester);
 
     await tester.tap(bookButton());
@@ -119,6 +163,7 @@ void main() {
   for (final (size, gap) in const [(Size(1440, 900), 64.0), (Size(390, 844), 48.0)]) {
     homeTest('"See packages" on another page comes back home to the packages (${size.width.round()}px)',
         (tester) async {
+      offerPackages();
       await pumpHome(tester, size: size);
       tester.state<NavigatorState>(find.byType(Navigator)).push(MaterialPageRoute<void>(
         builder: (context) => Scaffold(
@@ -142,6 +187,7 @@ void main() {
   }
 
   homeTest('the butter button shows a two-tone focus ring, only while it has keyboard focus', (tester) async {
+    offerPackages();
     await pumpHome(tester);
     final ring = find.ancestor(of: bookButton(), matching: find.byType(FocusRing));
     expect(tester.widget<FocusRing>(ring).visible, isFalse);
@@ -171,6 +217,7 @@ void main() {
   });
 
   homeTest('introduction: one display line and a lede, no placeholder text', (tester) async {
+    showIntroduction();
     await pumpHome(tester);
 
     const display = 'Little ones, while they’re little';
@@ -185,6 +232,7 @@ void main() {
   });
 
   homeTest('introduction: the display line takes its compact size on phones', (tester) async {
+    showIntroduction();
     await pumpHome(tester, size: const Size(390, 844));
 
     final style = tester.widget<Text>(find.text('Little ones, while they’re little')).style!;
@@ -254,8 +302,8 @@ void main() {
     await pumpHome(tester);
 
     expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9)[1]);
-    // Still on a photograph: the butter button.
-    expect(tester.widget<FilledButton>(bookButton()).style, isNotNull);
+    // Still on a photograph.
+    expect(tester.widget<AccountButton>(find.byType(AccountButton)).onPhoto, isTrue);
     // The featured photos start after the new hero; five make one row of three.
     expect(urls(tester, featured()), photos(9).sublist(2, 5));
   });
@@ -369,6 +417,7 @@ void main() {
   });
 
   homeTest('the butter button is for the photograph; it gives way if no photo loads', (tester) async {
+    offerPackages();
     server.broken.add(photos(1).single);
     tester.view.physicalSize = const Size(1440, 900);
     tester.view.devicePixelRatio = 1;
@@ -389,6 +438,7 @@ void main() {
   });
 
   homeTest('without photos the hero keeps the logo and the button', (tester) async {
+    offerPackages();
     await pumpHome(tester, portfolio: FakePortfolioService());
 
     expect(find.byType(NetworkPhoto), findsNothing);
@@ -399,6 +449,7 @@ void main() {
   });
 
   homeTest('a portfolio error is treated like having no photos', (tester) async {
+    offerPackages();
     await pumpHome(tester, portfolio: FakePortfolioService(photos(3))..error = Exception('offline'));
 
     expect(find.byType(NetworkPhoto), findsNothing);
@@ -424,31 +475,40 @@ void main() {
     }
   });
 
-  for (final textScale in const [1.0, 2.0]) {
-    for (final brightness in Brightness.values) {
-      for (final size in const [
-        Size(320, 568),
-        Size(360, 640),
-        Size(390, 844),
-        Size(844, 390),
-        Size(768, 1024),
-        Size(1440, 900),
-      ]) {
-        final name = '${brightness.name}, ${size.width.round()}x${size.height.round()}, text ×$textScale';
-        homeTest('lays out without overflow: $name', (tester) async {
-          tester.platformDispatcher.textScaleFactorTestValue = textScale;
-          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-          await pumpHome(tester, size: size, brightness: brightness);
-          // The hero on its photograph (still loading), with the butter button.
-          expect(tester.widget<FilledButton>(bookButton()).style, isNotNull);
-          expect(tester.takeException(), isNull);
+  for (final everything in const [false, true]) {
+    for (final textScale in const [1.0, 2.0]) {
+      for (final brightness in Brightness.values) {
+        for (final size in const [
+          Size(320, 568),
+          Size(360, 640),
+          Size(390, 844),
+          Size(844, 390),
+          Size(768, 1024),
+          Size(1440, 900),
+        ]) {
+          final name = '${brightness.name}, ${size.width.round()}x${size.height.round()}, text ×$textScale'
+              '${everything ? ', with the introduction and the packages' : ''}';
+          homeTest('lays out without overflow: $name', (tester) async {
+            tester.platformDispatcher.textScaleFactorTestValue = textScale;
+            addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+            if (everything) {
+              showIntroduction();
+              offerPackages();
+            }
+            await pumpHome(tester, size: size, brightness: brightness);
+            // The hero on its photograph (still loading), with the butter
+            // button when there is one.
+            expect(tester.widget<AccountButton>(find.byType(AccountButton)).onPhoto, isTrue);
+            if (everything) expect(tester.widget<FilledButton>(bookButton()).style, isNotNull);
+            expect(tester.takeException(), isNull);
 
-          await tester.drag(find.byType(SingleChildScrollView), const Offset(0, -40000));
-          await tester.pumpAndSettle();
+            await tester.drag(find.byType(SingleChildScrollView), const Offset(0, -40000));
+            await tester.pumpAndSettle();
 
-          expect(tester.takeException(), isNull);
-          expect(find.textContaining('Brooke Stapleton Photography').hitTestable(), findsWidgets);
-        });
+            expect(tester.takeException(), isNull);
+            expect(find.textContaining('Brooke Stapleton Photography').hitTestable(), findsWidgets);
+          });
+        }
       }
     }
   }

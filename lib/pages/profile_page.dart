@@ -332,10 +332,12 @@ class _NoSessions extends StatelessWidget {
     // Short enough to set on one line from about 740px wide.
     final band = EmptyState(
       message: 'No sessions yet. Your booking appears here once we’ve confirmed it.',
-      action: OutlinedButton(
-        onPressed: () => HomePage.showPackages(context),
-        child: const Text('See packages'),
-      ),
+      action: HomePage.offersPackages
+          ? OutlinedButton(
+              onPressed: () => HomePage.showPackages(context),
+              child: const Text('See packages'),
+            )
+          : null,
     );
     final email = this.email?.trim() ?? '';
     if (email.isEmpty) return band;

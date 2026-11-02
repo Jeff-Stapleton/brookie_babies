@@ -12,9 +12,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
+import '../support/hidden_sections.dart';
 
 const _noSessions = 'No sessions yet. Your booking appears here once we’ve confirmed it.';
 const _noPackage = 'Choose a package first, then pick a time for your session.';
+const _notBookable = 'Sessions can’t be booked online yet.';
 
 void main() {
   setUpAll(() async {
@@ -54,6 +56,7 @@ void main() {
     for (final brightness in Brightness.values) {
       testWidgets('$page (${brightness.name}): a sunk band, the sentence in body and ink, "See packages" inside',
           (tester) async {
+        offerPackages();
         await pump(tester, home, brightness: brightness);
         final c = brightness == Brightness.dark ? BrookieColors.dark : BrookieColors.light;
 
@@ -79,6 +82,7 @@ void main() {
 
     for (final width in [740.0, 768.0, 1024.0, 1440.0]) {
       testWidgets('$page at ${width.round()}px: the sentence sets on one line', (tester) async {
+        offerPackages();
         await pump(tester, home, width: width);
 
         final text = tester.getSize(find.text(sentence));
@@ -89,11 +93,30 @@ void main() {
 
     for (final width in [320.0, 390.0]) {
       testWidgets('$page at ${width.round()}px: the band fills the column and nothing overflows', (tester) async {
+        offerPackages();
         await pump(tester, home, width: width);
 
         final gutter = BrookieSpace.s4;
         expect(tester.getRect(bandBox).left, gutter);
         expect(tester.getRect(bandBox).width, width - 2 * gutter);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
+  for (final (page, home, sentence) in [
+    ('Your sessions', const ProfilePage(), _noSessions),
+    ('Book a session', const SchedulingPage(packageName: ''), _notBookable),
+  ]) {
+    for (final width in [320.0, 1440.0]) {
+      testWidgets('$page at ${width.round()}px, with no packages: just the sentence, s5 all round', (tester) async {
+        await pump(tester, home, width: width);
+
+        final box = tester.getRect(bandBox);
+        final text = tester.getRect(find.text(sentence));
+        expect(text.topLeft - box.topLeft, const Offset(BrookieSpace.s5, BrookieSpace.s5));
+        expect(box.bottom - text.bottom, BrookieSpace.s5);
+        expect(find.text('See packages'), findsNothing);
         expect(tester.takeException(), isNull);
       });
     }

@@ -255,12 +255,14 @@ class _TimesColumn extends StatelessWidget {
 
 /// Shown when there is nothing to book: the page was opened without a
 /// package (the bare /schedule route), or the package can't be paid for.
-/// Offers a way back to the packages, like "Your sessions" with no sessions.
+/// Offers a way back to the packages, like "Your sessions" with no sessions,
+/// while the site offers them.
 class _NoPackage extends StatelessWidget {
   const _NoPackage();
 
   @override
   Widget build(BuildContext context) {
+    if (!HomePage.offersPackages) return const EmptyState(message: 'Sessions can’t be booked online yet.');
     return EmptyState(
       message: 'Choose a package first, then pick a time for your session.',
       action: OutlinedButton(

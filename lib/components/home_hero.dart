@@ -23,7 +23,9 @@ class HomeHero extends StatefulWidget {
   /// Whether the photograph's link is still being looked up.
   final bool loading;
 
-  final VoidCallback onBook;
+  /// What "Book a session" does. Null leaves the button out, and the logo
+  /// alone at the center.
+  final VoidCallback? onBook;
 
   /// Called when [photo] can't be loaded, so the page can offer another.
   /// Until it does, the hero shows the quiet band.
@@ -62,6 +64,7 @@ class _HomeHeroState extends State<HomeHero> {
 
     final photo = widget.photo;
     final onPhoto = widget.loading || (photo != null && !_photoFailed);
+    final onBook = widget.onBook;
 
     return Semantics(
       container: true,
@@ -83,11 +86,13 @@ class _HomeHeroState extends State<HomeHero> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     BrookieLogo(width: disc / BrookieLogo.discFraction),
-                    const SizedBox(height: BrookieSpace.s6),
-                    if (onPhoto)
-                      _PhotoButton(onPressed: widget.onBook, child: const Text('Book a session'))
-                    else
-                      FilledButton(onPressed: widget.onBook, child: const Text('Book a session')),
+                    if (onBook != null) ...[
+                      const SizedBox(height: BrookieSpace.s6),
+                      if (onPhoto)
+                        _PhotoButton(onPressed: onBook, child: const Text('Book a session'))
+                      else
+                        FilledButton(onPressed: onBook, child: const Text('Book a session')),
+                    ],
                   ],
                 ),
               ),

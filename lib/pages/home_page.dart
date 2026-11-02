@@ -12,8 +12,21 @@ import 'package:flutter/rendering.dart';
 
 /// The landing page: the hero photograph, a short introduction with a few
 /// more photographs, the packages, and the footer.
+///
+/// The introduction and the packages wait on Brooke: see [showsIntroduction]
+/// and [offersPackages].
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  /// Whether the page shows its introduction. Off while Brooke rewrites it
+  /// (TODO.md, "Site content needed from Brooke").
+  static bool showsIntroduction = false;
+
+  /// Whether the site offers the packages: the page's "Choose your package",
+  /// the hero's "Book a session" that scrolls to it, and "See packages" on
+  /// Your sessions and Book a session. Off until Brooke decides what her
+  /// packages are (TODO.md, "Site content needed from Brooke").
+  static bool offersPackages = false;
 
   /// Goes back to the home page and scrolls to the packages, as "See
   /// packages" on the other pages promises. The home page is always the first
@@ -133,7 +146,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // The first is the hero, the rest are featured below the introduction.
+    // The first is the hero, the rest are featured below it.
     final photos = [
       for (final photo in _photos ?? const <Uri>[])
         if (!_failedPhotos.contains(photo)) photo,
@@ -149,20 +162,26 @@ class _HomePageState extends State<HomePage> {
             HomeHero(
               photo: hero,
               loading: _photos == null,
-              onBook: _scrollToPackages,
+              onBook: HomePage.offersPackages ? _scrollToPackages : null,
               onPhotoFailed: hero == null ? null : () => _leaveOut(hero),
             ),
-            SizedBox(height: sectionGap),
-            const _Introduction(),
+            if (HomePage.showsIntroduction) ...[
+              SizedBox(height: sectionGap),
+              const _Introduction(),
+            ],
             ContentWidth(
               child: FeaturedPhotos(
                 photos: photos.skip(1).toList(),
-                padding: const EdgeInsets.only(top: BrookieSpace.s6),
+                // Close under the introduction. Without it, a section below
+                // the hero, as padding so it goes when there's no grid.
+                padding: EdgeInsets.only(top: HomePage.showsIntroduction ? BrookieSpace.s6 : sectionGap),
                 onPhotoFailed: _leaveOut,
               ),
             ),
-            SizedBox(height: sectionGap),
-            Packages(key: _packagesKey),
+            if (HomePage.offersPackages) ...[
+              SizedBox(height: sectionGap),
+              Packages(key: _packagesKey),
+            ],
             SizedBox(height: sectionGap),
             const PageFooter(),
           ],

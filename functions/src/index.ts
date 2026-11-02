@@ -67,10 +67,12 @@ export const getGalleryDownloadUrl = onCall<
 );
 
 /**
- * Callable: {bookingId} -> {photos: [{name, url}], expiresAt}. Each URL
- * displays one photo from a gallery the caller may download and expires after
- * 60 minutes. Access, payment and readiness checks are the same as the zip
- * callable above.
+ * Callable: {bookingId, adminPreview?} ->
+ * {photos: [{name, url}], expiresAt}. Each URL displays one photo from a
+ * gallery the caller may download and expires after 60 minutes. Access,
+ * payment and readiness checks are the same as the zip callable above.
+ * With adminPreview: true, an admin may load the same gallery before it is
+ * available to the family.
  */
 export const getGalleryPhotoUrls = onCall<
   unknown,

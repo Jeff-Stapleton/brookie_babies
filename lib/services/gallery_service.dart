@@ -94,8 +94,9 @@ class GalleryException implements Exception {
 /// the real implementation; tests use a fake.
 abstract class GalleryService {
   /// Lists every photo the signed-in family may see, each through a
-  /// short-lived private link.
-  Future<List<GalleryPhoto>> loadPhotos(String bookingId);
+  /// short-lived private link. With [adminPreview], the signed-in admin may
+  /// see the same gallery before it is available to the family.
+  Future<List<GalleryPhoto>> loadPhotos(String bookingId, {bool adminPreview = false});
 
   /// Zips the photos for [bookingId] and returns a download link. Building a
   /// large gallery's zip can take minutes; [onProgress] hears how it's going
@@ -113,10 +114,13 @@ class FunctionsGalleryService implements GalleryService {
   final FirebaseFunctions _functions;
 
   @override
-  Future<List<GalleryPhoto>> loadPhotos(String bookingId) async {
+  Future<List<GalleryPhoto>> loadPhotos(String bookingId, {bool adminPreview = false}) async {
     try {
       final callable = _functions.httpsCallable('getGalleryPhotoUrls');
-      final result = await callable.call<Object?>({'bookingId': bookingId});
+      final result = await callable.call<Object?>({
+        'bookingId': bookingId,
+        if (adminPreview) 'adminPreview': true,
+      });
       return parseGalleryPhotos(result.data);
     } on GalleryException {
       rethrow;

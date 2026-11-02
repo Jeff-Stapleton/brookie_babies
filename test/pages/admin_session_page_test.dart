@@ -9,8 +9,10 @@ import 'package:brookie_babies/models/picked_photo.dart';
 import 'package:brookie_babies/models/session_lookup.dart';
 import 'package:brookie_babies/pages/admin_page.dart';
 import 'package:brookie_babies/pages/admin_session_page.dart';
+import 'package:brookie_babies/pages/session_gallery_page.dart';
 import 'package:brookie_babies/pages/session_form_page.dart';
 import 'package:brookie_babies/services/admin_service.dart';
+import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/utilities/leave_warning.dart';
 import 'package:brookie_babies/widgets/brookie_dialog.dart';
 import 'package:brookie_babies/widgets/empty_state.dart';
@@ -46,13 +48,14 @@ FakeAdminService _service({
 Future<void> _pumpSession(
   WidgetTester tester, {
   FakeAdminService? admin,
+  FakeGalleryService? gallery,
   FakePhotoPicker? picker,
   String id = 's1',
   Size size = const Size(1440, 900),
   Brightness brightness = Brightness.light,
 }) =>
     pumpAdminPage(tester, AdminSessionPage(sessionId: id),
-        admin: admin ?? _service(), picker: picker, size: size, brightness: brightness);
+        admin: admin ?? _service(), gallery: gallery, picker: picker, size: size, brightness: brightness);
 
 /// [label] inside the open dialog.
 Finder _inDialog(String label) => find.descendant(of: find.byType(BrookieDialog), matching: find.text(label));
@@ -171,6 +174,35 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.widget<SessionFormPage>(find.byType(SessionFormPage)).session?.id, 's1');
+    });
+
+    testWidgets('"Preview session" opens the customer gallery before the photos are available', (tester) async {
+      final gallery = FakeGalleryService()
+        ..galleryPhotos = [
+          GalleryPhoto(
+            name: 'IMG_1.jpg',
+            url: Uri.parse('https://storage.example/galleries/s1/IMG_1.jpg?signature=1'),
+          ),
+        ];
+      await _pumpSession(tester, gallery: gallery);
+
+      await tapInView(tester, find.text('Preview session'));
+      await tester.pumpAndSettle();
+
+      final page = tester.widget<SessionGalleryPage>(find.byType(SessionGalleryPage));
+      expect(page.booking.id, 's1');
+      expect(page.adminPreview, isTrue);
+      expect(gallery.photoRequests, ['s1']);
+      expect(gallery.adminPreviewRequests, ['s1']);
+      expect(find.text('Photo gallery'), findsOneWidget);
+      expect(tester.widget<BrookieTopBar>(find.byType(BrookieTopBar)).showAdminLink, isFalse);
+      expect(find.bySemanticsLabel('Cover photo from The Harper family'), findsOneWidget);
+    });
+
+    testWidgets('doesn’t offer a preview until the session has a photo', (tester) async {
+      await _pumpSession(tester, admin: _service(photos: const []));
+
+      expect(find.text('Preview session'), findsNothing);
     });
 
     testWidgets('the account menu has no way off the page but back and "Sign out"', (tester) async {

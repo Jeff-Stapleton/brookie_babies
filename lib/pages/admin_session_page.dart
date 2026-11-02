@@ -11,6 +11,7 @@ import 'package:brookie_babies/models/session_lookup.dart';
 import 'package:brookie_babies/models/session_time.dart';
 import 'package:brookie_babies/models/stored_photo.dart';
 import 'package:brookie_babies/pages/admin_page.dart';
+import 'package:brookie_babies/pages/session_gallery_page.dart';
 import 'package:brookie_babies/pages/session_form_page.dart';
 import 'package:brookie_babies/services/admin_service.dart';
 import 'package:brookie_babies/services/app_services.dart';
@@ -687,6 +688,19 @@ class _SessionBodyState extends State<_SessionBody> {
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (context) => SessionFormPage(session: booking)));
   }
 
+  /// Opens the customer gallery with admin-only links, without making the
+  /// photos available first.
+  void _preview(Booking booking) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => SessionGalleryPage(
+          booking: booking,
+          adminPreview: true,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final lookup = _shown;
@@ -711,10 +725,22 @@ class _SessionBodyState extends State<_SessionBody> {
 
   Widget _session(BuildContext context, Booking booking) {
     final gap = SizedBox(height: BrookieLayout.sectionGap(context));
+    final showPreview = _downloadableId.hasMatch(booking.id) && (_photos?.isNotEmpty ?? false);
+    final canPreview = showPreview &&
+        !_queue.isBusy &&
+        _deletingAll == null &&
+        _deletingPhotos.isEmpty &&
+        !_deletingSession &&
+        _savingMainPhoto == null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Details(booking: booking, onEdit: booking.isAdHoc ? () => _edit(booking) : null),
+        _Details(
+          booking: booking,
+          showPreview: showPreview,
+          onPreview: canPreview ? () => _preview(booking) : null,
+          onEdit: booking.isAdHoc ? () => _edit(booking) : null,
+        ),
         gap,
         _WhoCanDownload(booking: booking),
         gap,
@@ -978,9 +1004,19 @@ class _Spinner extends StatelessWidget {
 
 /// Who it's for, the package, when and where, and how it was paid for.
 class _Details extends StatelessWidget {
-  const _Details({required this.booking, required this.onEdit});
+  const _Details({
+    required this.booking,
+    required this.showPreview,
+    required this.onPreview,
+    required this.onEdit,
+  });
 
   final Booking booking;
+
+  /// Whether there are photos to preview. [onPreview] may still be null while
+  /// those photos are changing.
+  final bool showPreview;
+  final VoidCallback? onPreview;
 
   /// Opens the form; null for bookings, whose details the app can't change.
   final VoidCallback? onEdit;
@@ -1015,12 +1051,25 @@ class _Details extends StatelessWidget {
           const SizedBox(height: BrookieSpace.s2),
           DetailLine(icon: Icons.place_outlined, text: location),
         ],
-        if (onEdit != null) ...[
+        if (showPreview || onEdit != null) ...[
           const SizedBox(height: BrookieSpace.s5),
-          OutlinedButton.icon(
-            onPressed: onEdit,
-            icon: const Icon(Icons.edit_outlined),
-            label: const Text('Edit details'),
+          Wrap(
+            spacing: BrookieSpace.s3,
+            runSpacing: BrookieSpace.s2,
+            children: [
+              if (showPreview)
+                OutlinedButton.icon(
+                  onPressed: onPreview,
+                  icon: const Icon(Icons.visibility_outlined),
+                  label: const Text('Preview session'),
+                ),
+              if (onEdit != null)
+                OutlinedButton.icon(
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit details'),
+                ),
+            ],
           ),
         ],
       ],

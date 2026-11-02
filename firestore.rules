@@ -22,11 +22,12 @@ service cloud.firestore {
     }
 
     // bookings/{bookingId}. Customers' bookings: {uid, email, packageName,
-    // date, time, location, status, photosReady, createdAt}, written only by
-    // the server or by the photographer in the console. Ad hoc sessions (for
-    // family and friends, no payment): {status: 'adhoc', name, emails,
-    // packageName?, date, time?, location?, photosReady, createdAt,
-    // createdBy}, written by admins; they have no uid, because the guests are
+    // date, time, location, status, photosReady, mainPhoto?, createdAt},
+    // written only by the server or by the photographer in the console. Ad
+    // hoc sessions (for family and friends, no payment): {status: 'adhoc',
+    // name, emails, packageName?, date, time?, location?, photosReady,
+    // mainPhoto?, createdAt, createdBy}, written by admins; they have no uid,
+    // because the guests are
     // known only by the Google emails the session is shared with. One added
     // before a session could have several emails has a single `email`
     // instead of `emails` (validGuests). Either kind may also have
@@ -107,8 +108,9 @@ service cloud.firestore {
                         && request.resource.data.updatedAt == request.time
                         && (resource.data.get('status', null) == 'adhoc'
                             ? validAdHocUpdate()
-                            : changedKeys().hasOnly(['photosReady', 'updatedAt'])
-                              && validPhotosReadyChange()))
+                            : changedKeys().hasOnly(['photosReady', 'mainPhoto', 'updatedAt'])
+                              && validPhotosReadyChange()
+                              && validMainPhotoChange()))
                     || (isOwner()
                         && changedKeys().hasOnly(['sharedWith'])
                         && validEmailList(request.resource.data.sharedWith, 0));
@@ -197,6 +199,19 @@ service cloud.firestore {
         || request.resource.data.photosReady is bool;
     }
 
+    // The optional name of the photo shown at the top of the session
+    // gallery, relative to galleries/{bookingId}/. The app also confirms it
+    // is in that folder. The gallery function only compares this value with
+    // photos it already listed and authorized; it never uses it to build a
+    // Storage path.
+    function validMainPhotoChange() {
+      return !('mainPhoto' in changedKeys())
+        || !('mainPhoto' in request.resource.data)
+        || (request.resource.data.mainPhoto is string
+            && request.resource.data.mainPhoto.size() >= 1
+            && request.resource.data.mainPhoto.size() <= 1024);
+    }
+
     // An ad hoc session's details can be edited. Only the optional fields
     // can be removed (FieldValue.delete()), and `email`, as a session from
     // before several emails moves to `emails`; any field that changes must
@@ -205,12 +220,13 @@ service cloud.firestore {
       let data = request.resource.data;
       let changed = changedKeys();
       return changed.hasOnly(['name', 'emails', 'email', 'packageName', 'date',
-                              'time', 'location', 'photosReady', 'updatedAt'])
-        && removedKeys().hasOnly(['email', 'packageName', 'time', 'location'])
+                              'time', 'location', 'photosReady', 'mainPhoto', 'updatedAt'])
+        && removedKeys().hasOnly(['email', 'packageName', 'time', 'location', 'mainPhoto'])
         && (!('name' in changed) || validName(data))
         && (!(('emails' in changed) || ('email' in changed)) || validGuests(data))
         && (!('date' in changed) || validDate(data))
         && validPhotosReadyChange()
+        && validMainPhotoChange()
         && (!('packageName' in changed) || !('packageName' in data)
             || validPackageName(data))
         && (!('time' in changed) || !('time' in data) || validTime(data))

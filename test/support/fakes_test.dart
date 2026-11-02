@@ -114,6 +114,7 @@ void main() {
           .having((e) => e.message, 'message', kAdminDeniedMessage));
 
       await expectLater(admin.setPhotosReady('gone', true), refused);
+      await expectLater(admin.setMainPhoto('gone', null), refused);
       await expectLater(admin.updateSession(testSession('gone'), harper), refused);
       await admin.deleteSession('gone');
 
@@ -196,6 +197,11 @@ void main() {
       expect(upload.progress.value, 1);
       expect(admin.sessionPhotos['s1'], ['IMG_1.jpg']);
       expect((await admin.listSessionPhotos('s1')).single.fullPath, 'galleries/s1/IMG_1.jpg');
+
+      admin.sessions['s1'] = testSession('s1');
+      await admin.setMainPhoto('s1', 'IMG_1.jpg');
+      await admin.setPhotosReady('s1', true);
+      expect(admin.sessions['s1']!.mainPhoto, 'IMG_1.jpg');
     });
 
     test('uploads fail with any kind, and cancel as cancelled', () async {

@@ -650,6 +650,40 @@ describe("getGalleryPhotos", {timeout: 10_000}, () => {
     assert.equal(bucket.readStreamsOpened, 0);
   });
 
+  test("puts the booking's exact main photo first for the cover", async () => {
+    addBooking(BOOKING_ID, {mainPhoto: "album/hero:portrait.jpg"});
+    bucket.put("galleries/b1/a-first.jpg", "first by name");
+    bucket.put("galleries/b1/album/hero:portrait.jpg", "chosen");
+
+    const result = await callPhotos();
+
+    assert.deepEqual(result.photos, [
+      {
+        // The response name stays safe for clients and zip-style display,
+        // while the choice matched the exact Storage-relative name.
+        name: "album/hero_portrait.jpg",
+        url: "https://storage.example/galleries/b1/album/hero:portrait.jpg?signature=1",
+      },
+      {
+        name: "a-first.jpg",
+        url: "https://storage.example/galleries/b1/a-first.jpg?signature=2",
+      },
+    ]);
+  });
+
+  test("ignores a stale or malformed main photo", async () => {
+    bucket.put("galleries/b1/a-first.jpg", "first");
+    bucket.put("galleries/b1/z-last.jpg", "last");
+    for (const mainPhoto of ["gone.jpg", 7, null]) {
+      addBooking(BOOKING_ID, {mainPhoto});
+      const result = await callPhotos();
+      assert.deepEqual(result.photos.map((photo) => photo.name), [
+        "a-first.jpg",
+        "z-last.jpg",
+      ]);
+    }
+  });
+
   test("uses the same private access and readiness checks as the zip", async () => {
     addBooking(BOOKING_ID, {uid: "someone-else"});
     bucket.put("galleries/b1/a.jpg", "photo");

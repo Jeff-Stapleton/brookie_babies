@@ -245,19 +245,24 @@ export async function handleGalleryPhotosRequest(
 }
 
 /**
- * Returns short-lived URLs for every photo in a gallery the caller may see.
- * Signing is bounded rather than fully parallel, so a large gallery neither
- * serializes hundreds of network calls nor bursts all of them at IAM.
+ * Returns short-lived URLs for every photo in a gallery the caller may see,
+ * with its chosen main photo first (otherwise name order). Signing is bounded
+ * rather than fully parallel, so a large gallery neither serializes hundreds
+ * of network calls nor bursts all of them at IAM.
  */
 export async function getGalleryPhotos(
   deps: GalleryDeps,
   caller: CallerAuth,
   data: unknown,
 ): Promise<GalleryPhotoList> {
-  const {photos} = await authorizedGallery(deps, caller, data);
+  const {booking, photos} = await authorizedGallery(deps, caller, data);
   const expires = new Date(deps.now().getTime() + SIGNED_URL_TTL_MS);
   return {
-    photos: await signGalleryPhotos(deps.bucket, photos, expires),
+    photos: await signGalleryPhotos(
+      deps.bucket,
+      mainPhotoFirst(photos, booking.mainPhoto),
+      expires,
+    ),
     expiresAt: expires.toISOString(),
   };
 }
@@ -483,6 +488,8 @@ export interface Photo {
   file: SourceFileLike;
   /** Full object name, e.g. galleries/abc/IMG_0001.jpg. */
   name: string;
+  /** Exact object name relative to the session folder. */
+  relativeName: string;
   /** Sanitized, unique path inside the zip. */
   entryName: string;
   generation: string;
@@ -511,8 +518,9 @@ export function selectPhotos(
 
   const used = new Set<string>();
   return candidates.map((file) => {
+    const relativeName = file.name.slice(prefix.length);
     const entryName = uniqueEntryName(
-      sanitizeEntryName(file.name.slice(prefix.length)),
+      sanitizeEntryName(relativeName),
       used,
     );
     const mtime = file.metadata.updated
@@ -521,12 +529,35 @@ export function selectPhotos(
     return {
       file,
       name: file.name,
+      relativeName,
       entryName,
       generation: String(file.metadata.generation ?? ""),
       size: parseSize(file.metadata.size),
       mtime: mtime && !Number.isNaN(mtime.getTime()) ? mtime : undefined,
     };
   });
+}
+
+/**
+ * Puts the booking's chosen main photo first for the gallery cover. The
+ * choice is compared with an already-authorized listing, never turned into a
+ * Storage path. A missing, malformed or stale choice leaves name order alone.
+ * The zip keeps its own name order.
+ */
+export function mainPhotoFirst(
+  photos: readonly Photo[],
+  chosen: unknown,
+): Photo[] {
+  const index =
+    typeof chosen === "string"
+      ? photos.findIndex((photo) => photo.relativeName === chosen)
+      : -1;
+  if (index <= 0) return [...photos];
+  return [
+    photos[index],
+    ...photos.slice(0, index),
+    ...photos.slice(index + 1),
+  ];
 }
 
 /** The photos' total size from the listing, or null if one wasn't listed. */

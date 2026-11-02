@@ -66,11 +66,13 @@ void main() {
 
   group('firestore.rules', () {
     late FakeFirestore db;
+    late FakeStorage storage;
     late FirebaseAdminService admin;
 
     setUp(() {
       db = FakeFirestore();
-      admin = FirebaseAdminService(db, FakeStorage(), FakeFirebaseAuth(uid: 'admin-uid'));
+      storage = FakeStorage();
+      admin = FirebaseAdminService(db, storage, FakeFirebaseAuth(uid: 'admin-uid'));
     });
 
     final everything = SessionDetails(
@@ -123,9 +125,12 @@ void main() {
       await admin.updateSession(session, onlyRequired);
       // One from before several emails moves its email to emails.
       await admin.updateSession(testSession('s1', email: 'harper@example.com'), onlyRequired);
+      storage.objects['galleries/s1/edits/main.jpg'] = 'image/jpeg';
+      await admin.setMainPhoto('s1', 'edits/main.jpg');
+      await admin.setMainPhoto('s1', null);
 
       expect(
-        {...keysOf(db.writes[0].data), ...keysOf(db.writes[1].data), ...keysOf(db.writes[3].data)},
+        {for (final write in db.writes) ...keysOf(write.data)},
         _listAfter(adHocUpdate, 'changed.hasOnly('),
       );
       final removed = {
@@ -152,12 +157,15 @@ void main() {
       expect(_find(bookings, r'validEmailList\(request\.resource\.data\.sharedWith, (\d+)\)'), '0');
     });
 
-    test('a customer’s booking changes only photosReady (and updatedAt)', () async {
+    test('a customer’s booking changes only delivery fields (and updatedAt)', () async {
       db.docs['bookings/b1'] = {'status': 'paid', 'uid': 'customer-uid'};
+      storage.objects['galleries/b1/main.jpg'] = 'image/jpeg';
 
       await admin.setPhotosReady('b1', true);
+      await admin.setMainPhoto('b1', 'main.jpg');
 
-      expect(keysOf(db.writes.single.data), _listAfter(bookings, ': changedKeys().hasOnly('));
+      expect({for (final write in db.writes) ...keysOf(write.data)},
+          _listAfter(bookings, ': changedKeys().hasOnly('));
     });
 
     test('the field limits match SessionRules', () {
@@ -167,6 +175,10 @@ void main() {
 
       final location = _block(firestore, 'function validLocation(data) {');
       expect(int.parse(_find(location, r'data\.location\.size\(\) <= (\d+)')), SessionRules.locationMaxLength);
+
+      final mainPhoto = _block(firestore, 'function validMainPhotoChange() {');
+      expect(int.parse(_find(mainPhoto, r'data\.mainPhoto\.size\(\) <= (\d+)')),
+          SessionRules.mainPhotoMaxLength);
 
       final package = _block(firestore, 'function validPackageName(data) {');
       expect(_listAfter(package, 'data.packageName in'), SessionRules.packageNames.toSet());

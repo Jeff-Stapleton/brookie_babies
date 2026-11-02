@@ -183,6 +183,7 @@ Booking withSharedWith(Booking b, List<String> sharedWith) => Booking(
       location: b.location,
       status: b.status,
       photosReady: b.photosReady,
+      mainPhoto: b.mainPhoto,
       uid: b.uid,
       email: b.email,
       emails: b.emails,
@@ -309,6 +310,7 @@ Booking testSession(
   BookingStatus status = BookingStatus.adhoc,
   String? packageName,
   bool photosReady = false,
+  String? mainPhoto,
   String? uid,
   List<String> sharedWith = const [],
 }) {
@@ -321,6 +323,7 @@ Booking testSession(
     location: location,
     status: status,
     photosReady: photosReady,
+    mainPhoto: mainPhoto,
     uid: uid ?? (adHoc ? null : 'uid-$id'),
     email: email,
     emails: emails ?? (adHoc && email == null ? const ['harper@example.com'] : const []),
@@ -542,6 +545,7 @@ class FakeAdminService implements AdminService {
     String id,
     SessionDetails details, {
     required bool photosReady,
+    String? mainPhoto,
     List<String> sharedWith = const [],
   }) =>
       Booking(
@@ -552,6 +556,7 @@ class FakeAdminService implements AdminService {
         location: details.location,
         status: BookingStatus.adhoc,
         photosReady: photosReady,
+        mainPhoto: mainPhoto,
         emails: [
           for (final email in details.emails)
             if (SessionRules.normalizeEmail(email) case final normalized when normalized.isNotEmpty) normalized,
@@ -589,6 +594,7 @@ class FakeAdminService implements AdminService {
       sessionId,
       details,
       photosReady: saved?.photosReady ?? false,
+      mainPhoto: saved?.mainPhoto,
       sharedWith: saved?.sharedWith ?? const [],
     );
     notifyChanged();
@@ -601,8 +607,13 @@ class FakeAdminService implements AdminService {
     if (!session.isAdHoc) throw StateError('updateSession(${session.id}) is for ad hoc sessions only');
     await _write('updateSession', 'updateSession(${session.id})');
     final current = _session(session.id);
-    sessions[session.id] =
-        _adHoc(session.id, details, photosReady: current.photosReady, sharedWith: current.sharedWith);
+    sessions[session.id] = _adHoc(
+      session.id,
+      details,
+      photosReady: current.photosReady,
+      mainPhoto: current.mainPhoto,
+      sharedWith: current.sharedWith,
+    );
     notifyChanged();
   }
 
@@ -618,6 +629,7 @@ class FakeAdminService implements AdminService {
       location: s.location,
       status: s.status,
       photosReady: ready,
+      mainPhoto: s.mainPhoto,
       uid: s.uid,
       email: s.email,
       emails: s.emails,
@@ -643,6 +655,34 @@ class FakeAdminService implements AdminService {
     _fail('listSessionPhotos');
     final names = [...?sessionPhotos[id]]..sort();
     return [for (final name in names) StoredPhoto(name: name, fullPath: 'galleries/$id/$name')];
+  }
+
+  @override
+  Future<void> setMainPhoto(String id, String? name) async {
+    await _write('setMainPhoto', 'setMainPhoto($id, ${name ?? 'first by name'})');
+    final session = _session(id);
+    if (name != null && !(sessionPhotos[id]?.contains(name) ?? false)) {
+      throw const AdminException(
+        'That photo is no longer in this session. Refresh the page and choose another.',
+        AdminErrorKind.notFound,
+      );
+    }
+    sessions[id] = Booking(
+      id: session.id,
+      packageName: session.packageName,
+      date: session.date,
+      time: session.time,
+      location: session.location,
+      status: session.status,
+      photosReady: session.photosReady,
+      mainPhoto: name,
+      uid: session.uid,
+      email: session.email,
+      emails: session.emails,
+      sharedWith: session.sharedWith,
+      name: session.name,
+    );
+    notifyChanged();
   }
 
   @override

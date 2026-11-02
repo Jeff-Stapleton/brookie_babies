@@ -10,6 +10,7 @@ void main() {
     'location': '10652 S Wild Rice Dr.',
     'status': 'paid',
     'photosReady': true,
+    'mainPhoto': 'edits/IMG_2.jpg',
   };
 
   test('reads every field', () {
@@ -22,6 +23,7 @@ void main() {
     expect(booking.location, '10652 S Wild Rice Dr.');
     expect(booking.status, BookingStatus.paid);
     expect(booking.photosReady, isTrue);
+    expect(booking.mainPhoto, 'edits/IMG_2.jpg');
   });
 
   test('optional fields default to absent', () {
@@ -35,14 +37,29 @@ void main() {
     expect(booking.location, isNull);
     expect(booking.status, BookingStatus.pending);
     expect(booking.photosReady, isFalse);
+    expect(booking.mainPhoto, isNull);
   });
 
   test('drops malformed optional fields', () {
-    final booking = Booking.fromMap('b1', {...valid, 'time': '9:30am', 'location': '', 'photosReady': 'yes'})!;
+    final booking = Booking.fromMap('b1', {
+      ...valid,
+      'time': '9:30am',
+      'location': '',
+      'photosReady': 'yes',
+      'mainPhoto': 7,
+    })!;
 
     expect(booking.time, isNull);
     expect(booking.location, isNull);
     expect(booking.photosReady, isFalse);
+    expect(booking.mainPhoto, isNull);
+  });
+
+  test('keeps a main photo’s exact Storage object name', () {
+    final booking = Booking.fromMap('b1', {...valid, 'mainPhoto': ' edits/IMG 2.jpg '})!;
+
+    expect(booking.mainPhoto, ' edits/IMG 2.jpg ');
+    expect(Booking.fromMap('b1', {...valid, 'mainPhoto': ''})!.mainPhoto, isNull);
   });
 
   test('forgives spaces and the case of status in hand-typed fields', () {

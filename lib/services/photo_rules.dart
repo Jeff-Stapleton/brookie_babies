@@ -107,6 +107,10 @@ abstract final class PhotoRules {
 /// The firestore.rules limits on an ad hoc session's fields (a `bookings`
 /// document with status `adhoc`), for the session form and AdminService.
 abstract final class SessionRules {
+  /// A session's optional `mainPhoto` is a Storage object name relative to
+  /// its gallery. Cloud Storage object names are at most 1024 bytes.
+  static const mainPhotoMaxLength = 1024;
+
   /// `name`, once trimmed, is 1 to this many characters.
   static const nameMaxLength = 100;
 

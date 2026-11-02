@@ -12,7 +12,7 @@ Payment Link to pay. Signed-in families see "Your sessions", open a private
 full-bleed gallery for each finished session and download its photos as one
 zip. Admins (the studio) use an admin portal at `/#/admin` to add ad hoc
 sessions for family and friends, upload photos, make them available and choose
-the home page photos.
+the main photo for each session gallery and the home page photos.
 
 For now the home page leaves out the introduction and the packages, and with
 the packages every way into booking, until Brooke settles them
@@ -65,7 +65,7 @@ lib/
     booking.dart          Booking: one session (paid booking or ad hoc), parsed from a Firestore `bookings`
                           document; title, familyTitle, isAdHoc, canDeliverPhotos, guestEmails (an ad hoc
                           session's `emails`, or an older one's single `email`), sharedWith (who its owner
-                          shared it with); problemWith() says why one can't be read
+                          shared it with), and the optional mainPhoto; problemWith() says why one can't be read
     picked_photo.dart     PickedPhoto: a file chosen in the browser's picker (name, size, type, the File itself)
     session_details.dart  SessionDetails: what the session form saves for an ad hoc session
     session_lookup.dart   SessionLookup (SessionFound / SessionMissing / SessionUnreadable) and UnreadableBooking
@@ -87,8 +87,8 @@ lib/
     portfolio_service.dart PortfolioService + StoragePortfolioService (home page photo links: the names in
                           site/home, or with none chosen or no answer in 3 s, image files in _admin/gallery by
                           name; at most `limit`, each fetched on its own so one failure drops one photo)
-    admin_service.dart    AdminService + FirebaseAdminService: sessions, session photos, the home page library
-                          and site/home; AdminException/AdminErrorKind; newSessionData()/sessionChanges() write
+    admin_service.dart    AdminService + FirebaseAdminService: sessions, session photos and each gallery's
+                          mainPhoto, the home page library and site/home; AdminException/AdminErrorKind; newSessionData()/sessionChanges() write
                           exactly the keys firestore.rules allows; Firestore writes time out after 20 s
     photo_rules.dart      PhotoRules and SessionRules: storage.rules' and firestore.rules' limits in Dart
                           (sizes, types, names, session fields), checked before every upload and write
@@ -99,12 +99,12 @@ lib/
                           HomePage.reloadPhotos(); showsIntroduction and offersPackages (both off for now)
     scheduling_page.dart  "Book a session": calendar + session times, then sign-in and the Payment Link
     profile_page.dart     "Your sessions": account, upcoming and past sessions (route /profile)
-    session_gallery_page.dart  One private family gallery: full-bleed first photo, session title/date,
+    session_gallery_page.dart  One private family gallery: full-bleed main photo (first by name by default), session title/date,
                           responsive print grid and a full-screen previous/next photo viewer
     admin_page.dart       "Admin" (route /admin): home page photos card, "Add a session", every session
                           (upcoming, past, unreadable); AdminPage.open(), AdminPage.returnWithNotice()
     admin_session_page.dart  One session: details, who can download and the share message, "Make photos
-                          available" / "Hide photos", uploads, the photo list; edit and delete for ad hoc ones
+                          available" / "Hide photos", uploads, the main-photo choice and photo list; edit and delete for ad hoc ones
     session_form_page.dart   Add or edit an ad hoc session (name, up to ten emails, package, date, time, location)
     home_photos_admin_page.dart  "Home page photos": the chosen photos in order, the public library, uploads,
                           "Save home page"
@@ -191,7 +191,8 @@ test/                     Widget and unit tests; mirrors lib/
 functions/                Cloud Functions, TypeScript on Node 24 (own package.json; not a Dart package)
   src/index.ts            Function definitions (region us-central1); getGalleryPhotoUrls, getGalleryDownloadUrl
   src/gallery.ts          Shared gallery access/listing logic with injected Firestore/Storage, so tests use
-                          in-memory fakes; signs individual photo links with bounded concurrency; canDownload():
+                          in-memory fakes; puts a valid bookings.mainPhoto first for the gallery cover, then
+                          signs individual photo links with bounded concurrency; canDownload():
                           the booking's uid, or a verified email in an ad hoc session's emails or any session's
                           sharedWith; progressSender: progress
                           chunks to the caller, at most one per 500 ms (the first and last always)
@@ -199,7 +200,7 @@ functions/                Cloud Functions, TypeScript on Node 24 (own package.js
 firestore.rules           bookings: customers read their own (uid), guests ad hoc sessions shared with their
                           verified email, and anyone a session's sharedWith lists; owners change only
                           sharedWith; admins (claim admin: true) create/edit/delete ad hoc sessions and set
-                          photosReady; site/home: public get, admin writes
+                          photosReady/mainPhoto; site/home: public get, admin writes
 storage.rules             _admin/gallery/: public read, admin add (JPEG/PNG/WebP < 20 MiB) and delete;
                           galleries/: admin only (< 100 MiB); gallery-zips/: admin delete; no overwrites
 rules-tests/              Rules API test cases for both rules files (firestore-cases.mjs, storage-cases.mjs),
@@ -259,8 +260,9 @@ scripts/
    payment tag). Both callables first check that the booking belongs to the
    caller (its uid, one of an ad hoc session's emails matching the caller's
    verified Google email, or its `sharedWith`). `getGalleryPhotoUrls` lists
-   `galleries/<bookingId>/` and returns a one-hour signed link per photo.
-   `SessionGalleryPage` uses the first file by name as a full-bleed cover,
+   `galleries/<bookingId>/`, moves the booking's valid `mainPhoto` to the
+   front (otherwise leaving name order), and returns a one-hour signed link
+   per photo. `SessionGalleryPage` uses that first link as a full-bleed cover,
    places the title and date below it, then lazily builds a responsive 4:5
    print grid; a print opens the original in a full-screen previous/next,
    keyboard-accessible viewer. `getGalleryDownloadUrl` zips the same files

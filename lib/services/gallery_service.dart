@@ -16,6 +16,16 @@ class GalleryDownload {
   final int? totalBytes;
 }
 
+/// One photo in a private session gallery, through a link that expires after
+/// an hour.
+class GalleryPhoto {
+  const GalleryPhoto({required this.name, required this.url});
+
+  /// Its safe relative name, unique within the gallery.
+  final String name;
+  final Uri url;
+}
+
 /// How a zip build is going: one of getGalleryDownloadUrl's progress chunks.
 ///
 /// Mirrors GalleryProgress in functions/src/gallery.ts; change them
@@ -80,9 +90,13 @@ class GalleryException implements Exception {
   String toString() => message;
 }
 
-/// Session photo downloads. [FunctionsGalleryService] is the real
-/// implementation; tests use a fake.
+/// Private session galleries and zip downloads. [FunctionsGalleryService] is
+/// the real implementation; tests use a fake.
 abstract class GalleryService {
+  /// Lists every photo the signed-in family may see, each through a
+  /// short-lived private link.
+  Future<List<GalleryPhoto>> loadPhotos(String bookingId);
+
   /// Zips the photos for [bookingId] and returns a download link. Building a
   /// large gallery's zip can take minutes; [onProgress] hears how it's going
   /// (never for a zip that's already built, or from a function that doesn't
@@ -90,13 +104,30 @@ abstract class GalleryService {
   Future<GalleryDownload> prepareDownload(String bookingId, {GalleryProgressCallback? onProgress});
 }
 
-/// Calls the `getGalleryDownloadUrl` Cloud Function, which checks that the
-/// signed-in user owns the booking before returning a link. It streams:
-/// progress chunks while it builds a zip, then the link.
+/// Calls the gallery Cloud Functions, which check that the signed-in user may
+/// see the booking before returning individual photo links or a zip link. The
+/// zip call streams progress chunks while it builds, then the link.
 class FunctionsGalleryService implements GalleryService {
   FunctionsGalleryService(this._functions);
 
   final FirebaseFunctions _functions;
+
+  @override
+  Future<List<GalleryPhoto>> loadPhotos(String bookingId) async {
+    try {
+      final callable = _functions.httpsCallable('getGalleryPhotoUrls');
+      final result = await callable.call<Object?>({'bookingId': bookingId});
+      return parseGalleryPhotos(result.data);
+    } on GalleryException {
+      rethrow;
+    } on FirebaseFunctionsException catch (e) {
+      log('getGalleryPhotoUrls failed: ${e.code} ${e.message}');
+      throw GalleryException(galleryPhotoErrorMessage(e.code, e.message));
+    } catch (e) {
+      log('getGalleryPhotoUrls failed: $e');
+      throw const GalleryException(kGalleryLoadErrorFallback);
+    }
+  }
 
   @override
   Future<GalleryDownload> prepareDownload(String bookingId, {GalleryProgressCallback? onProgress}) {
@@ -104,12 +135,56 @@ class FunctionsGalleryService implements GalleryService {
     // the time limit).
     final callable = _functions.httpsCallable('getGalleryDownloadUrl');
     final events = callable.stream<Object?, Object?>({'bookingId': bookingId}).map<GalleryCallEvent>(
-          (response) => switch (response) {
-            Chunk(:final partialData) => (isResult: false, data: partialData),
-            Result(:final result) => (isResult: true, data: result.data),
-          },
-        );
+      (response) => switch (response) {
+        Chunk(:final partialData) => (isResult: false, data: partialData),
+        Result(:final result) => (isResult: true, data: result.data),
+      },
+    );
     return readGalleryDownload(events, onProgress: onProgress);
+  }
+}
+
+/// Reads getGalleryPhotoUrls' `{photos: [{name, url}]}` response. Anything
+/// malformed fails closed rather than handing an unexpected link to an image.
+List<GalleryPhoto> parseGalleryPhotos(Object? data) {
+  if (data is Map && data['photos'] is List) {
+    final photos = <GalleryPhoto>[];
+    final names = <String>{};
+    for (final item in data['photos'] as List) {
+      if (item is! Map || item['name'] is! String || item['url'] is! String) {
+        throw const GalleryException(kGalleryLoadErrorFallback);
+      }
+      final name = item['name'] as String;
+      final url = Uri.tryParse(item['url'] as String);
+      if (name.isEmpty ||
+          !names.add(name) ||
+          url == null ||
+          (url.scheme != 'https' && url.scheme != 'http') ||
+          url.host.isEmpty) {
+        throw const GalleryException(kGalleryLoadErrorFallback);
+      }
+      photos.add(GalleryPhoto(name: name, url: url));
+    }
+    if (photos.isNotEmpty) return photos;
+  }
+  log('Unexpected getGalleryPhotoUrls response: $data');
+  throw const GalleryException(kGalleryLoadErrorFallback);
+}
+
+const kGalleryLoadErrorFallback =
+    'We couldn’t load your photos. Refresh the page to try again, and if it happens again, let Brooke know.';
+
+String galleryPhotoErrorMessage(String code, String? message) {
+  switch (code) {
+    case 'failed-precondition':
+      final shown = message?.replaceFirst(_statusSuffix, '').trim();
+      return shown == null || shown.isEmpty ? 'Your photos aren’t ready yet.' : shown;
+    case 'not-found':
+      return 'We couldn’t find this session’s photos. Return to Your sessions and try again.';
+    case 'unauthenticated':
+      return 'Your sign-in has expired. Sign out, sign in again, then open your photos.';
+    default:
+      return kGalleryLoadErrorFallback;
   }
 }
 
@@ -185,8 +260,7 @@ GalleryDownload parseGalleryDownload(Object? data) {
   throw const GalleryException(kGalleryErrorFallback);
 }
 
-const kGalleryErrorFallback =
-    'We couldn’t get your photos ready. Choose “Download all photos” to try again, '
+const kGalleryErrorFallback = 'We couldn’t get your photos ready. Choose “Download all photos” to try again, '
     'and if it happens again, let Brooke know.';
 
 /// The JS SDK ends every error message with the HTTP status: " [400]" from

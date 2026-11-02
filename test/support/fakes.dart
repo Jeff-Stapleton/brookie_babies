@@ -138,7 +138,8 @@ class FakeBookingService implements BookingService {
     watchedUsers.add(user);
     final error = this.error;
     if (error != null) return Stream.error(error);
-    UserBookings current() => (bookings: List.of(bookings), unreadable: unreadable, sharedWithUser: {...sharedWithUser});
+    UserBookings current() =>
+        (bookings: List.of(bookings), unreadable: unreadable, sharedWithUser: {...sharedWithUser});
     return Stream.multi((controller) {
       controller.add(current());
       final changes = _changes.stream.listen((_) => controller.add(current()));
@@ -189,15 +190,35 @@ Booking withSharedWith(Booking b, List<String> sharedWith) => Booking(
       name: b.name,
     );
 
-/// [GalleryService] whose downloads stay pending until the test calls
-/// [complete] or [fail]; [progress] reports how the zip's build is going.
+/// [GalleryService] with fixed individual [galleryPhotos] (or
+/// [galleryPhotosError]); zip downloads stay pending until the test calls
+/// [complete] or [fail], and [progress] reports how the zip's build is going.
 class FakeGalleryService implements GalleryService {
+  List<GalleryPhoto> galleryPhotos = const [];
+  Object? galleryPhotosError;
+  bool holdGalleryPhotos = false;
+
+  final photoRequests = <String>[];
   final requested = <String>[];
 
   // Created per call rather than up front, so it belongs to the test's
   // fake-async zone and completing it reaches the widget.
+  Completer<List<GalleryPhoto>>? _pendingPhotos;
   Completer<GalleryDownload>? _pending;
   GalleryProgressCallback? _onProgress;
+
+  @override
+  Future<List<GalleryPhoto>> loadPhotos(String bookingId) {
+    photoRequests.add(bookingId);
+    final error = galleryPhotosError;
+    if (error != null) return Future.error(error);
+    if (holdGalleryPhotos) return (_pendingPhotos = Completer()).future;
+    return Future.value(List.of(galleryPhotos));
+  }
+
+  void completePhotos([List<GalleryPhoto>? photos]) => _pendingPhotos!.complete(List.of(photos ?? galleryPhotos));
+
+  void failPhotos(Object error) => _pendingPhotos!.completeError(error);
 
   @override
   Future<GalleryDownload> prepareDownload(String bookingId, {GalleryProgressCallback? onProgress}) {
@@ -625,9 +646,8 @@ class FakeAdminService implements AdminService {
   }
 
   @override
-  PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name) =>
-      _upload('uploadSessionPhoto', 'galleries/$sessionId/$name', photo, name,
-          sessionPhotos.putIfAbsent(sessionId, () => []));
+  PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name) => _upload(
+      'uploadSessionPhoto', 'galleries/$sessionId/$name', photo, name, sessionPhotos.putIfAbsent(sessionId, () => []));
 
   /// One that leaves the zip is logged with ', deleteZip: false' after its
   /// path.

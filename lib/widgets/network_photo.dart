@@ -75,7 +75,9 @@ class _NetworkPhotoState extends State<NetworkPhoto> {
     var failed = false;
     await precacheImage(_image, context, onError: (error, stackTrace) {
       failed = true;
-      log('Could not load photo $url: $error');
+      // A private gallery URL carries a one-hour signature in its query.
+      // Never copy that credential into logs.
+      log('Could not load a photo from ${url.host} (${error.runtimeType})');
     });
     if (!mounted || url != _requested) return;
     if (failed) {

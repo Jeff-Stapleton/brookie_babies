@@ -4,6 +4,7 @@ import 'package:brookie_babies/models/app_user.dart';
 import 'package:brookie_babies/models/booking.dart';
 import 'package:brookie_babies/pages/home_page.dart';
 import 'package:brookie_babies/pages/profile_page.dart';
+import 'package:brookie_babies/pages/session_gallery_page.dart';
 import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/services/gallery_service.dart';
 import 'package:brookie_babies/theme/brookie_theme.dart';
@@ -259,7 +260,22 @@ void main() {
   testWidgets('an upcoming session whose photos are ready can be downloaded', (tester) async {
     await pumpProfile(tester, bookings: FakeBookingService([_booking('soon', date: _future)]));
 
+    expect(find.text('View photos'), findsOneWidget);
     expect(find.text('Download all photos'), findsOneWidget);
+  });
+
+  testWidgets('View photos opens the session gallery', (tester) async {
+    gallery.galleryPhotos = [
+      GalleryPhoto(name: 'IMG_1.jpg', url: Uri.parse('https://storage.example/b1/IMG_1.jpg')),
+    ];
+    await pumpProfile(tester, bookings: FakeBookingService([_booking('b1')]));
+
+    await tester.tap(find.text('View photos'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SessionGalleryPage), findsOneWidget);
+    expect(gallery.photoRequests, ['b1']);
+    expect(find.text('Photo gallery'), findsOneWidget);
   });
 
   testWidgets('says when some bookings could not be shown', (tester) async {
@@ -324,7 +340,8 @@ void main() {
     expect(_tag(tester, 'Paid').tone, StatusTone.success);
     expect(_tag(tester, 'Paid').icon, Icons.check);
     expect(_tag(tester, 'Ready to download').tone, StatusTone.success);
-    expect(find.widgetWithIcon(FilledButton, Icons.download_outlined), findsOneWidget);
+    expect(find.widgetWithIcon(FilledButton, Icons.photo_library_outlined), findsOneWidget);
+    expect(find.widgetWithIcon(TextButton, Icons.download_outlined), findsOneWidget);
   });
 
   testWidgets('past session without photos yet: explains they are being edited', (tester) async {
@@ -505,8 +522,8 @@ void main() {
 
   testWidgets('keyboard: "Download all photos" keeps focus while the photos are prepared', (tester) async {
     await pumpProfile(tester, bookings: FakeBookingService([_booking('b1')]));
-    // Account menu, "Sign out", then the download.
-    for (var i = 0; i < 3; i++) {
+    // Account menu, "Sign out", "View photos", then the download.
+    for (var i = 0; i < 4; i++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     }
     await tester.pump();
@@ -516,14 +533,16 @@ void main() {
     await tester.pump();
 
     expect(gallery.requested, ['b1']);
-    final busy = find.widgetWithText(FilledButton, 'Preparing your photos…');
+    final busy = find.widgetWithText(TextButton, 'Preparing your photos…');
     expect(hasFocus(tester, find.text('Preparing your photos…')), isTrue);
     expect(hasFocus(tester, find.text('Sign out')), isFalse);
-    expect(tester.widget<FilledButton>(busy).onPressed, isNotNull);
+    expect(tester.widget<TextButton>(busy).onPressed, isNotNull);
     expect(find.descendant(of: busy, matching: find.byType(CircularProgressIndicator)), findsOneWidget);
-    // It looks unavailable while it works.
-    expect(tester.widget<Material>(find.descendant(of: busy, matching: find.byType(Material))).color,
-        BrookieColors.light.surfaceSunk);
+    // It stays a quiet download action while it works.
+    expect(
+      tester.widget<Material>(find.descendant(of: busy, matching: find.byType(Material))).color,
+      Colors.transparent,
+    );
 
     // A second Enter waits for the same download rather than starting another.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -551,7 +570,7 @@ void main() {
     await tester.pump();
 
     expect(
-      tester.getSemantics(find.widgetWithText(FilledButton, 'Preparing your photos…')),
+      tester.getSemantics(find.widgetWithText(TextButton, 'Preparing your photos…')),
       isSemantics(label: 'Preparing your photos…', isButton: true, isEnabled: true, isLiveRegion: true),
     );
     gallery.complete(GalleryDownload(url: Uri.parse('https://example.com/b1.zip'), photoCount: 3));
@@ -559,39 +578,38 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('one primary button: the newest ready session; the others are outlined', (tester) async {
+  testWidgets('one primary gallery button: the newest ready session; the others are outlined', (tester) async {
     await pumpProfile(tester, bookings: FakeBookingService([
       _booking('older', date: '1999-01-01', packageName: 'Basic'),
       _booking('newest', date: _past, packageName: 'Ultimate'),
       _booking('editing', date: '2000-01-01', photosReady: false),
     ]));
 
-    final primary = find.widgetWithText(FilledButton, 'Download all photos');
+    final primary = find.widgetWithText(FilledButton, 'View photos');
     expect(primary, findsOneWidget);
-    expect(find.widgetWithText(OutlinedButton, 'Download all photos'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'View photos'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Download all photos'), findsNWidgets(2));
     expect(find.ancestor(of: primary, matching: find.widgetWithText(Card, 'Ultimate session')), findsOneWidget);
   });
 
-  testWidgets('a busy outlined download keeps its focus ring', (tester) async {
+  testWidgets('a busy quiet download keeps its focus ring', (tester) async {
     await pumpProfile(tester, bookings: FakeBookingService([
       _booking('older', date: '1999-01-01', packageName: 'Basic'),
       _booking('newest', date: _past, packageName: 'Ultimate'),
     ]));
-    final outlined = find.widgetWithText(OutlinedButton, 'Download all photos');
-    await tester.ensureVisible(outlined);
+    final quiet = find.widgetWithText(TextButton, 'Download all photos').last;
+    await tester.ensureVisible(quiet);
     await tester.pumpAndSettle();
-    await tester.tap(outlined);
+    await tester.tap(quiet);
     await tester.pump();
     Focus.of(tester.element(find.text('Preparing your photos…'))).requestFocus();
     await tester.sendKeyEvent(LogicalKeyboardKey.shift); // keyboard highlight mode
     await tester.pump();
 
-    final busy = find.widgetWithText(OutlinedButton, 'Preparing your photos…');
+    final busy = find.widgetWithText(TextButton, 'Preparing your photos…');
     final shape = tester.widget<Material>(find.descendant(of: busy, matching: find.byType(Material))).shape!;
-    // Its own quiet edge, then the gap and the ring.
-    expect(shape, isA<FocusRingBorder>());
-    expect((shape as FocusRingBorder).ring, brookieFocusSide(BrookieColors.light.focus));
-    expect(shape.side, BorderSide(color: BrookieColors.light.line, width: 1.5));
+    expect(shape, isA<OutlinedBorder>());
+    expect((shape as OutlinedBorder).side, brookieFocusSide(BrookieColors.light.focus));
     gallery.complete(GalleryDownload(url: Uri.parse('https://example.com/b1.zip'), photoCount: 3));
     await tester.pumpAndSettle();
   });
@@ -714,7 +732,7 @@ void main() {
       expect(bar(), findsNothing);
       expect(find.text('Adding photo 38 of 150'), findsNothing);
       expect(find.widgetWithText(InlineMessage, kGalleryErrorFallback), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'Download all photos'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Download all photos'), findsOneWidget);
       expect(urlOpener.opened, isEmpty);
       expect(LeaveWarning.active.value, isFalse);
       expect(ScreenAwake.active.value, isFalse);
@@ -853,7 +871,10 @@ void main() {
     testWidgets('screen readers hear the hint once, then each quarter, then the finishing', (tester) async {
       final semantics = tester.ensureSemantics();
       await startDownload(tester);
-      final button = find.byType(FilledButton);
+      final button = find.descendant(
+        of: find.byType(BusyButton),
+        matching: find.byType(TextButton),
+      );
 
       void expectButton(String label, String reason) => expect(
             tester.getSemantics(button),
@@ -924,7 +945,8 @@ void main() {
       expect(find.byType(StatusTag), findsOneWidget);
       expect(_tag(tester, 'Ready to download').tone, StatusTone.success);
       expect(find.text('Ad hoc'), findsNothing);
-      expect(find.widgetWithText(FilledButton, 'Download all photos'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'View photos'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Download all photos'), findsOneWidget);
 
       await tester.tap(find.text('Download all photos'));
       await tester.pump();
@@ -948,16 +970,17 @@ void main() {
       expect(find.textContaining('Your photos are being edited'), findsOneWidget);
     });
 
-    testWidgets('can hold the page’s one primary download', (tester) async {
+    testWidgets('can hold the page’s one primary gallery action', (tester) async {
       await pumpProfile(tester, bookings: FakeBookingService([
         _booking('older', date: '1999-01-01', packageName: 'Basic'),
         _adHoc('newest'),
       ]));
 
-      final primary = find.widgetWithText(FilledButton, 'Download all photos');
+      final primary = find.widgetWithText(FilledButton, 'View photos');
       expect(primary, findsOneWidget);
       expect(find.ancestor(of: primary, matching: find.widgetWithText(Card, 'Church Family - Fall 2026')), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, 'Download all photos'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'View photos'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Download all photos'), findsNWidgets(2));
     });
 
     testWidgets('fits a narrow phone in both themes, even with the longest name', (tester) async {
@@ -1024,7 +1047,7 @@ void main() {
       expect(find.text('Stop sharing'), findsNWidgets(2));
       expect(find.widgetWithText(OutlinedButton, 'Share this session'), findsOneWidget);
       expect(find.text('Shared with you'), findsNothing);
-      // Still one primary button: the download.
+      // Still one primary button: the gallery.
       expect(find.byType(FilledButton), findsOneWidget);
     });
 

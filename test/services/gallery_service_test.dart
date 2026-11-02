@@ -18,9 +18,81 @@ const _link = 'https://storage.googleapis.com/bucket/gallery-zips/b1.zip?X-Goog-
 final _answer = {'url': _link, 'photoCount': 150, 'expiresAt': '2026-10-25T12:00:00.000Z', 'totalBytes': 4800000000};
 
 void main() {
+  group('individual gallery photos', () {
+    test('reads their names and private links in order', () {
+      final photos = parseGalleryPhotos({
+        'photos': [
+          {'name': 'IMG_0001.jpg', 'url': 'https://storage.example/galleries/b1/IMG_0001.jpg?sig=one'},
+          {'name': 'album/IMG_0002.jpg', 'url': 'http://localhost:9199/galleries/b1/IMG_0002.jpg?sig=two'},
+        ],
+        'expiresAt': '2026-11-02T07:00:00.000Z',
+      });
+
+      expect(photos.map((photo) => photo.name), ['IMG_0001.jpg', 'album/IMG_0002.jpg']);
+      expect(photos.first.url.queryParameters['sig'], 'one');
+      expect(photos.last.url.host, 'localhost');
+    });
+
+    test('refuses an empty or malformed response', () {
+      final bad = <Object?>[
+        null,
+        {},
+        {'photos': []},
+        {'photos': 'not a list'},
+        {
+          'photos': [null]
+        },
+        {
+          'photos': [
+            {'name': '', 'url': 'https://example.com/a.jpg'}
+          ]
+        },
+        {
+          'photos': [
+            {'name': 'a.jpg', 'url': '/relative/a.jpg'}
+          ]
+        },
+        {
+          'photos': [
+            {'name': 'a.jpg', 'url': 'javascript:alert(1)'}
+          ]
+        },
+        {
+          'photos': [
+            {'name': 'a.jpg', 'url': 'https://example.com/a.jpg'},
+            {'name': 'a.jpg', 'url': 'https://example.com/b.jpg'},
+          ],
+        },
+      ];
+      for (final data in bad) {
+        expect(
+          () => parseGalleryPhotos(data),
+          throwsA(isA<GalleryException>().having((e) => e.message, 'message', kGalleryLoadErrorFallback)),
+          reason: '$data',
+        );
+      }
+    });
+
+    test('turns callable failures into customer-facing gallery messages', () {
+      expect(
+        galleryPhotoErrorMessage('failed-precondition', 'Your photos aren’t ready yet. [400]'),
+        'Your photos aren’t ready yet.',
+      );
+      expect(
+        galleryPhotoErrorMessage('not-found', 'private detail'),
+        'We couldn’t find this session’s photos. Return to Your sessions and try again.',
+      );
+      expect(
+        galleryPhotoErrorMessage('unauthenticated', null),
+        'Your sign-in has expired. Sign out, sign in again, then open your photos.',
+      );
+      expect(galleryPhotoErrorMessage('internal', 'private detail'), kGalleryLoadErrorFallback);
+    });
+  });
+
   test("shows the function's message for failed-precondition", () {
-    expect(galleryErrorMessage('failed-precondition', 'Your photos aren’t ready yet.'),
-        'Your photos aren’t ready yet.');
+    expect(
+        galleryErrorMessage('failed-precondition', 'Your photos aren’t ready yet.'), 'Your photos aren’t ready yet.');
     expect(galleryErrorMessage('failed-precondition', null), 'Your photos aren’t ready yet.');
   });
 
@@ -129,7 +201,12 @@ void main() {
     });
 
     test('anything else is the generic failure', () {
-      for (final data in <Object?>[null, 'https://example.com', {'url': _link}, {'photoCount': 3}]) {
+      for (final data in <Object?>[
+        null,
+        'https://example.com',
+        {'url': _link},
+        {'photoCount': 3}
+      ]) {
         expect(
           () => parseGalleryDownload(data),
           throwsA(isA<GalleryException>().having((e) => e.isFallback, 'isFallback', isTrue)),

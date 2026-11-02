@@ -12,9 +12,11 @@ import {
   DocumentSnapshotLike,
   FirestoreLike,
   getGalleryDownload,
+  getGalleryPhotos,
   GalleryDeps,
   GalleryProgress,
   handleGalleryDownloadRequest,
+  handleGalleryPhotosRequest,
   MESSAGES,
   progressSender,
   ProgressStream,
@@ -258,6 +260,11 @@ function callAsGuest(token: CallerAuth["token"]) {
 /** Calls as UID for BOOKING_ID, sending progress to `stream`. */
 function callStreaming(stream: FakeStream) {
   return getGalleryDownload(deps, {uid: UID}, {bookingId: BOOKING_ID}, stream);
+}
+
+/** Loads the individual photo links as UID, for BOOKING_ID. */
+function callPhotos() {
+  return getGalleryPhotos(deps, {uid: UID}, {bookingId: BOOKING_ID});
 }
 
 /** Makes deps.now move on a second each time it's read, so no progress is throttled. */
@@ -607,6 +614,72 @@ describe("getGalleryDownload: sessions their owner shared", {timeout: 10_000}, (
     await assertHttpsError(callAsGuest(GRANDMA), "failed-precondition", MESSAGES.notPaid);
     addBooking(BOOKING_ID, {sharedWith: ["grandma@example.com"], photosReady: false});
     await assertHttpsError(callAsGuest(GRANDMA), "failed-precondition", MESSAGES.notReady);
+  });
+});
+
+describe("getGalleryPhotos", {timeout: 10_000}, () => {
+  test("returns every visible photo in name order through one-hour read URLs", async () => {
+    addBooking(BOOKING_ID);
+    bucket.put("galleries/b1/z-last.jpg", "last");
+    bucket.put("galleries/b1/album/a-first.jpg", "first");
+    bucket.put("galleries/b1/.DS_Store", "junk");
+    bucket.put("galleries/b1/album/", "");
+    bucket.put("galleries/b10/not-this-session.jpg", "other");
+
+    const result = await callPhotos();
+
+    const expires = new Date(NOW.getTime() + 60 * 60 * 1000);
+    assert.deepEqual(result, {
+      photos: [
+        {
+          name: "album/a-first.jpg",
+          url: "https://storage.example/galleries/b1/album/a-first.jpg?signature=1",
+        },
+        {
+          name: "z-last.jpg",
+          url: "https://storage.example/galleries/b1/z-last.jpg?signature=2",
+        },
+      ],
+      expiresAt: expires.toISOString(),
+    });
+    assert.deepEqual(bucket.signedUrlConfigs, [
+      {version: "v4", action: "read", expires},
+      {version: "v4", action: "read", expires},
+    ]);
+    assert.equal(bucket.writeStreamsOpened, 0);
+    assert.equal(bucket.readStreamsOpened, 0);
+  });
+
+  test("uses the same private access and readiness checks as the zip", async () => {
+    addBooking(BOOKING_ID, {uid: "someone-else"});
+    bucket.put("galleries/b1/a.jpg", "photo");
+    await assertHttpsError(callPhotos(), "not-found", MESSAGES.notFound);
+
+    addBooking(BOOKING_ID, {photosReady: false});
+    await assertHttpsError(callPhotos(), "failed-precondition", MESSAGES.notReady);
+    assert.deepEqual(bucket.signedUrlConfigs, []);
+  });
+
+  test("opens ad hoc and owner-shared galleries for their verified guests", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    addAdHocSession(BOOKING_ID);
+    const adHoc = await getGalleryPhotos(
+      deps,
+      {uid: GUEST_UID, token: GUEST_TOKEN},
+      {bookingId: BOOKING_ID},
+    );
+    assert.equal(adHoc.photos.length, 1);
+
+    addBooking(BOOKING_ID, {sharedWith: ["grandma@example.com"]});
+    const shared = await getGalleryPhotos(
+      deps,
+      {
+        uid: GUEST_UID,
+        token: {email: "Grandma@Example.COM", email_verified: true},
+      },
+      {bookingId: BOOKING_ID},
+    );
+    assert.equal(shared.photos.length, 1);
   });
 });
 
@@ -980,6 +1053,17 @@ describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
       request,
       stream,
     );
+  const handlePhotos = (request: CallableRequestLike) =>
+    handleGalleryPhotosRequest(
+      {
+        ...deps,
+        logError: (message, error) => {
+          loggedMessages.push(message);
+          logged.push(error);
+        },
+      },
+      request,
+    );
 
   beforeEach(() => {
     logged = [];
@@ -996,6 +1080,11 @@ describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
         MESSAGES.unauthenticated,
       );
     }
+    await assertHttpsError(
+      handlePhotos({auth: null, data: {bookingId: BOOKING_ID}}),
+      "unauthenticated",
+      MESSAGES.unauthenticated,
+    );
   });
 
   test("returns the download for the signed-in owner", async () => {
@@ -1003,6 +1092,16 @@ describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
     bucket.put("galleries/b1/a.jpg", "a");
     const result = await handle({auth: {uid: UID}, data: {bookingId: BOOKING_ID}});
     assert.equal(result.photoCount, 1);
+  });
+
+  test("returns individual photos for the signed-in owner", async () => {
+    addBooking(BOOKING_ID);
+    bucket.put("galleries/b1/a.jpg", "a");
+    const result = await handlePhotos({
+      auth: {uid: UID},
+      data: {bookingId: BOOKING_ID},
+    });
+    assert.deepEqual(result.photos.map((photo) => photo.name), ["a.jpg"]);
   });
 
   test("passes the token's email claims to the access check", async () => {
@@ -1033,6 +1132,21 @@ describe("handleGalleryDownloadRequest", {timeout: 10_000}, () => {
       MESSAGES.internal,
     );
     assert.deepEqual(logged, [bucket.getFilesError]);
+  });
+
+  test("turns an unexpected photo-list error into a logged 'internal' error", async () => {
+    addBooking(BOOKING_ID);
+    bucket.getFilesError = new Error("storage is down");
+    await assertHttpsError(
+      handlePhotos({auth: {uid: UID}, data: {bookingId: BOOKING_ID}}),
+      "internal",
+      MESSAGES.internal,
+    );
+    assert.deepEqual(logged, [bucket.getFilesError]);
+    assert.equal(loggedMessages.length, 1);
+    assert.match(loggedMessages[0], /getGalleryPhotoUrls failed/);
+    assert.match(loggedMessages[0], new RegExp(UID));
+    assert.doesNotMatch(loggedMessages[0], /@/);
   });
 
   test("logs the uid, never the email", async () => {

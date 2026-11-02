@@ -5,8 +5,8 @@ import 'package:firebase_core/firebase_core.dart';
 /// web/index.html sends on to this domain.
 const siteDomain = 'brookestapletonphoto.com';
 
-/// "Your sessions", where families download their photos, on the site this
-/// runs on (the live site when it isn't running on the web).
+/// "Your sessions", where families view and download their photos, on the
+/// site this runs on (the live site when it isn't running on the web).
 Uri get sessionsLink {
   final base = Uri.base;
   final origin = base.isScheme('http') || base.isScheme('https') ? base.origin : 'https://$siteDomain';

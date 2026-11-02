@@ -73,7 +73,7 @@ void main() {
         for (final photo in tester.widgetList<NetworkPhoto>(photos)) photo.url,
       ];
 
-  homeTest('hero: the first photo with the logo alone at its center', (tester) async {
+  homeTest('hero: the first photo with the logo', (tester) async {
     await pumpHome(tester);
 
     final hero = find.byType(HomeHero);
@@ -81,40 +81,47 @@ void main() {
     expect(tester.getSemantics(hero), isSemantics(label: 'Brooke Stapleton Photography'));
     expect(tester.widget<NetworkPhoto>(heroPhoto()).url, photos(9).first);
     expect(find.descendant(of: hero, matching: find.image(const AssetImage('assets/logo.png'))), findsOneWidget);
-    final logo = find.descendant(of: hero, matching: find.byType(BrookieLogo));
-    expect(tester.getCenter(logo).dy, moreOrLessEquals(tester.getCenter(hero).dy, epsilon: 0.01));
-    // Nothing to book until there are packages.
-    expect(find.text('Book a session'), findsNothing);
     expect(find.text('Sign in'), findsOneWidget);
   });
 
-  homeTest('no introduction and no packages until Brooke settles them', (tester) async {
-    await pumpHome(tester);
+  group('while the introduction and the packages are hidden', () {
+    homeTest('the logo alone at the hero’s center, with nothing to book', (tester) async {
+      await pumpHome(tester);
 
-    expect(find.text('Little ones, while they’re little'), findsNothing);
-    expect(find.textContaining('Calm, unhurried sessions'), findsNothing);
-    expect(find.text('Choose your package'), findsNothing);
-    expect(find.byType(PackageCard), findsNothing);
-  });
-
-  for (final (size, gap) in const [(Size(1440, 900), 64.0), (Size(390, 844), 48.0)]) {
-    homeTest('the featured photos a section below the hero, the footer a section below them '
-        '(${size.width.round()}px)', (tester) async {
-      await pumpHome(tester, size: size);
-
-      expect(tester.getTopLeft(featured().first).dy - tester.getBottomLeft(find.byType(HomeHero)).dy, gap);
-      expect(tester.getTopLeft(find.byType(PageFooter)).dy - tester.getBottomLeft(featured().last).dy, gap);
+      final hero = find.byType(HomeHero);
+      final logo = find.descendant(of: hero, matching: find.byType(BrookieLogo));
+      expect(tester.getCenter(logo).dy, moreOrLessEquals(tester.getCenter(hero).dy, epsilon: 0.01));
+      expect(find.text('Book a session'), findsNothing);
     });
-  }
 
-  homeTest('without photos: the logo alone on the quiet band, the footer a section below', (tester) async {
-    await pumpHome(tester, portfolio: FakePortfolioService());
+    homeTest('no introduction and no packages', (tester) async {
+      await pumpHome(tester);
 
-    final hero = find.byType(HomeHero);
-    expect(find.byType(NetworkPhoto), findsNothing);
-    expect(find.descendant(of: hero, matching: find.byType(BrookieLogo)), findsOneWidget);
-    expect(find.byType(FilledButton), findsNothing);
-    expect(tester.getTopLeft(find.byType(PageFooter)).dy - tester.getBottomLeft(hero).dy, 64);
+      expect(find.text('Little ones, while they’re little'), findsNothing);
+      expect(find.textContaining('Calm, unhurried sessions'), findsNothing);
+      expect(find.text('Choose your package'), findsNothing);
+      expect(find.byType(PackageCard), findsNothing);
+    });
+
+    for (final (size, gap) in const [(Size(1440, 900), 64.0), (Size(390, 844), 48.0)]) {
+      homeTest('the featured photos a section below the hero, the footer a section below them '
+          '(${size.width.round()}px)', (tester) async {
+        await pumpHome(tester, size: size);
+
+        expect(tester.getTopLeft(featured().first).dy - tester.getBottomLeft(find.byType(HomeHero)).dy, gap);
+        expect(tester.getTopLeft(find.byType(PageFooter)).dy - tester.getBottomLeft(featured().last).dy, gap);
+      });
+    }
+
+    homeTest('without photos: the logo alone on the quiet band, the footer a section below', (tester) async {
+      await pumpHome(tester, portfolio: FakePortfolioService());
+
+      final hero = find.byType(HomeHero);
+      expect(find.byType(NetworkPhoto), findsNothing);
+      expect(find.descendant(of: hero, matching: find.byType(BrookieLogo)), findsOneWidget);
+      expect(find.byType(FilledButton), findsNothing);
+      expect(tester.getTopLeft(find.byType(PageFooter)).dy - tester.getBottomLeft(hero).dy, 64);
+    });
   });
 
   homeTest('the logo takes its full size before it has loaded, so nothing moves', (tester) async {

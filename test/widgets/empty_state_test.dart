@@ -109,7 +109,8 @@ void main() {
     ('Book a session', const SchedulingPage(packageName: ''), _notBookable),
   ]) {
     for (final width in [320.0, 1440.0]) {
-      testWidgets('$page at ${width.round()}px, with no packages: just the sentence, s5 all round', (tester) async {
+      testWidgets('$page at ${width.round()}px, while there are no packages: just the sentence, s5 all round',
+          (tester) async {
         await pump(tester, home, width: width);
 
         final box = tester.getRect(bandBox);

@@ -134,7 +134,12 @@ void main() {
     // With the email, for the sessions shared with it.
     expect(bookings.watchedUsers.single.email, testUser.email);
     expect(find.textContaining('No sessions yet.'), findsOneWidget);
-    // No packages to see until Brooke settles them.
+  });
+
+  testWidgets('with no sessions, while there are no packages: no "See packages"', (tester) async {
+    await pumpProfile(tester);
+
+    expect(find.textContaining('No sessions yet.'), findsOneWidget);
     expect(find.text('See packages'), findsNothing);
   });
 

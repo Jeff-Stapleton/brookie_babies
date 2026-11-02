@@ -207,11 +207,14 @@ PickedPhoto testPhoto(String name, {int size = 2 * 1024 * 1024, String contentTy
     PickedPhoto(name: name, size: size, contentType: contentType, data: Uint8List(0));
 
 /// A session for admin tests: ad hoc unless [status] says otherwise (then
-/// with a package unless one is given).
+/// with a package unless one is given). An ad hoc session is shared with
+/// [emails], harper@example.com unless they or the one [email] of a session
+/// from before several emails are given.
 Booking testSession(
   String id, {
   String? name = 'The Harper family',
-  String? email = 'harper@example.com',
+  List<String>? emails,
+  String? email,
   DateTime? date,
   ({int hour, int minute})? time,
   String? location,
@@ -220,16 +223,18 @@ Booking testSession(
   bool photosReady = false,
   String? uid,
 }) {
+  final adHoc = status == BookingStatus.adhoc;
   return Booking(
     id: id,
-    packageName: packageName ?? (status == BookingStatus.adhoc ? null : 'Premium'),
+    packageName: packageName ?? (adHoc ? null : 'Premium'),
     date: date ?? DateTime(2999, 3, 4),
     time: time,
     location: location,
     status: status,
     photosReady: photosReady,
-    uid: uid ?? (status == BookingStatus.adhoc ? null : 'uid-$id'),
+    uid: uid ?? (adHoc ? null : 'uid-$id'),
     email: email,
+    emails: emails ?? (adHoc && email == null ? const ['harper@example.com'] : const []),
     name: name,
   );
 }
@@ -450,7 +455,10 @@ class FakeAdminService implements AdminService {
         location: details.location,
         status: BookingStatus.adhoc,
         photosReady: photosReady,
-        email: SessionRules.normalizeEmail(details.email),
+        emails: [
+          for (final email in details.emails)
+            if (SessionRules.normalizeEmail(email) case final normalized when normalized.isNotEmpty) normalized,
+        ],
         name: details.name.trim(),
       );
 
@@ -508,6 +516,7 @@ class FakeAdminService implements AdminService {
       photosReady: ready,
       uid: s.uid,
       email: s.email,
+      emails: s.emails,
       name: s.name,
     );
     notifyChanged();

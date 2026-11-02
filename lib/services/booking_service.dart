@@ -40,41 +40,48 @@ class FirestoreBookingService implements BookingService {
 
     // As the session stores it (firestore.rules lowercases the token's).
     final email = SessionRules.normalizeEmail(user.email ?? '');
+    final adHoc = bookings.where('status', isEqualTo: BookingStatus.adhoc.name);
     return mergeUserBookings(
       docs(bookings.where('uid', isEqualTo: user.uid)),
       sharedByEmail: email.isEmpty
-          ? null
-          : docs(bookings.where('status', isEqualTo: BookingStatus.adhoc.name).where('email', isEqualTo: email)),
+          ? const []
+          : [
+              docs(adHoc.where('emails', arrayContains: email)),
+              // Sessions from before there could be several emails.
+              docs(adHoc.where('email', isEqualTo: email)),
+            ],
     );
   }
 }
 
-/// The bookings in [byUid] and [sharedByEmail] as one live list, each
-/// document once (a document in both is the same booking).
+/// The bookings in [byUid] and each of [sharedByEmail] as one live list,
+/// each document once (a document in more than one is the same booking).
 ///
-/// The first list waits until both queries have answered, so a guest's
-/// sessions don't pop in after "No sessions yet"; then every update to
-/// either re-emits. [sharedByEmail] failing (say, before rules that allow
-/// it are deployed) is logged and counts as no shared sessions, so it never
-/// hides the family's own bookings; [byUid] failing is an error. Cancelling
-/// the result cancels both queries.
+/// The first list waits until every query has answered, so a guest's
+/// sessions don't pop in after "No sessions yet"; then every update to any
+/// re-emits. One of [sharedByEmail] failing (say, before rules that allow
+/// it are deployed) is logged and counts as no sessions from it, so it never
+/// hides the family's own bookings or the other shared ones; [byUid] failing
+/// is an error. Cancelling the result cancels every query.
 @visibleForTesting
-Stream<UserBookings> mergeUserBookings(Stream<List<BookingDoc>> byUid, {Stream<List<BookingDoc>>? sharedByEmail}) {
+Stream<UserBookings> mergeUserBookings(
+  Stream<List<BookingDoc>> byUid, {
+  List<Stream<List<BookingDoc>>> sharedByEmail = const [],
+}) {
   late final StreamController<UserBookings> controller;
   StreamSubscription<List<BookingDoc>>? own;
-  StreamSubscription<List<BookingDoc>>? shared;
+  final shared = <StreamSubscription<List<BookingDoc>>>[];
   List<BookingDoc>? ownDocs;
-  // No shared query: nothing to wait for.
-  List<BookingDoc>? sharedDocs = sharedByEmail == null ? const [] : null;
+  // Null until that query answers.
+  final sharedDocs = List<List<BookingDoc>?>.filled(sharedByEmail.length, null);
 
   void emit() {
     final ownSoFar = ownDocs;
-    final sharedSoFar = sharedDocs;
-    if (ownSoFar == null || sharedSoFar == null) return;
+    if (ownSoFar == null || sharedDocs.contains(null)) return;
     final seen = <String>{};
     final bookings = <Booking>[];
     var unreadable = 0;
-    for (final doc in [...ownSoFar, ...sharedSoFar]) {
+    for (final doc in [...ownSoFar, for (final docs in sharedDocs) ...?docs]) {
       if (!seen.add(doc.id)) continue;
       final booking = Booking.fromMap(doc.id, doc.data);
       if (booking == null) {
@@ -98,34 +105,44 @@ Stream<UserBookings> mergeUserBookings(Stream<List<BookingDoc>> byUid, {Stream<L
         // Firestore ends a query's stream only after an error, and the
         // shared sessions alone aren't the family's list.
         onDone: () {
-          shared?.cancel();
+          for (final subscription in shared) {
+            subscription.cancel();
+          }
           controller.close();
         },
       );
-      shared = sharedByEmail?.listen(
-        (docs) {
-          sharedDocs = docs;
-          emit();
-        },
-        onError: (Object error) {
-          // Never the email itself: it's personal.
-          log('Could not load the sessions shared by email, so showing only booked ones: $error');
-          sharedDocs = const [];
-          emit();
-        },
-      );
+      for (final (i, query) in sharedByEmail.indexed) {
+        shared.add(query.listen(
+          (docs) {
+            sharedDocs[i] = docs;
+            emit();
+          },
+          onError: (Object error) {
+            // Never the email itself: it's personal.
+            log('Could not load some sessions shared by email, so leaving them out: $error');
+            sharedDocs[i] = const [];
+            emit();
+          },
+        ));
+      }
     },
     onPause: () {
       own?.pause();
-      shared?.pause();
+      for (final subscription in shared) {
+        subscription.pause();
+      }
     },
     onResume: () {
       own?.resume();
-      shared?.resume();
+      for (final subscription in shared) {
+        subscription.resume();
+      }
     },
     onCancel: () async {
       await own?.cancel();
-      await shared?.cancel();
+      for (final subscription in shared) {
+        await subscription.cancel();
+      }
     },
   );
   return controller.stream;

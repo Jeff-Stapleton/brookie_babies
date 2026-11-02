@@ -39,6 +39,7 @@ class LocalFirstAdminService extends FakeAdminService {
         photosReady: ready,
         uid: s.uid,
         email: s.email,
+        emails: s.emails,
         name: s.name,
       );
 }

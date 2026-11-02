@@ -13,8 +13,8 @@ BookingDoc _doc(String id, {String status = 'paid', String date = '2026-11-14'})
     (id: id, data: {'status': status, 'packageName': 'Premium', 'date': date});
 
 /// Records each query listened to, as its collection then its filters
-/// ('uid == u1'). Anything but equality filters (orderBy, limit, another
-/// operator) isn't faked, so it fails the test.
+/// ('uid == u1', 'emails contains a@b.co'). Anything but those filters
+/// (orderBy, limit, another operator) isn't faked, so it fails the test.
 class _RecordingFirestore extends Fake implements FirebaseFirestore {
   final queries = <List<String>>[];
 
@@ -50,13 +50,18 @@ class _RecordingQuery extends Fake implements CollectionReference<Map<String, dy
       isLessThanOrEqualTo,
       isGreaterThan,
       isGreaterThanOrEqualTo,
-      arrayContains,
       arrayContainsAny,
       whereIn,
       whereNotIn,
       isNull,
     ].nonNulls;
-    return _RecordingQuery(_db, [..._parts, others.isEmpty ? '$field == $isEqualTo' : '$field: not only isEqualTo']);
+    final String filter;
+    if (others.isNotEmpty || (isEqualTo == null) == (arrayContains == null)) {
+      filter = '$field: not just one isEqualTo or arrayContains';
+    } else {
+      filter = isEqualTo != null ? '$field == $isEqualTo' : '$field contains $arrayContains';
+    }
+    return _RecordingQuery(_db, [..._parts, filter]);
   }
 
   @override
@@ -90,6 +95,8 @@ void main() {
     test('the bookings with their uid, and the ad hoc sessions shared with their email as stored', () async {
       expect(await queriesFor(const AppUser(uid: 'u1', email: ' Harper@Example.COM ')), [
         ['bookings', 'uid == u1'],
+        ['bookings', 'status == adhoc', 'emails contains harper@example.com'],
+        // From before a session could have several emails.
         ['bookings', 'status == adhoc', 'email == harper@example.com'],
       ]);
     });
@@ -124,7 +131,7 @@ void main() {
   List<String> ids(UserBookings bookings) => [for (final booking in bookings.bookings) booking.id]..sort();
 
   test('waits for both queries, then lists them as one', () async {
-    listen(mergeUserBookings(byUid.stream, sharedByEmail: byEmail.stream));
+    listen(mergeUserBookings(byUid.stream, sharedByEmail: [byEmail.stream]));
 
     byUid.add([_doc('paid1')]);
     await pumpEventQueue();
@@ -137,7 +144,7 @@ void main() {
   });
 
   test('every later update of either query lists them again', () async {
-    listen(mergeUserBookings(byUid.stream, sharedByEmail: byEmail.stream));
+    listen(mergeUserBookings(byUid.stream, sharedByEmail: [byEmail.stream]));
     byUid.add([_doc('paid1')]);
     byEmail.add([]);
     await pumpEventQueue();
@@ -155,7 +162,7 @@ void main() {
   });
 
   test('a booking in both queries is listed once', () async {
-    listen(mergeUserBookings(byUid.stream, sharedByEmail: byEmail.stream));
+    listen(mergeUserBookings(byUid.stream, sharedByEmail: [byEmail.stream]));
 
     byUid.add([_doc('both', status: 'adhoc')]);
     byEmail.add([_doc('both', status: 'adhoc'), _doc('bad', date: 'soon')]);
@@ -166,7 +173,7 @@ void main() {
   });
 
   test('counts unreadable documents from either query, once each', () async {
-    listen(mergeUserBookings(byUid.stream, sharedByEmail: byEmail.stream));
+    listen(mergeUserBookings(byUid.stream, sharedByEmail: [byEmail.stream]));
 
     byUid.add([_doc('typo', status: 'piad'), _doc('ok')]);
     byEmail.add([_doc('typo', status: 'piad'), _doc('nodate', status: 'adhoc', date: '')]);
@@ -177,7 +184,7 @@ void main() {
   });
 
   test('the shared sessions failing (rules not deployed yet) leaves the booked ones', () async {
-    listen(mergeUserBookings(byUid.stream, sharedByEmail: byEmail.stream));
+    listen(mergeUserBookings(byUid.stream, sharedByEmail: [byEmail.stream]));
 
     byUid.add([_doc('paid1')]);
     byEmail.addError(Exception('permission-denied'));
@@ -192,7 +199,7 @@ void main() {
   });
 
   test('a shared query that fails after answering counts as none', () async {
-    listen(mergeUserBookings(byUid.stream, sharedByEmail: byEmail.stream));
+    listen(mergeUserBookings(byUid.stream, sharedByEmail: [byEmail.stream]));
     byUid.add([_doc('paid1')]);
     byEmail.add([_doc('adhoc1', status: 'adhoc')]);
     await pumpEventQueue();
@@ -204,8 +211,53 @@ void main() {
     expect(errors, isEmpty);
   });
 
+  group('several shared queries', () {
+    late StreamController<List<BookingDoc>> byOneEmail;
+
+    setUp(() => byOneEmail = StreamController());
+
+    Stream<UserBookings> merged() => mergeUserBookings(byUid.stream, sharedByEmail: [byEmail.stream, byOneEmail.stream]);
+
+    test('waits for every one, then lists them all, each booking once', () async {
+      listen(merged());
+
+      byUid.add([_doc('paid1')]);
+      byEmail.add([_doc('adhoc1', status: 'adhoc'), _doc('both', status: 'adhoc')]);
+      await pumpEventQueue();
+      expect(emitted, isEmpty);
+
+      byOneEmail.add([_doc('both', status: 'adhoc'), _doc('old', status: 'adhoc')]);
+      await pumpEventQueue();
+      expect(ids(emitted.single), ['adhoc1', 'both', 'old', 'paid1']);
+    });
+
+    test('one failing leaves the others', () async {
+      listen(merged());
+
+      byUid.add([_doc('paid1')]);
+      byEmail.addError(Exception('failed-precondition'));
+      byOneEmail.add([_doc('old', status: 'adhoc')]);
+      await pumpEventQueue();
+
+      expect(errors, isEmpty);
+      expect(ids(emitted.last), ['old', 'paid1']);
+    });
+
+    test('cancelling cancels them all', () async {
+      var cancelled = 0;
+      byEmail = StreamController(onCancel: () => cancelled++);
+      byOneEmail = StreamController(onCancel: () => cancelled++);
+      final subscription = listen(merged());
+      await pumpEventQueue();
+
+      await subscription.cancel();
+
+      expect(cancelled, 2);
+    });
+  });
+
   test('the booked sessions failing is an error', () async {
-    listen(mergeUserBookings(byUid.stream, sharedByEmail: byEmail.stream));
+    listen(mergeUserBookings(byUid.stream, sharedByEmail: [byEmail.stream]));
 
     byUid.addError(Exception('permission-denied'));
     await pumpEventQueue();
@@ -227,7 +279,7 @@ void main() {
     var emailCancelled = false;
     byUid = StreamController(onCancel: () => uidCancelled = true);
     byEmail = StreamController(onCancel: () => emailCancelled = true);
-    final subscription = listen(mergeUserBookings(byUid.stream, sharedByEmail: byEmail.stream));
+    final subscription = listen(mergeUserBookings(byUid.stream, sharedByEmail: [byEmail.stream]));
     await pumpEventQueue();
     expect(byUid.hasListener && byEmail.hasListener, isTrue);
 
@@ -240,7 +292,7 @@ void main() {
   test('ends when the uid query ends, and stops the shared one', () async {
     var emailCancelled = false;
     byEmail = StreamController(onCancel: () => emailCancelled = true);
-    final merged = mergeUserBookings(byUid.stream, sharedByEmail: byEmail.stream);
+    final merged = mergeUserBookings(byUid.stream, sharedByEmail: [byEmail.stream]);
     final done = Completer<void>();
     merged.listen(null, onDone: done.complete, onError: (_) {});
 

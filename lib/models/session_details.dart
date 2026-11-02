@@ -3,7 +3,7 @@
 class SessionDetails {
   const SessionDetails({
     required this.name,
-    required this.email,
+    required this.emails,
     required this.date,
     this.packageName,
     this.time,
@@ -13,8 +13,9 @@ class SessionDetails {
   /// Who it's for: "The Harper family".
   final String name;
 
-  /// The Google email of whoever may download the photos.
-  final String email;
+  /// The Google emails of whoever may download the photos, in the order
+  /// typed: both of a couple, say.
+  final List<String> emails;
 
   /// The session's day (the time of day is ignored).
   final DateTime date;

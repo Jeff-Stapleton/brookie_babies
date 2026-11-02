@@ -27,10 +27,10 @@ and later download their edited photos. The site is hosted on Firebase.
   photo from a session as one zip, through a private link that expires after
   an hour. While a zip is prepared, the page shows how it's going.
 - **Admin portal** (`/#/admin`, or **Admin** in the account menu, shown only to
-  admins): every session; ad hoc sessions for family and friends, shared by
-  email; uploading a session's photos; **Make photos available**; a message to
-  copy and send to the family; and choosing the home page photos. See "Admin
-  portal".
+  admins): every session; ad hoc sessions for family and friends, shared with
+  one or more emails (both of a couple, say); uploading a session's photos;
+  **Make photos available**; a message to copy and send to the family; and
+  choosing the home page photos. See "Admin portal".
 
 ## Tech stack
 
@@ -223,14 +223,14 @@ says so by **Upload photos**).
 
 ## Delivering photos
 
-Families download their photos from **Your sessions** once the session's `photosReady` is `true` and its `status` is `paid` or `adhoc`. The **Download all photos** button appears on the session's card even before the session date, so check that the session is right before making its photos available. Photos are never public through the site: families get a zip download link that expires after one hour. Hiding the photos, deleting one, or changing who an ad hoc session is shared with also deletes the cached zip, so links already handed out stop working at once (if that delete fails, the change still goes through and those links expire within the hour).
+Families download their photos from **Your sessions** once the session's `photosReady` is `true` and its `status` is `paid` or `adhoc`. The **Download all photos** button appears on the session's card even before the session date, so check that the session is right before making its photos available. Photos are never public through the site: families get a zip download link that expires after one hour. Hiding the photos, deleting one, or taking an email off an ad hoc session also deletes the cached zip, so links already handed out stop working at once (if that delete fails, the change still goes through and those links expire within the hour).
 
 ### In the admin portal
 
 1. **Open the session** from **Admin**. A paid booking appears there once it's in Firestore (for now you add those by hand; see "Adding a paid booking by hand"). For family and friends, **Add a session** first (see "Ad hoc sessions").
 2. **Upload photos** and pick the edited photos: any image type, each under 100 MB. They upload three at a time; keep the page open until they finish (leaving or closing the tab asks first, and stops them). A photo whose name is already in the session is skipped, never overwritten, so after a problem you can pick the whole folder again. To replace a photo, delete it first. **Retry failed** tries failed ones again.
 3. **Make photos available.** It becomes the page's main button once there are photos and nothing is still uploading or failed, and it asks first, saying how many photos and who can download them. **Hide photos** stops downloads again. **Delete all photos** on a session whose photos are available hides them first, so a family never downloads a half-deleted gallery.
-4. **Tell the family.** Under **Share with the family**, **Copy message** copies a note with the link to Your sessions and the Google account to sign in with, ready to paste into an email or a text. The site doesn't email families itself.
+4. **Tell the family.** Under **Share with the family**, **Copy message** copies a note with the link to Your sessions and the Google account to sign in with (any of an ad hoc session's emails), ready to paste into an email or a text. The site doesn't email families itself.
 
 The first download builds a zip of the whole folder, which can take a few minutes for a large gallery. While it's built, the family sees which photo is being added ("Adding photo 38 of 150"), a progress bar and the zip's size. On a computer the page asks before it's closed or reloaded, and on a phone it keeps the screen from locking where the browser allows. When the zip is ready, the download starts by itself and the card says "Your download has started", with the number of photos and the size. A family with several sessions ready downloads them one at a time: pressing another session's button while one is being prepared asks them to wait for it. Closing or reloading the page doesn't stop the build, so the next download is usually quick. Later downloads reuse the zip. If you add, replace or delete photos afterwards, the next download rebuilds the zip automatically; families who already downloaded need to download again to get the changes. (If you replace a photo while a family's download is being built, that one download may contain the old version.)
 
@@ -238,9 +238,9 @@ A gallery that takes more than 9 minutes to zip fails every time. The function l
 
 ### Ad hoc sessions
 
-An ad hoc session is for family, friends and anyone not booked on the site: no payment, and no `uid`. It's a `bookings` document with `status` `adhoc`, shared by email: whoever signs in to the site with Google as that email, verified by Google, sees it under **Your sessions** (with no payment tag) and can download its photos once they're available.
+An ad hoc session is for family, friends and anyone not booked on the site: no payment, and no `uid`. It's a `bookings` document with `status` `adhoc`, shared by email: whoever signs in to the site with Google as one of its emails, verified by Google, sees it under **Your sessions** (with no payment tag) and can download its photos once they're available. A wedding can be shared with both of the couple, say, so either can sign in and download the photos.
 
-**Admin → Add a session**: a name (who it's for, such as "The Harper family"; the family sees it as the session's title under Your sessions, as you do on the Admin page), the email they use to sign in to Google (exactly as their Google account shows it: Google sign-in accepts `janedoe@gmail.com` for `jane.doe@gmail.com`, but the site matches the account's own address, dots included; the form refuses addresses no Google sign-in could match, such as ones with angle brackets, `mailto:`, spaces or a Gmail `+tag`), a date, and optionally a package, time and location. **Add session** opens its page, ready for photos. **Edit details** changes them; changing the email of a session whose photos are available asks first, because it hands the photos to the new address. **Delete session** deletes the session and its photos for good. Only ad hoc sessions can be edited or deleted in the portal. A family signed in with a different Google account sees, under Your sessions, which account they're signed in as, so they can switch.
+**Admin → Add a session**: a name (who it's for, such as "The Harper family"; the family sees it as the session's title under Your sessions, as you do on the Admin page), the email they use to sign in to Google, and **Add another email** for each other person who should download the photos (up to 10). Enter each exactly as their Google account shows it: Google sign-in accepts `janedoe@gmail.com` for `jane.doe@gmail.com`, but the site matches the account's own address, dots included. The form refuses addresses no Google sign-in could match, such as ones with angle brackets, `mailto:`, spaces or a Gmail `+tag`, and the same address twice. Then a date, and optionally a package, time and location. **Add session** opens its page, ready for photos. **Edit details** changes them; adding or taking off an email of a session whose photos are available asks first, because it changes who has the photos. **Delete session** deletes the session and its photos for good. Only ad hoc sessions can be edited or deleted in the portal. A family signed in with a different Google account sees, under Your sessions, which account they're signed in as, so they can switch.
 
 **Add ad hoc sessions in the portal, not in the Firebase console.** The portal writes exactly what the rules and the download function check. A session typed in the console with `status` other than exactly `adhoc`, or an email with a capital letter or a space, is shared with nobody.
 
@@ -252,7 +252,7 @@ The portal saves these fields:
 |---|---|---|
 | `status` | string | `adhoc`, exactly |
 | `name` | string | Who it's for, 1 to 100 characters: the session's title for you and the family |
-| `email` | string | The guest's Google email, trimmed and lowercase |
+| `emails` | array of strings | The guests' Google emails: 1 to 10, each trimmed and lowercase, none twice |
 | `packageName` | string | Optional: `Basic`, `Premium` or `Ultimate` |
 | `date` | string | `YYYY-MM-DD` |
 | `time` | string | Optional: 24-hour `HH:mm` |
@@ -260,6 +260,8 @@ The portal saves these fields:
 | `photosReady` | boolean | `false` until you make the photos available |
 | `createdAt`, `createdBy` | timestamp, string | When it was added, and the admin's uid |
 | `updatedAt` | timestamp | When the portal last changed it (set on any booking it changes) |
+
+A session added before it could have several emails has a single `email` (a string) instead of `emails`. It works the same, and the first **Edit details** moves it into `emails`. The rules still accept a single `email` from a site that old, so a page left open from before the change keeps working.
 
 ### Adding a paid booking by hand
 
@@ -336,10 +338,10 @@ These files are the source of truth: each deploy **replaces the Firestore and St
 
 Admins are accounts whose ID token carries the custom claim `admin: true` (see "Admin portal"); both rules files check it the same way. The admin pages write straight from the browser, so the rules are the only check on what they write. The app checks the same limits first (`lib/services/photo_rules.dart`, `lib/services/admin_service.dart`), so change them together.
 
-- **Bookings.** A family reads the bookings carrying their `uid`, and ad hoc sessions (`status` exactly `adhoc`) whose `email` is the email they verified with Google, lowercased. Admins read every booking. They create only ad hoc sessions (the fields in "Ad hoc sessions", never a `uid`), change only `photosReady` on other bookings and only the details and `photosReady` of ad hoc sessions, stamping `updatedAt` each time, and delete only ad hoc sessions. `uid`, `status`, `createdAt` and `createdBy` never change.
+- **Bookings.** A family reads the bookings carrying their `uid`, and ad hoc sessions (`status` exactly `adhoc`) whose `emails` (or single `email`, from before several) include the email they verified with Google, lowercased. Admins read every booking. They create only ad hoc sessions (the fields in "Ad hoc sessions", never a `uid`; `emails` holds 1 to 10 valid addresses, each once, or a single `email` stands in for it), change only `photosReady` on other bookings and only the details and `photosReady` of ad hoc sessions, stamping `updatedAt` each time, and delete only ad hoc sessions. `uid`, `status`, `createdAt` and `createdBy` never change; `email` may only go, as a session moves to `emails`.
 - **`site/home`.** Anyone reads it. Admins save it whole: `photos` (at most seven file names), `updatedAt` and `updatedBy`.
 - **Storage.** `_admin/gallery/` stays publicly readable (get and list). Admins add photos directly in it (JPEG, PNG or WebP, named `.jpg`, `.jpeg`, `.png` or `.webp`, under 20 MiB) and delete them. Under `galleries/<bookingId>/` only admins read, add (any image type, under 100 MiB) and delete. Admins may delete a cached zip in `gallery-zips/`, nothing more. There's no update anywhere, so nothing is ever overwritten.
-- **`getGalleryDownloadUrl`** serves the same people: the booking's `uid`, or for an ad hoc session the caller whose verified Google email matches. Ad hoc sessions need no payment.
+- **`getGalleryDownloadUrl`** serves the same people: the booking's `uid`, or for an ad hoc session the caller whose verified Google email is one of its emails. Ad hoc sessions need no payment.
 
 No new IAM roles, function permissions, APIs or secrets are needed: the function reads the same bookings and bucket as before, and everything admins do goes through the rules.
 
@@ -347,7 +349,7 @@ CI doesn't evaluate the rules (it has no emulator); `flutter test` only checks t
 
 ```bash
 gcloud auth login            # once, as the owner
-bash scripts/test-rules.sh   # "firestore.rules: 149 of 149 cases pass", then storage.rules
+bash scripts/test-rules.sh   # "firestore.rules: 202 of 202 cases pass", then storage.rules
 ```
 
 Both are read-only: the script sends the rules and each case to the Firebase Rules API's test endpoint (`projects/brookie-babies:test`), which deploys nothing and reads no live data, and it never prints your access token. It lists any case that fails and exits with an error. Add cases to `rules-tests/firestore-cases.mjs` or `rules-tests/storage-cases.mjs` for what you change. Never test rules by writing to the live project.
@@ -356,9 +358,10 @@ Both are read-only: the script sends the rules and each case to the Firebase Rul
 
 Deploy the rules and the function **before** (or with) the site that relies on them. A site that's already live keeps working with newer rules and function (today's site only asks for what the new ones still allow). If a new site goes live first:
 
-- the query for ad hoc sessions shared by email is refused, so families see only their own bookings (it's logged, nothing breaks);
+- the queries for ad hoc sessions shared by email are refused, so families see only their own bookings (it's logged, nothing breaks);
 - reading `site/home` is refused, so the home page falls back to the first seven photos by name;
 - admins' reads and writes are refused, so the admin pages say they couldn't load or save;
+- with the rules from before several emails, sessions saved with `emails` can't be added or edited, and their guests don't see them;
 - with the new rules but the old function, guests see their ad hoc session but its download fails ("We couldn’t find this session’s photos");
 - with the new site but the old function, downloads work as before, showing only "Preparing your photos…" until they start (no progress or size).
 

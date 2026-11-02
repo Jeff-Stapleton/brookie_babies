@@ -19,9 +19,17 @@ final _viewerFade = CurveTween(curve: Curves.easeOut);
 /// A family's private session: a full-bleed cover photograph followed by
 /// every photo in the gallery. Selecting a print opens the full photograph.
 class SessionGalleryPage extends StatefulWidget {
-  const SessionGalleryPage({super.key, required this.booking});
+  const SessionGalleryPage({
+    super.key,
+    required this.booking,
+    this.adminPreview = false,
+  });
 
   final Booking booking;
+
+  /// Loads the gallery with the admin claim even before it is available to
+  /// the family. The page itself stays the same as the customer's view.
+  final bool adminPreview;
 
   @override
   State<SessionGalleryPage> createState() => _SessionGalleryPageState();
@@ -36,7 +44,10 @@ class _SessionGalleryPageState extends State<SessionGalleryPage> {
     _photos = _load();
   }
 
-  Future<List<GalleryPhoto>> _load() => AppServices.of(context).gallery.loadPhotos(widget.booking.id);
+  Future<List<GalleryPhoto>> _load() => AppServices.of(context).gallery.loadPhotos(
+        widget.booking.id,
+        adminPreview: widget.adminPreview,
+      );
 
   void _retry() {
     final photos = _load();
@@ -48,7 +59,10 @@ class _SessionGalleryPageState extends State<SessionGalleryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const BrookieTopBar(title: 'Photo gallery'),
+      // A customer has no Admin link. Keep it out of the preview too, so the
+      // gallery itself is what the family will see; Back still returns to the
+      // session's admin page.
+      appBar: BrookieTopBar(title: 'Photo gallery', showAdminLink: !widget.adminPreview),
       body: FutureBuilder<List<GalleryPhoto>>(
         future: _photos,
         builder: (context, snapshot) {

@@ -267,6 +267,15 @@ function callPhotos() {
   return getGalleryPhotos(deps, {uid: UID}, {bookingId: BOOKING_ID});
 }
 
+/** Loads an admin preview of the individual photos for BOOKING_ID. */
+function callPreview(token: CallerAuth["token"]) {
+  return getGalleryPhotos(
+    deps,
+    {uid: "admin-uid", token},
+    {bookingId: BOOKING_ID, adminPreview: true},
+  );
+}
+
 /** Makes deps.now move on a second each time it's read, so no progress is throttled. */
 function tick(): void {
   let time = NOW.getTime();
@@ -714,6 +723,67 @@ describe("getGalleryPhotos", {timeout: 10_000}, () => {
       {bookingId: BOOKING_ID},
     );
     assert.equal(shared.photos.length, 1);
+  });
+
+  test("lets an admin preview the same gallery before the customer can see it", async () => {
+    addBooking(BOOKING_ID, {
+      uid: "someone-else",
+      status: "pending",
+      photosReady: false,
+      mainPhoto: "z-cover.jpg",
+    });
+    bucket.put("galleries/b1/a-first.jpg", "first");
+    bucket.put("galleries/b1/z-cover.jpg", "cover");
+
+    const result = await callPreview({admin: true});
+
+    assert.deepEqual(result.photos.map((photo) => photo.name), [
+      "z-cover.jpg",
+      "a-first.jpg",
+    ]);
+  });
+
+  test("requires the exact admin claim and explicit preview flag", async () => {
+    addBooking(BOOKING_ID, {uid: "someone-else", photosReady: false});
+    bucket.put("galleries/b1/a.jpg", "photo");
+
+    const nonAdminTokens: CallerAuth["token"][] = [
+      undefined,
+      {},
+      {admin: false},
+      {admin: "true"},
+      {admin: 1},
+    ];
+    for (const token of nonAdminTokens) {
+      await assertHttpsError(callPreview(token), "not-found", MESSAGES.notFound);
+    }
+    await assertHttpsError(
+      getGalleryPhotos(
+        deps,
+        {uid: "admin-uid", token: {admin: true}},
+        {bookingId: BOOKING_ID},
+      ),
+      "not-found",
+      MESSAGES.notFound,
+    );
+    await assertHttpsError(
+      getGalleryPhotos(
+        deps,
+        {uid: "admin-uid", token: {admin: true}},
+        {bookingId: BOOKING_ID, adminPreview: "true"},
+      ),
+      "not-found",
+      MESSAGES.notFound,
+    );
+    await assertHttpsError(
+      getGalleryDownload(
+        deps,
+        {uid: "admin-uid", token: {admin: true}},
+        {bookingId: BOOKING_ID, adminPreview: true},
+      ),
+      "not-found",
+      MESSAGES.notFound,
+    );
   });
 });
 

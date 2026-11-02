@@ -71,6 +71,7 @@ void main() {
     await pumpGallery(tester);
 
     expect(gallery.photoRequests, ['fall-family']);
+    expect(gallery.adminPreviewRequests, isEmpty);
     expect(find.byType(BrookieTopBar), findsOneWidget);
     expect(find.text('Photo gallery'), findsOneWidget);
     expect(find.text('The Harper family'), findsOneWidget);

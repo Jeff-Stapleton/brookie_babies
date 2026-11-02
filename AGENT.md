@@ -12,7 +12,8 @@ Payment Link to pay. Signed-in families see "Your sessions", open a private
 full-bleed gallery for each finished session and download its photos as one
 zip. Admins (the studio) use an admin portal at `/#/admin` to add ad hoc
 sessions for family and friends, upload photos, make them available and choose
-the main photo for each session gallery and the home page photos.
+the main photo for each session gallery, preview the customer's gallery before
+sending it, and choose the home page photos.
 
 For now the home page leaves out the introduction and the packages, and with
 the packages every way into booking, until Brooke settles them
@@ -103,8 +104,9 @@ lib/
                           responsive print grid and a full-screen previous/next photo viewer
     admin_page.dart       "Admin" (route /admin): home page photos card, "Add a session", every session
                           (upcoming, past, unreadable); AdminPage.open(), AdminPage.returnWithNotice()
-    admin_session_page.dart  One session: details, who can download and the share message, "Make photos
-                          available" / "Hide photos", uploads, the main-photo choice and photo list; edit and delete for ad hoc ones
+    admin_session_page.dart  One session: details, who can download and the share message, customer-view
+                          preview, "Make photos available" / "Hide photos", uploads, the main-photo choice
+                          and photo list; edit and delete for ad hoc ones
     session_form_page.dart   Add or edit an ad hoc session (name, up to ten emails, package, date, time, location)
     home_photos_admin_page.dart  "Home page photos": the chosen photos in order, the public library, uploads,
                           "Save home page"
@@ -192,7 +194,9 @@ functions/                Cloud Functions, TypeScript on Node 24 (own package.js
   src/index.ts            Function definitions (region us-central1); getGalleryPhotoUrls, getGalleryDownloadUrl
   src/gallery.ts          Shared gallery access/listing logic with injected Firestore/Storage, so tests use
                           in-memory fakes; puts a valid bookings.mainPhoto first for the gallery cover, then
-                          signs individual photo links with bounded concurrency; canDownload():
+                          signs individual photo links with bounded concurrency; an explicit admin preview
+                          checks the admin claim and bypasses customer payment/readiness without enabling zip
+                          downloads; canDownload():
                           the booking's uid, or a verified email in an ad hoc session's emails or any session's
                           sharedWith; progressSender: progress
                           chunks to the caller, at most one per 500 ms (the first and last always)
@@ -297,7 +301,11 @@ Admin flows (accounts with the `admin: true` claim, from `scripts/grant-admin.sh
 7. `AdminSessionPage`: "Upload photos" → `pickPhotos(accept: 'image/*')` →
    `UploadQueue` (three at a time, names already there skipped, checked with
    `PhotoRules.sessionPhotoProblem`) → `uploadSessionPhoto` into
-   `galleries/<id>/`. "Make photos available" (confirmed) →
+   `galleries/<id>/`. Once there is a photo, "Preview session" opens the same
+   `SessionGalleryPage` customers see; `loadPhotos(adminPreview: true)` asks
+   `getGalleryPhotoUrls` for one-hour links after checking the admin claim,
+   even before payment/readiness, without changing the session. "Make photos
+   available" (confirmed) →
    `setPhotosReady(id, true)`; "Hide photos" undoes it. "Copy message" copies
    `AdminSessionPage.shareMessage`: the `/#/profile` link and the Google
    account to sign in with. Ad hoc sessions also have "Edit details"
@@ -620,7 +628,8 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
   first gets its guest query and `site/home` read refused (both fall back
   harmlessly) and every admin read and write denied (README, "Deploy order").
   A new site before `getGalleryPhotoUrls` exists shows its gallery retry
-  message; with an older `getGalleryDownloadUrl` it still downloads, without
+  message; a function from before admin preview does the same for "Preview
+  session". With an older `getGalleryDownloadUrl` it still downloads, without
   progress or a size.
 - CI deploys the backend as `github-deployer`, which deliberately has no
   direct permission to turn on APIs, read secret values or change IAM. The

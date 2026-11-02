@@ -200,6 +200,7 @@ class FakeGalleryService implements GalleryService {
   bool holdGalleryPhotos = false;
 
   final photoRequests = <String>[];
+  final adminPreviewRequests = <String>[];
   final requested = <String>[];
 
   // Created per call rather than up front, so it belongs to the test's
@@ -209,8 +210,9 @@ class FakeGalleryService implements GalleryService {
   GalleryProgressCallback? _onProgress;
 
   @override
-  Future<List<GalleryPhoto>> loadPhotos(String bookingId) {
+  Future<List<GalleryPhoto>> loadPhotos(String bookingId, {bool adminPreview = false}) {
     photoRequests.add(bookingId);
+    if (adminPreview) adminPreviewRequests.add(bookingId);
     final error = galleryPhotosError;
     if (error != null) return Future.error(error);
     if (holdGalleryPhotos) return (_pendingPhotos = Completer()).future;

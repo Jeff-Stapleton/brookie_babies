@@ -2,15 +2,16 @@
 // the caller may see a booking whose photos are ready (their own paid
 // booking, an ad hoc session shared with their verified Google email, or a
 // session its owner shared with that email), then lists the photos in
-// galleries/{bookingId}/. getGalleryPhotoUrls returns short-lived signed URLs
+// galleries/{bookingId}/. An admin may also ask getGalleryPhotoUrls for a
+// preview before the photos are available. It returns short-lived signed URLs
 // for the individual photos. getGalleryDownloadUrl zips them into
 // gallery-zips/{bookingId}.zip (reusing the zip while the photos are
 // unchanged) and returns a short-lived signed URL for it. While it builds a
 // zip, it streams its progress to callers that ask for it (the site).
 //
-// Who may see the photos mirrors who may read the booking in firestore.rules
-// (admins aside: they read every booking but download none), so the app only
-// ever shows a gallery or download the caller can get.
+// Customer access mirrors who may read the booking in firestore.rules. Admin
+// preview is explicit and checks the same admin claim as the rules; admins
+// still cannot ask for a customer's zip.
 //
 // Firestore and Storage are injected as the small interfaces below, so the
 // unit tests can use in-memory fakes. index.ts passes the real Admin SDK
@@ -167,7 +168,7 @@ export interface GalleryDeps {
  */
 export interface CallerAuth {
   uid: string;
-  token?: {email?: unknown; email_verified?: unknown};
+  token?: {email?: unknown; email_verified?: unknown; admin?: unknown};
 }
 
 export interface CallableRequestLike {
@@ -255,7 +256,12 @@ export async function getGalleryPhotos(
   caller: CallerAuth,
   data: unknown,
 ): Promise<GalleryPhotoList> {
-  const {booking, photos} = await authorizedGallery(deps, caller, data);
+  const {booking, photos} = await authorizedGallery(
+    deps,
+    caller,
+    data,
+    adminPreviewRequested(data),
+  );
   const expires = new Date(deps.now().getTime() + SIGNED_URL_TTL_MS);
   return {
     photos: await signGalleryPhotos(
@@ -355,27 +361,33 @@ async function authorizedGallery(
   deps: GalleryDeps,
   caller: CallerAuth,
   data: unknown,
+  adminPreview = false,
 ): Promise<AuthorizedGallery> {
   const bookingId = parseBookingId(data);
   const snapshot = await deps.db.doc(`bookings/${bookingId}`).get();
   const booking = snapshot.exists ? snapshot.data() : undefined;
   // Same error for "doesn't exist" and "someone else's", and before any
   // status or readiness check, so booking IDs can't be probed.
-  if (!booking || !canDownload(booking, caller)) {
+  const canSee = adminPreview
+    ? caller.token?.admin === true
+    : booking !== undefined && canDownload(booking, caller);
+  if (!booking || !canSee) {
     throw new HttpsError("not-found", MESSAGES.notFound);
   }
   // Bookings are typed in by hand; accept " Paid " the same way the Flutter
   // client (Booking.fromMap) does, so it never shows a gallery that fails.
   // Ad hoc sessions need no payment.
-  const status =
-    typeof booking.status === "string"
-      ? booking.status.trim().toLowerCase()
-      : undefined;
-  if (status !== "paid" && status !== "adhoc") {
-    throw new HttpsError("failed-precondition", MESSAGES.notPaid);
-  }
-  if (booking.photosReady !== true) {
-    throw new HttpsError("failed-precondition", MESSAGES.notReady);
+  if (!adminPreview) {
+    const status =
+      typeof booking.status === "string"
+        ? booking.status.trim().toLowerCase()
+        : undefined;
+    if (status !== "paid" && status !== "adhoc") {
+      throw new HttpsError("failed-precondition", MESSAGES.notPaid);
+    }
+    if (booking.photosReady !== true) {
+      throw new HttpsError("failed-precondition", MESSAGES.notReady);
+    }
   }
 
   const prefix = `${GALLERY_PREFIX}${bookingId}/`;
@@ -385,6 +397,15 @@ async function authorizedGallery(
     throw new HttpsError("failed-precondition", MESSAGES.notReady);
   }
   return {bookingId, booking, photos};
+}
+
+/** Only the exact boolean opts the photo callable into its admin-only path. */
+function adminPreviewRequested(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as {adminPreview?: unknown}).adminPreview === true
+  );
 }
 
 /**

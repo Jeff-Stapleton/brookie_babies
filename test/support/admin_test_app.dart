@@ -20,6 +20,7 @@ Future<void> pumpAdminPage(
   WidgetTester tester,
   Widget page, {
   FakeAdminService? admin,
+  FakeGalleryService? gallery,
   FakePhotoPicker? picker,
   FakeAuthService? auth,
   Brightness brightness = Brightness.light,
@@ -38,6 +39,7 @@ Future<void> pumpAdminPage(
   await tester.pumpWidget(testApp(
     auth: auth ?? FakeAuthService(signedInAs: studio, admin: true),
     admin: admin ?? FakeAdminService(),
+    gallery: gallery,
     pickPhotos: (picker ?? FakePhotoPicker()).call,
     brightness: brightness,
     routes: routes,

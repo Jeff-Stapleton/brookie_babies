@@ -179,6 +179,19 @@ void main() {
     expect(Booking.fromMap('b1', {...valid, 'name': 'The Harper family'})!.familyTitle, 'Premium session');
   });
 
+  test('reads who its owner shared it with, leaving out anything but text', () {
+    expect(
+      Booking.fromMap('b1', {
+        ...valid,
+        'sharedWith': [' grandma@example.com ', 7, '', 'aunt@example.com'],
+      })!
+          .sharedWith,
+      ['grandma@example.com', 'aunt@example.com'],
+    );
+    expect(Booking.fromMap('b1', valid)!.sharedWith, isEmpty);
+    expect(Booking.fromMap('b1', {...valid, 'sharedWith': 'grandma@example.com'})!.sharedWith, isEmpty);
+  });
+
   test('a paid booking has no guests: its email is a note, and emails on it count for nothing', () {
     final booking = Booking.fromMap('b1', {
       ...valid,

@@ -1,6 +1,7 @@
 // Core logic of the getGalleryDownloadUrl callable: checks that the caller
-// may download a booking whose photos are ready (their own paid booking, or
-// an ad hoc session shared with their verified Google email), zips the
+// may download a booking whose photos are ready (their own paid booking, an
+// ad hoc session shared with their verified Google email, or a session its
+// owner shared with that email), zips the
 // photos in galleries/{bookingId}/ into gallery-zips/{bookingId}.zip
 // (reusing the zip while the photos are unchanged) and returns a short-lived
 // signed URL for it. While it builds a zip, it streams its progress to callers
@@ -333,11 +334,12 @@ export function progressSender(
 
 /**
  * Whether the caller may download this booking's photos: it carries their
- * uid, or it's an ad hoc session (status exactly "adhoc", as only the admin
- * pages write it) whose `emails` include the email the caller verified with
- * Google (or whose `email` is it, for a session from before there could be
- * several). Like the bookings read rule in firestore.rules, which compares
- * the stored emails (saved lowercase) with the token's email lowercased.
+ * uid; or its owner shared it with the email the caller verified with Google
+ * (`sharedWith`); or it's an ad hoc session (status exactly "adhoc", as only
+ * the admin pages write it) whose `emails` include that email (or whose
+ * `email` is it, for a session from before there could be several). Like
+ * the bookings read rule in firestore.rules, which compares the stored
+ * emails (saved lowercase) with the token's email lowercased.
  *
  * Booking fields and claims are checked with typeof first, so odd values
  * typed into the console mean "not theirs", never a TypeError ('internal').
@@ -350,10 +352,10 @@ export function canDownload(
   const token = caller.token;
   if (token?.email_verified !== true || typeof token.email !== "string") return false;
   const email = token.email.toLowerCase();
+  const listed = (list: unknown): boolean => Array.isArray(list) && list.includes(email);
   return (
-    booking.status === "adhoc" &&
-    ((Array.isArray(booking.emails) && booking.emails.includes(email)) ||
-      booking.email === email)
+    listed(booking.sharedWith) ||
+    (booking.status === "adhoc" && (listed(booking.emails) || booking.email === email))
   );
 }
 

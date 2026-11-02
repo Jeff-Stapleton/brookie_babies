@@ -41,16 +41,8 @@ class AdminSessionPage extends StatefulWidget {
   /// The `bookings` document id.
   final String sessionId;
 
-  /// Where families download their photos, on the site this runs on (the
-  /// live site when it isn't running on the web).
-  static Uri get familyLink {
-    final base = Uri.base;
-    final origin = base.isScheme('http') || base.isScheme('https') ? base.origin : 'https://$siteDomain';
-    return Uri.parse('$origin/#/profile');
-  }
-
-  /// The message to send the family: where to go, and which account to
-  /// sign in with.
+  /// The message to send the family: where to go, which account to sign in
+  /// with, and that they can share the photos from there.
   static String shareMessage(Booking booking) {
     final emails = booking.guestEmails;
     // An ad hoc session is shared with its emails; a booking with the Google
@@ -58,7 +50,8 @@ class AdminSessionPage extends StatefulWidget {
     final account = emails.isNotEmpty
         ? 'sign in with Google as ${formatList(emails, last: 'or')}'
         : 'sign in with the Google account you booked with';
-    return 'Your photos from Brooke are ready. Open $familyLink and $account to download them.';
+    return 'Your photos from Brooke are ready. Open $sessionsLink and $account to download them or share them '
+        'with family.';
   }
 
   @override
@@ -340,12 +333,16 @@ class _SessionBodyState extends State<_SessionBody> {
   Future<void> _makeAvailable(Booking booking) async {
     if (_savingReady) return;
     final who = _whoCanDownload(booking);
+    final shared = booking.sharedWith;
     final confirmed = await showBrookieConfirm(
       context,
       title: 'Make photos available?',
       message: who == null
           ? '${_photoCount(_photos!.length)}. Nobody can download them until the session says who it’s for.'
-          : '${_photoCount(_photos!.length)}. $who can download them.',
+          : [
+              '${_photoCount(_photos!.length)}. $who can download them.',
+              if (shared.isNotEmpty) 'The family also shared it with ${formatList(shared)}.',
+            ].join(' '),
       confirmLabel: 'Make photos available',
     );
     if (confirmed && mounted) await _setReady(true);
@@ -966,6 +963,8 @@ class _WhoCanDownload extends StatelessWidget {
     final lines = <Widget>[
       SelectableText(_whoCanDownload(booking) ?? nobody),
       if (!booking.isAdHoc && email != null) SelectableText('Email on the booking: $email'),
+      if (booking.sharedWith.isNotEmpty)
+        SelectableText('Shared by the family with ${formatList(booking.sharedWith)}'),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

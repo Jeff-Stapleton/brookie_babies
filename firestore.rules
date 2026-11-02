@@ -7,9 +7,10 @@ rules_version = '2';
 // can still create and edit bookings.
 //
 // Admins are accounts with the custom claim `admin: true`, granted by the
-// project owner with scripts/grant-admin.sh. The admin pages write directly
-// from the app, so these rules are the only check on what they write. The app
-// (lib/services/admin_service.dart) checks the same constraints before
+// project owner with scripts/grant-admin.sh. The admin pages, and families
+// sharing their sessions, write directly from the app, so these rules are the
+// only check on what they write. The app (lib/services/admin_service.dart,
+// lib/services/booking_service.dart) checks the same constraints before
 // writing, so a rejection here only ever means a real access problem: change
 // both together.
 service cloud.firestore {
@@ -28,25 +29,30 @@ service cloud.firestore {
     // createdBy}, written by admins; they have no uid, because the guests are
     // known only by the Google emails the session is shared with. One added
     // before a session could have several emails has a single `email`
-    // instead of `emails` (validGuests).
+    // instead of `emails` (validGuests). Either kind may also have
+    // `sharedWith`: the emails its owner shared it with (isOwner), written
+    // from "Your sessions".
     //
     // Readers:
     //   - a signed-in customer: bookings carrying their uid;
     //   - an ad hoc guest: ad hoc sessions whose emails (or email) include
     //     the one they verified with Google (the session's are saved
     //     lowercase; the token's may have capitals);
+    //   - whoever a session was shared with: bookings whose sharedWith
+    //     includes the email they verified with Google;
     //   - admins: everything.
     // getGalleryDownloadUrl (functions/src/gallery.ts) lets the same
-    // customers and guests download the photos. A check on a field the
-    // booking doesn't have (a uid, emails) is an error, which counts as false
-    // between the ||s, so the others decide.
+    // customers, guests and people shared with download the photos. A check
+    // on a field the booking doesn't have (a uid, emails, sharedWith) is an
+    // error, which counts as false between the ||s, so the others decide.
     //
     // Rules aren't filters: a query must match one of these on its own, i.e.
-    // `where('uid', isEqualTo: uid)` for customers, and
+    // `where('uid', isEqualTo: uid)` for customers,
     // `where('status', isEqualTo: 'adhoc')` with
     // `.where('emails', arrayContains: email)` or
     // `.where('email', isEqualTo: email)` (the lowercased email) for guests,
-    // or Firestore refuses the whole query instead of filtering it.
+    // and `where('sharedWith', arrayContains: email)` for people shared
+    // with, or Firestore refuses the whole query instead of filtering it.
     match /bookings/{bookingId} {
       allow get, list: if (request.auth != null
                            && resource.data.uid == request.auth.uid)
@@ -58,6 +64,9 @@ service cloud.firestore {
                            && resource.data.status == 'adhoc'
                            && request.auth.token.get('email_verified', false) == true
                            && resource.data.email == request.auth.token.email.lower())
+                       || (request.auth != null
+                           && request.auth.token.get('email_verified', false) == true
+                           && request.auth.token.email.lower() in resource.data.sharedWith)
                        || isAdmin();
 
       // Admins create ad hoc sessions only, never a booking with a uid:
@@ -89,12 +98,20 @@ service cloud.firestore {
       // validated: bookings typed into the console may hold odd values in
       // fields nobody touches. uid, status, createdAt and createdBy never
       // change, so a booking never moves between customer and guest.
-      allow update: if isAdmin()
-                    && request.resource.data.updatedAt == request.time
-                    && (resource.data.get('status', null) == 'adhoc'
-                        ? validAdHocUpdate()
-                        : changedKeys().hasOnly(['photosReady', 'updatedAt'])
-                          && validPhotosReadyChange());
+      //
+      // A session's owner changes who it's shared with, and nothing else:
+      // up to 10 valid emails, each listed once (the app adds and removes
+      // them one at a time with arrayUnion and arrayRemove). Admins don't
+      // touch sharedWith.
+      allow update: if (isAdmin()
+                        && request.resource.data.updatedAt == request.time
+                        && (resource.data.get('status', null) == 'adhoc'
+                            ? validAdHocUpdate()
+                            : changedKeys().hasOnly(['photosReady', 'updatedAt'])
+                              && validPhotosReadyChange()))
+                    || (isOwner()
+                        && changedKeys().hasOnly(['sharedWith'])
+                        && validEmailList(request.resource.data.sharedWith, 0));
 
       // Customers' bookings are records of a payment; only ad hoc sessions
       // can be deleted.
@@ -125,8 +142,9 @@ service cloud.firestore {
         && email.size() <= 254
         && email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
     }
-    // [min] to 10 valid emails, each listed once. Rules can't loop, so each
-    // place is checked in turn: one validEmailAt per place up to the most
+    // [min] to 10 valid emails, each listed once: an ad hoc session's emails,
+    // or who a session is shared with. Rules can't loop, so each place is
+    // checked in turn: one validEmailAt per place up to the most
     // (SessionRules.emailListMaxLength).
     function validEmailList(list, min) {
       return list is list
@@ -154,6 +172,18 @@ service cloud.firestore {
     }
     function validLocation(data) {
       return data.location is string && data.location.size() <= 200;
+    }
+
+    // Whose session it is to share: the customer whose uid it carries, or a
+    // guest the studio shared an ad hoc session with. Never someone it was
+    // shared with in turn: they can't pass it on, or take anyone off.
+    function isOwner() {
+      return request.auth != null
+        && (resource.data.get('uid', null) == request.auth.uid
+            || (resource.data.get('status', null) == 'adhoc'
+                && request.auth.token.get('email_verified', false) == true
+                && (request.auth.token.email.lower() in resource.data.get('emails', [])
+                    || resource.data.get('email', null) == request.auth.token.email.lower())));
     }
 
     function changedKeys() {

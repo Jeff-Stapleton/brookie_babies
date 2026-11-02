@@ -1,6 +1,6 @@
 # TODO
 
-Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-11-01 (several emails per ad hoc session).
+Open items for sign-in, bookings, photo downloads, the admin portal and site content. Last updated 2026-11-01 (several emails per ad hoc session; families sharing sessions).
 
 ## 1. Ship the admin portal
 
@@ -26,7 +26,7 @@ version of the download function. Do these in order.
       ```bash
       npm ci --prefix functions
       firebase deploy --only firestore:rules,storage --dry-run   # compiles the rules; changes nothing
-      bash scripts/test-rules.sh   # read-only: expect "202 of 202" and "65 of 65" cases to pass
+      bash scripts/test-rules.sh   # read-only: expect "265 of 265" and "65 of 65" cases to pass
       firebase deploy --only functions,firestore:rules,storage
       ```
       The site that's live now keeps working with them. Without them, the new
@@ -63,6 +63,13 @@ version of the download function. Do these in order.
         and open the link from the message: the session is under **Your
         sessions**, and **Download all photos** downloads a zip of the photos.
         Then the same as the third account.
+  - [ ] As the second account, on its **Your sessions**: **Share this
+        session** with a fourth account (or anyone willing to check), and
+        **Copy message**. Signed in as that account, the session is there,
+        marked "Shared with you", with no **Share this session**, and
+        **Download all photos** works. Back as the second account, **Stop
+        sharing**: the fourth account no longer sees it. The session's admin
+        page says who the family shared it with while they do.
   - [ ] Back in the session, **Edit details** and take the third email off
         (it asks first): that account no longer sees the session, and the
         second still does. Then change the second email: the second account
@@ -190,7 +197,13 @@ Functions → getGalleryDownloadUrl → Logs.
   - Add a branch ruleset on `main` that blocks force-pushes and deletion.
 - [ ] **Admin portal follow-ups** (not built yet):
   - Email families when their photos are ready. Today you copy the message
-    from the session's page and send it yourself.
+    from the session's page and send it yourself. The same for the people a
+    family shares a session with: today the family copies a message.
+  - When a family stops sharing a session, end the download links already
+    given out at once (a Firestore trigger deleting the cached zip when
+    `sharedWith` loses someone). Today they work until they expire, within
+    the hour.
+  - Let someone a session was shared with take themselves off it.
   - Thumbnails and resizing: the library grid downloads every photo at full
     size, and session photos are listed by name only.
   - Drag and drop from Finder onto the upload buttons.

@@ -555,6 +555,61 @@ describe("getGalleryDownload: ad hoc sessions shared by email", {timeout: 10_000
   });
 });
 
+describe("getGalleryDownload: sessions their owner shared", {timeout: 10_000}, () => {
+  const GRANDMA = {email: "grandma@example.com", email_verified: true};
+
+  test("someone a paid booking was shared with can download it", async () => {
+    addBooking(BOOKING_ID, {sharedWith: ["aunt@example.com", "grandma@example.com"]});
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const email of ["grandma@example.com", "Grandma@Example.COM", "aunt@example.com"]) {
+      assert.equal((await callAsGuest({email, email_verified: true})).photoCount, 1);
+    }
+  });
+
+  test("so can someone an ad hoc session was shared with, one email or several", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    addAdHocSession(BOOKING_ID, {sharedWith: ["grandma@example.com"]});
+    assert.equal((await callAsGuest(GRANDMA)).photoCount, 1);
+    addOneEmailSession(BOOKING_ID, {sharedWith: ["grandma@example.com"]});
+    assert.equal((await callAsGuest(GRANDMA)).photoCount, 1);
+  });
+
+  test("not until Google has verified the email, and never another one", async () => {
+    addBooking(BOOKING_ID, {sharedWith: ["grandma@example.com"]});
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const token of [
+      {email: "grandma@example.com", email_verified: false},
+      {email: "grandma@example.com"},
+      {email: "bob@example.com", email_verified: true},
+    ]) {
+      await assertHttpsError(callAsGuest(token), "not-found", MESSAGES.notFound);
+    }
+    assert.equal(bucket.writeStreamsOpened, 0);
+  });
+
+  test("a sharedWith that isn't a list of lowercase strings is not found", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    for (const sharedWith of [
+      "grandma@example.com",
+      ["Grandma@example.com"],
+      [["grandma@example.com"]],
+      {0: "grandma@example.com", length: 1},
+      null,
+    ]) {
+      addBooking(BOOKING_ID, {sharedWith});
+      await assertHttpsError(callAsGuest(GRANDMA), "not-found", MESSAGES.notFound);
+    }
+  });
+
+  test("access first, then the same payment and readiness checks as the owner's", async () => {
+    bucket.put("galleries/b1/a.jpg", "photo");
+    addBooking(BOOKING_ID, {sharedWith: ["grandma@example.com"], status: "pending"});
+    await assertHttpsError(callAsGuest(GRANDMA), "failed-precondition", MESSAGES.notPaid);
+    addBooking(BOOKING_ID, {sharedWith: ["grandma@example.com"], photosReady: false});
+    await assertHttpsError(callAsGuest(GRANDMA), "failed-precondition", MESSAGES.notReady);
+  });
+});
+
 describe("getGalleryDownload: zip", {timeout: 10_000}, () => {
   test("zips every photo, skipping placeholders and hidden files", async () => {
     addBooking(BOOKING_ID);

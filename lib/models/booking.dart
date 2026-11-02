@@ -6,8 +6,9 @@ enum BookingStatus { pending, paid, cancelled, refunded, adhoc }
 ///
 /// Paid bookings are written by the server or by hand in the Firebase
 /// console; ad hoc sessions by an admin in the app. Customers can only read
-/// their own (by uid, or ad hoc ones shared with their Google email). See the
-/// README for the fields.
+/// their own (by uid, or ad hoc ones shared with their Google email) and
+/// ones their owner shared with them ([sharedWith]). See the README for the
+/// fields.
 class Booking {
   const Booking({
     required this.id,
@@ -20,6 +21,7 @@ class Booking {
     this.uid,
     this.email,
     this.emails = const [],
+    this.sharedWith = const [],
     this.name,
   }) : assert(packageName != null || status == BookingStatus.adhoc, 'Only ad hoc sessions may have no package.');
 
@@ -61,6 +63,11 @@ class Booking {
     final email = this.email;
     return [...emails, if (email != null && !emails.contains(email)) email];
   }
+
+  /// Who the session's owner (the customer who booked it, or a guest of an
+  /// ad hoc one) shared it with from "Your sessions", by Google email: they
+  /// can see it and download its photos too, but not share it on.
+  final List<String> sharedWith;
 
   /// An ad hoc session's name, "The Harper family", which the admin pages
   /// and the family both see as its title. On a paid booking, who it's for,
@@ -109,6 +116,7 @@ class Booking {
       uid: optional('uid'),
       email: optional('email'),
       emails: _texts(data, 'emails'),
+      sharedWith: _texts(data, 'sharedWith'),
       name: optional('name'),
     );
   }

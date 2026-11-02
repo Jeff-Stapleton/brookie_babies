@@ -74,14 +74,8 @@ String? _emailProblem(String? email, {required bool first, required Iterable<Str
   if (normalized.isEmpty) {
     return first ? 'Enter the email they use to sign in to Google.' : 'Enter another email, or remove this one.';
   }
-  final googleProblem = SessionRules.googleEmailProblem(normalized);
-  if (googleProblem != null) return googleProblem;
-  if (normalized.length > SessionRules.emailMaxLength) {
-    return 'That’s too long for an email address: they have at most ${SessionRules.emailMaxLength} characters.';
-  }
-  if (!SessionRules.emailPattern.hasMatch(normalized)) {
-    return 'That isn’t a whole email address. Check it, like name@gmail.com.';
-  }
+  final problem = SessionRules.emailProblem(normalized);
+  if (problem != null) return problem;
   if (earlier.map(SessionRules.normalizeEmail).contains(normalized)) return 'That email is already above.';
   return null;
 }

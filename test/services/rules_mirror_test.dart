@@ -6,8 +6,10 @@
 
 import 'dart:io';
 
+import 'package:brookie_babies/models/booking.dart';
 import 'package:brookie_babies/models/session_details.dart';
 import 'package:brookie_babies/services/admin_service.dart';
+import 'package:brookie_babies/services/booking_service.dart';
 import 'package:brookie_babies/services/photo_rules.dart';
 import 'package:brookie_babies/services/portfolio_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -132,6 +134,22 @@ void main() {
             if (value == FieldValue.delete()) key as String,
       };
       expect(removed, _listAfter(adHocUpdate, 'removedKeys().hasOnly('));
+    });
+
+    test('sharing a session changes only what the rules let its owner change', () async {
+      db.docs['bookings/b1'] = {'status': 'paid', 'uid': 'customer-uid'};
+      final family = FirestoreBookingService(db);
+      final booking = testSession('b1', status: BookingStatus.paid, uid: 'customer-uid');
+
+      await family.share(booking, 'grandma@example.com');
+      await family.stopSharing(booking, 'grandma@example.com');
+
+      final ownerKeys = _listAfter(bookings, '&& changedKeys().hasOnly(');
+      for (final write in db.writes) {
+        expect(keysOf(write.data), ownerKeys);
+      }
+      // Up to as many as an ad hoc session's emails, and none at all.
+      expect(_find(bookings, r'validEmailList\(request\.resource\.data\.sharedWith, (\d+)\)'), '0');
     });
 
     test('a customer’s booking changes only photosReady (and updatedAt)', () async {

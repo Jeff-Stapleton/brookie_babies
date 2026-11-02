@@ -30,6 +30,10 @@ const customer = {uid: 'cust1', token: tok()};
 const guest = {uid: 'g1', token: tok()};
 const secondGuest = {uid: 'g2', token: tok({email: 'john@gmail.com'})};
 const admin = {uid: 'adm', token: {admin: true, email: 'brooke@gmail.com', email_verified: true}};
+// Someone the family shared a session with.
+const grandma = {uid: 'gm', token: tok({email: 'grandma@gmail.com'})};
+const sharedPaid = {...paid, sharedWith: ['grandma@gmail.com']};
+const sharedAdhoc = {...adhoc, sharedWith: ['grandma@gmail.com']};
 
 const get = (auth, id, existing, method = 'get') => ({request: {...(auth ? {auth} : {}), path: P(id), method, time: T}, existing});
 const write = (auth, id, method, next, existing) => ({request: {...(auth ? {auth} : {}), path: P(id), method, time: T, ...(next ? {resource: {data: next}} : {})}, existing});
@@ -38,6 +42,8 @@ const upd = (existing, changes, removed = [], auth = admin, id = 'x1') =>
 const updAdhoc = (changes, removed = [], auth = admin) => upd(adhoc, {updatedAt: T, ...changes}, removed, auth, 'c1');
 const updLegacy = (changes, removed = [], auth = admin) => upd(legacyAdhoc, {updatedAt: T, ...changes}, removed, auth, 'c2');
 const updPaid = (changes, removed = [], existing = paid) => upd(existing, {updatedAt: T, ...changes}, removed, admin, 'b1');
+// [auth] sets who [existing] is shared with, as arrayUnion and arrayRemove would leave it.
+const share = (auth, existing, sharedWith, id = 'b1') => upd(existing, {sharedWith}, [], auth, id);
 const home = (auth, method, next, existing) => ({request: {...(auth ? {auth} : {}), path: HOME, method, time: T, ...(next ? {resource: {data: next}} : {})}, existing});
 const names7 = ['1.jpg', '2.jpg', '3.jpg', '4.jpg', '5.jpg', '6.jpg', '7.jpg'];
 
@@ -235,8 +241,76 @@ const written = [
   ['DENY', 'admin update no-status doc date', updPaid({date: '2026-12-01'}, [], {uid: 'cust1', date: '2026-11-01'})],
   ['DENY', 'customer update own paid photosReady', upd(paid, {photosReady: true, updatedAt: T}, [], customer, 'b1')],
 
+  // ---- sharing: reading a session shared with you ----
+  ['ALLOW', 'shared with: get paid booking', get(grandma, 'b1', sharedPaid)],
+  ['ALLOW', 'shared with: list paid booking', get(grandma, 'b1', sharedPaid, 'list')],
+  ['ALLOW', 'shared with: get adhoc', get(grandma, 'c1', sharedAdhoc)],
+  ['ALLOW', 'shared with: list adhoc', get(grandma, 'c1', sharedAdhoc, 'list')],
+  ['ALLOW', 'shared with: mixed-case token email', get({uid: 'gm', token: tok({email: 'Grandma@Gmail.com'})}, 'b1', sharedPaid)],
+  ['ALLOW', 'shared with: the last of 10', get({uid: 'g9', token: tok({email: 'guest9@gmail.com'})}, 'b1', {...paid, sharedWith: emails10})],
+  ['ALLOW', 'shared with: a pending booking (no download, but it shows)', get(grandma, 'b1', {...sharedPaid, status: 'pending'})],
+  ['DENY', 'shared with: unverified email', get({uid: 'gm', token: tok({email: 'grandma@gmail.com', email_verified: false})}, 'b1', sharedPaid)],
+  ['DENY', 'shared with: no email claim', get({uid: 'gm', token: {email_verified: true}}, 'b1', sharedPaid)],
+  ['DENY', 'shared with: another email', get({uid: 'bob', token: tok({email: 'bob@gmail.com'})}, 'b1', sharedPaid)],
+  ['DENY', 'shared with: a booking not shared', get(grandma, 'b1', paid)],
+  ['DENY', 'shared with: a booking not shared (list)', get(grandma, 'b1', paid, 'list')],
+  ['DENY', 'shared with: stored mixed-case', get(grandma, 'b1', {...paid, sharedWith: ['Grandma@gmail.com']})],
+  ['DENY', 'shared with: sharedWith as one string', get(grandma, 'b1', {...paid, sharedWith: 'grandma@gmail.com'})],
+  ['DENY', 'shared with: signed out', get(null, 'b1', sharedPaid)],
+
+  // ---- sharing: the owner changes who it's shared with ----
+  ['ALLOW', 'customer shares own paid booking', share(customer, paid, ['grandma@gmail.com'])],
+  ['ALLOW', 'customer shares with a second', share(customer, sharedPaid, ['grandma@gmail.com', 'grandpa@gmail.com'])],
+  ['ALLOW', 'customer shares with 10', share(customer, paid, emails10)],
+  ['ALLOW', 'customer stops sharing with one of two', share(customer, {...paid, sharedWith: ['grandma@gmail.com', 'grandpa@gmail.com']}, ['grandpa@gmail.com'])],
+  ['ALLOW', 'customer stops sharing with everyone', share(customer, sharedPaid, [])],
+  ['ALLOW', 'customer shares a pending booking', share(customer, {...paid, status: 'pending'}, ['grandma@gmail.com'])],
+  ['ALLOW', 'customer without email claim shares own (by uid)', share({uid: 'cust1', token: {}}, paid, ['grandma@gmail.com'])],
+  ['ALLOW', 'customer with unverified email shares own (by uid)', share({uid: 'cust1', token: tok({email_verified: false})}, paid, ['grandma@gmail.com'])],
+  ['ALLOW', 'customer shares email of 254 chars', share(customer, paid, [longestEmail])],
+  ['DENY', 'customer shares with 11', share(customer, paid, [...emails10, 'one@more.com'])],
+  ['DENY', 'customer shares with the same email twice', share(customer, paid, ['grandma@gmail.com', 'grandma@gmail.com'])],
+  ['DENY', 'customer shares uppercase email', share(customer, paid, ['Grandma@gmail.com'])],
+  ['DENY', 'customer shares untrimmed email', share(customer, paid, ['grandma@gmail.com '])],
+  ['DENY', 'customer shares invalid email', share(customer, paid, ['grandma'])],
+  ['DENY', 'customer shares email of 255 chars', share(customer, paid, [`a${longestEmail}`])],
+  ['DENY', 'customer shares a bad email in the 10th place', share(customer, paid, [...emails10.slice(0, 9), 'not an email'])],
+  ['DENY', 'customer shares a non-string', share(customer, paid, ['grandma@gmail.com', 7])],
+  ['DENY', 'customer sets sharedWith to one string', share(customer, paid, 'grandma@gmail.com')],
+  ['DENY', 'customer deletes sharedWith', upd(sharedPaid, {}, ['sharedWith'], customer, 'b1')],
+  ['DENY', 'customer shares and sets photosReady', upd(paid, {sharedWith: ['grandma@gmail.com'], photosReady: true}, [], customer, 'b1')],
+  ['DENY', 'customer shares and stamps updatedAt', upd(paid, {sharedWith: ['grandma@gmail.com'], updatedAt: T}, [], customer, 'b1')],
+  ['DENY', 'customer shares and changes the date', upd(paid, {sharedWith: ['grandma@gmail.com'], date: '2026-12-01'}, [], customer, 'b1')],
+  ['DENY', 'another customer shares the booking', share({uid: 'cust2', token: tok({email: 'bob@gmail.com'})}, paid, ['bob@gmail.com'])],
+  ['DENY', 'signed out shares the booking', share(null, paid, ['grandma@gmail.com'])],
+  ['DENY', 'shared with: passes it on', share(grandma, sharedPaid, ['grandma@gmail.com', 'aunt@gmail.com'])],
+  ['DENY', 'shared with: takes themselves off', share(grandma, sharedPaid, [])],
+  ['DENY', 'an email on a paid booking doesn’t make an owner', share(guest, paid, ['grandma@gmail.com'])],
+  ['ALLOW', 'guest shares adhoc', share(guest, adhoc, ['grandma@gmail.com'], 'c1')],
+  ['ALLOW', 'second guest shares adhoc', share(secondGuest, sharedAdhoc, ['grandma@gmail.com', 'grandpa@gmail.com'], 'c1')],
+  ['ALLOW', 'guest mixed-case token shares adhoc', share({uid: 'g1', token: tok({email: 'Jane@Gmail.COM'})}, adhoc, ['grandma@gmail.com'], 'c1')],
+  ['ALLOW', 'guest shares one-email adhoc', share(guest, legacyAdhoc, ['grandma@gmail.com'], 'c2')],
+  ['DENY', 'guest unverified shares adhoc', share({uid: 'g1', token: tok({email_verified: false})}, adhoc, ['grandma@gmail.com'], 'c1')],
+  ['DENY', 'guest without email claim shares adhoc', share({uid: 'g1', token: {email_verified: true}}, adhoc, ['grandma@gmail.com'], 'c1')],
+  ['DENY', 'other verified email shares adhoc', share({uid: 'bob', token: tok({email: 'bob@gmail.com'})}, adhoc, ['bob@gmail.com'], 'c1')],
+  ['DENY', 'guest shares status "Adhoc" (not exact)', share(guest, {...adhoc, status: 'Adhoc'}, ['grandma@gmail.com'], 'c1')],
+  ['DENY', 'shared with: passes on adhoc', share(grandma, sharedAdhoc, ['grandma@gmail.com', 'aunt@gmail.com'], 'c1')],
+  ['DENY', 'guest adds someone to emails', upd(adhoc, {emails: [...adhoc.emails, 'friend@gmail.com']}, [], guest, 'c1')],
+  ['DENY', 'guest shares and renames', upd(adhoc, {sharedWith: ['grandma@gmail.com'], name: 'Ours'}, [], guest, 'c1')],
+  // Admins leave it to the family.
+  ['DENY', 'admin shares a paid booking', updPaid({sharedWith: ['grandma@gmail.com']})],
+  ['DENY', 'admin shares a paid booking, without updatedAt', share(admin, paid, ['grandma@gmail.com'])],
+  ['DENY', 'admin shares an adhoc', updAdhoc({sharedWith: ['grandma@gmail.com']})],
+  ['DENY', 'admin create adhoc already shared', write(admin, 'n1', 'create', {...newAdhoc, sharedWith: ['grandma@gmail.com']})],
+  ['ALLOW', 'admin edits a shared adhoc, leaving sharedWith', upd(sharedAdhoc, {updatedAt: T, name: 'The Harpers', photosReady: true}, [], admin, 'c1')],
+  ['ALLOW', 'admin sets photosReady on a shared paid booking', upd(sharedPaid, {updatedAt: T, photosReady: true}, [], admin, 'b1')],
+  ['ALLOW', 'admin moves a shared one-email adhoc to emails', upd({...legacyAdhoc, sharedWith: ['grandma@gmail.com']}, {updatedAt: T, emails: ['jane@gmail.com']}, ['email'], admin, 'c2')],
+
   // ---- delete ----
   ['ALLOW', 'admin delete adhoc', write(admin, 'c1', 'delete', null, adhoc)],
+  ['ALLOW', 'admin delete shared adhoc', write(admin, 'c1', 'delete', null, sharedAdhoc)],
+  ['DENY', 'shared with: delete adhoc', write(grandma, 'c1', 'delete', null, sharedAdhoc)],
+  ['DENY', 'guest delete own adhoc after sharing it', write(guest, 'c1', 'delete', null, sharedAdhoc)],
   ['ALLOW', 'admin delete one-email adhoc', write(admin, 'c2', 'delete', null, legacyAdhoc)],
   ['DENY', 'admin delete paid', write(admin, 'b1', 'delete', null, paid)],
   ['DENY', 'admin delete doc with no status', write(admin, 'b2', 'delete', null, without(paid, 'status'))],

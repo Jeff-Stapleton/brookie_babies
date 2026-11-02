@@ -97,12 +97,19 @@ class FakeAuthService implements AuthService {
   }
 }
 
-/// [BookingService] that returns fixed bookings (or [error]) for any user.
+/// [BookingService] with the same bookings (or [error]) for any user, live:
+/// sharing one changes it, and the page hears of it, as from Firestore.
 class FakeBookingService implements BookingService {
-  FakeBookingService([this.bookings = const [], this.unreadable = 0]);
+  FakeBookingService([List<Booking> bookings = const [], this.unreadable = 0, Set<String> sharedWithUser = const {}])
+      : bookings = [...bookings],
+        sharedWithUser = {...sharedWithUser};
 
+  /// After changing it directly, call [notifyChanged].
   final List<Booking> bookings;
   final int unreadable;
+
+  /// The ids of [bookings] shared with the user by their owner.
+  final Set<String> sharedWithUser;
   Object? error;
 
   /// The uid of each user watched, in order.
@@ -111,16 +118,76 @@ class FakeBookingService implements BookingService {
   /// Each user watched, in order (for their email).
   final watchedUsers = <AppUser>[];
 
+  /// Each share and stop, as 'share(b1, grandma@example.com)'.
+  final calls = <String>[];
+
+  /// Thrown by the next share or stop, then cleared.
+  Object? nextError;
+
+  /// How long each share and stop takes.
+  Duration writeDelay = Duration.zero;
+
+  final _changes = StreamController<void>.broadcast(sync: true);
+
+  /// Has the live streams emit the bookings again.
+  void notifyChanged() => _changes.add(null);
+
   @override
   Stream<UserBookings> watchBookings(AppUser user) {
     watchedUids.add(user.uid);
     watchedUsers.add(user);
     final error = this.error;
-    return error == null
-        ? Stream.value((bookings: bookings, unreadable: unreadable))
-        : Stream.error(error);
+    if (error != null) return Stream.error(error);
+    UserBookings current() => (bookings: List.of(bookings), unreadable: unreadable, sharedWithUser: {...sharedWithUser});
+    return Stream.multi((controller) {
+      controller.add(current());
+      final changes = _changes.stream.listen((_) => controller.add(current()));
+      controller.onCancel = changes.cancel;
+    });
+  }
+
+  @override
+  Future<void> share(Booking booking, String email) => _changeSharing('share', booking, email);
+
+  @override
+  Future<void> stopSharing(Booking booking, String email) => _changeSharing('stopSharing', booking, email);
+
+  Future<void> _changeSharing(String method, Booking booking, String email) async {
+    final normalized = SessionRules.normalizeEmail(email);
+    calls.add('$method(${booking.id}, $normalized)');
+    if (writeDelay > Duration.zero) await Future<void>.delayed(writeDelay);
+    final error = nextError;
+    if (error != null) {
+      nextError = null;
+      throw error;
+    }
+    final i = bookings.indexWhere((b) => b.id == booking.id);
+    if (i < 0) return;
+    final sharedWith = [
+      for (final shared in bookings[i].sharedWith)
+        if (shared != normalized) shared,
+      if (method == 'share') normalized,
+    ];
+    bookings[i] = withSharedWith(bookings[i], sharedWith);
+    notifyChanged();
   }
 }
+
+/// [b], shared with [sharedWith].
+Booking withSharedWith(Booking b, List<String> sharedWith) => Booking(
+      id: b.id,
+      packageName: b.packageName,
+      date: b.date,
+      time: b.time,
+      location: b.location,
+      status: b.status,
+      photosReady: b.photosReady,
+      uid: b.uid,
+      email: b.email,
+      emails: b.emails,
+      sharedWith: sharedWith,
+      name: b.name,
+    );
 
 /// [GalleryService] whose downloads stay pending until the test calls
 /// [complete] or [fail]; [progress] reports how the zip's build is going.
@@ -222,6 +289,7 @@ Booking testSession(
   String? packageName,
   bool photosReady = false,
   String? uid,
+  List<String> sharedWith = const [],
 }) {
   final adHoc = status == BookingStatus.adhoc;
   return Booking(
@@ -235,6 +303,7 @@ Booking testSession(
     uid: uid ?? (adHoc ? null : 'uid-$id'),
     email: email,
     emails: emails ?? (adHoc && email == null ? const ['harper@example.com'] : const []),
+    sharedWith: sharedWith,
     name: name,
   );
 }
@@ -447,7 +516,14 @@ class FakeAdminService implements AdminService {
     return session;
   }
 
-  static Booking _adHoc(String id, SessionDetails details, {required bool photosReady}) => Booking(
+  /// Admins never change who the family shared it with ([sharedWith]).
+  static Booking _adHoc(
+    String id,
+    SessionDetails details, {
+    required bool photosReady,
+    List<String> sharedWith = const [],
+  }) =>
+      Booking(
         id: id,
         packageName: details.packageName,
         date: DateTime(details.date.year, details.date.month, details.date.day),
@@ -459,6 +535,7 @@ class FakeAdminService implements AdminService {
           for (final email in details.emails)
             if (SessionRules.normalizeEmail(email) case final normalized when normalized.isNotEmpty) normalized,
         ],
+        sharedWith: sharedWith,
         name: details.name.trim(),
       );
 
@@ -487,7 +564,12 @@ class FakeAdminService implements AdminService {
     // Anything else there is refused, as the rules refuse it.
     final saved = sessions[sessionId];
     if (saved != null && (id == null || !saved.isAdHoc)) throw adminError(AdminErrorKind.denied);
-    sessions[sessionId] = _adHoc(sessionId, details, photosReady: saved?.photosReady ?? false);
+    sessions[sessionId] = _adHoc(
+      sessionId,
+      details,
+      photosReady: saved?.photosReady ?? false,
+      sharedWith: saved?.sharedWith ?? const [],
+    );
     notifyChanged();
     return sessionId;
   }
@@ -498,7 +580,8 @@ class FakeAdminService implements AdminService {
     if (!session.isAdHoc) throw StateError('updateSession(${session.id}) is for ad hoc sessions only');
     await _write('updateSession', 'updateSession(${session.id})');
     final current = _session(session.id);
-    sessions[session.id] = _adHoc(session.id, details, photosReady: current.photosReady);
+    sessions[session.id] =
+        _adHoc(session.id, details, photosReady: current.photosReady, sharedWith: current.sharedWith);
     notifyChanged();
   }
 
@@ -517,6 +600,7 @@ class FakeAdminService implements AdminService {
       uid: s.uid,
       email: s.email,
       emails: s.emails,
+      sharedWith: s.sharedWith,
       name: s.name,
     );
     notifyChanged();

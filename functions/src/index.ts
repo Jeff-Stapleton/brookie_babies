@@ -12,6 +12,7 @@ import {
   handleGalleryPhotosRequest,
   type GalleryDeps,
   type GalleryDownload,
+  type GalleryPhotoChunk,
   type GalleryPhotoList,
   type GalleryProgress,
 } from "./gallery";
@@ -68,23 +69,27 @@ export const getGalleryDownloadUrl = onCall<
 
 /**
  * Callable: {bookingId, adminPreview?} ->
- * {photos: [{name, url}], expiresAt}. Each URL displays one photo from a
- * gallery the caller may download and expires after 60 minutes. Access,
- * payment and readiness checks are the same as the zip callable above.
+ * {photos: [{name, url, previewUrl?}], expiresAt}. Each URL displays one
+ * photo from a gallery the caller may download and expires after 60 minutes.
+ * Streaming callers first receive its count, then each photo as its cached
+ * low-resolution preview and original links become ready. Access, payment
+ * and readiness checks are the same as the zip callable above.
  * With adminPreview: true, an admin may load the same gallery before it is
  * available to the family.
  */
 export const getGalleryPhotoUrls = onCall<
   unknown,
-  Promise<GalleryPhotoList>
+  Promise<GalleryPhotoList>,
+  GalleryPhotoChunk
 >(
-  {timeoutSeconds: 120},
-  (request) =>
+  {memory: "1GiB", timeoutSeconds: 300},
+  (request, response) =>
     handleGalleryPhotosRequest(
       {
         ...realDeps(),
         logError: (message, error) => logger.error(message, error),
       },
       request,
+      response,
     ),
 );

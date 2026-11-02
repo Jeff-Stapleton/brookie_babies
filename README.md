@@ -30,11 +30,13 @@ Firebase.
   including ad hoc sessions shared with their Google email. Once photos are
   ready, **View photos** opens a private, full-bleed session gallery with its
   title and date, a responsive grid and a full-screen photo viewer. They can
-  also download every photo as one zip. The gallery and zip use private links
-  that expire after an hour. While a zip is prepared, the page shows how it's
-  going. Families can share a session with others, such as grandparents, by
-  Google email: it shows under their Your sessions too, with the same gallery
-  and download.
+  also download every photo as one zip. The gallery lays itself out as soon as
+  its private links begin streaming in, shows a cached low-resolution preview
+  of each photo, then crossfades to the original. The gallery and zip use
+  private links that expire after an hour. While a zip is prepared, the page
+  shows how it's going. Families can share a session with others, such as
+  grandparents, by Google email: it shows under their Your sessions too, with
+  the same gallery and download.
 - **Admin portal** (`/#/admin`, or **Admin** in the account menu, shown only to
   admins): every session; ad hoc sessions for family and friends, shared with
   one or more emails (both of a couple, say); uploading a session's photos;
@@ -267,16 +269,25 @@ opens a full-screen viewer with previous and next controls. **Download all
 photos** still prepares one zip. Both actions appear even before the session
 date, so check that the session is right before making its photos available.
 
-Photos are never public through the site. The gallery gets a separate signed
-read link for each photo, and the download gets a signed zip link; all expire
-after one hour. The server checks the signed-in account, payment status and
-`photosReady` before issuing either kind. An explicit admin preview checks the
-admin claim instead and issues the same one-hour photo links without making the
-gallery available to the family. Hiding the photos, deleting one, or taking an
-email off an ad hoc session also deletes the cached zip, so zip links already
-handed out stop working at once (if that delete fails, the change still goes
-through and those links expire within the hour). Individual photo links already
-issued remain usable until their one-hour expiry, as any signed link does.
+Photos are never public through the site. The gallery function streams the
+photo count first, then each photo's private links, so the page can show its
+layout and begin painting without waiting for the whole gallery. On the first
+visit it also makes a 480 px WebP under the session's hidden `.previews` folder;
+later visits reuse it while the source generation is unchanged. The page shows
+that small preview first and crossfades to the full-resolution original. These
+generated files are excluded from the gallery, admin photo list and zip.
+
+Both the preview and original get separate signed read links, and the download
+gets a signed zip link; all expire after one hour. The server checks the
+signed-in account, payment status and `photosReady` before issuing any of them.
+An explicit admin preview checks the admin claim instead and issues the same
+one-hour photo links without making the gallery available to the family (and
+warms the preview cache before the family visits). Hiding the photos, deleting
+one, or taking an email off an ad hoc session also deletes the cached zip, so
+zip links already handed out stop working at once (if that delete fails, the
+change still goes through and those links expire within the hour). Individual
+photo and preview links already issued remain usable until their one-hour
+expiry, as any signed link does.
 
 ### In the admin portal
 
@@ -356,7 +367,7 @@ Then deliver its photos in the portal as above. Its share message tells the fami
 The portal is the easier way, but the console still works:
 
 1. **Find the booking ID.** Firestore Database → `bookings`. Find the booking by `email` and `date`. The document ID is the booking ID.
-2. **Upload the photos.** Storage → open `galleries` (create it if needed) → **Create folder** named exactly the booking ID → upload the photos into it. Subfolders are fine; the portal lists them too. Hidden files such as `.DS_Store` are skipped. Never put customer photos in `_admin/gallery/`: that folder is public (it's the home page photo library).
+2. **Upload the photos.** Storage → open `galleries` (create it if needed) → **Create folder** named exactly the booking ID → upload the photos into it. Subfolders are fine; the portal lists them too. Hidden files and folders such as `.DS_Store` and the generated `.previews` folder are skipped. Never put customer photos in `_admin/gallery/`: that folder is public (it's the home page photo library).
 3. **Mark them ready.** Open the booking again and set the field `photosReady` (type **boolean**) to `true`. Do this only after every upload has finished.
 
 > **Never share the Storage console's file links.** For every uploaded file, the console shows a download link with an access token. Anyone with that link can open the photo, permanently, whatever the security rules say. Families should only get their photos through **Your sessions**. If a link was shared by mistake, revoke that file's access token (Storage → the file → Access token → Revoke).
@@ -408,14 +419,15 @@ Admins are accounts whose ID token carries the custom claim `admin: true` (see "
 - **Bookings.** A family reads the bookings carrying their `uid`, and ad hoc sessions (`status` exactly `adhoc`) whose `emails` (or single `email`, from before several) include the email they verified with Google, lowercased. Admins read every booking. They create only ad hoc sessions (the fields in "Ad hoc sessions", never a `uid`; `emails` holds 1 to 10 valid addresses, each once, or a single `email` stands in for it), change only `photosReady` and the optional `mainPhoto` on other bookings and only the details, `photosReady` and `mainPhoto` of ad hoc sessions, stamping `updatedAt` each time, and delete only ad hoc sessions. `uid`, `status`, `createdAt` and `createdBy` never change; `email` may only go, as a session moves to `emails`.
 - **Sharing.** A session's owner (the customer whose `uid` it carries, or a guest of an ad hoc session) may change its `sharedWith` and nothing else: up to 10 valid emails, each once. Whoever's verified Google email is in it reads the session, whatever its status. Someone it was shared with can't change it, and admins don't either.
 - **`site/home`.** Anyone reads it. Admins save it whole: `photos` (at most seven file names), `updatedAt` and `updatedBy`.
-- **Storage.** `_admin/gallery/` stays publicly readable (get and list). Admins add photos directly in it (JPEG, PNG or WebP, named `.jpg`, `.jpeg`, `.png` or `.webp`, under 20 MiB) and delete them. Under `galleries/<bookingId>/` only admins read, add (any image type, under 100 MiB) and delete. Admins may delete a cached zip in `gallery-zips/`, nothing more. There's no update anywhere, so nothing is ever overwritten.
+- **Storage.** `_admin/gallery/` stays publicly readable (get and list). Admins add photos directly in it (JPEG, PNG or WebP, named `.jpg`, `.jpeg`, `.png` or `.webp`, under 20 MiB) and delete them. Under `galleries/<bookingId>/` only admins read, add (any image type, under 100 MiB) and delete. The gallery function uses the Admin SDK (which bypasses rules) to create or refresh its private `.previews` files there. Admins may delete a cached zip in `gallery-zips/`, nothing more. Browser writes never update an object, so a source photo is never overwritten.
 - **`getGalleryPhotoUrls` and `getGalleryDownloadUrl`** serve the booking's
   `uid`, for an ad hoc session the caller whose verified Google email is one of
   its emails, and anyone whose verified Google email is in its `sharedWith`.
   Ad hoc sessions need no payment; a session shared with someone still needs to
   be paid (or ad hoc) and its photos available. The first callable signs each
-  individual photo for the gallery and also accepts an explicit preview from an
-  account whose token has `admin: true`, regardless of payment or readiness.
+  individual photo and its generated low-resolution preview, streams them as
+  they become ready, and also accepts an explicit preview from an account whose
+  token has `admin: true`, regardless of payment or readiness.
   The second signs the cached zip and has no admin-preview path.
 
 No new IAM roles, function permissions, APIs or secrets are needed: the

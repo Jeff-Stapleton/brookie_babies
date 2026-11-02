@@ -117,6 +117,12 @@ abstract final class SessionRules {
   /// test/services/photo_rules_test.dart checks they agree).
   static const packageNames = ['Basic', 'Premium', 'Ultimate'];
 
+  /// An ad hoc session's `emails` hold 1 to this many addresses.
+  static const emailListMaxLength = 10;
+
+  /// An email is at most this many characters: as long as an address can be.
+  static const emailMaxLength = 254;
+
   /// What the rules take as an email, once [normalizeEmail]ed.
   static final emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 

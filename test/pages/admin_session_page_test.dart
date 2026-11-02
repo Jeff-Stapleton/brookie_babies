@@ -200,6 +200,56 @@ void main() {
           findsOneWidget);
     });
 
+    testWidgets('an ad hoc session with several emails: anyone signed in as any of them', (tester) async {
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String;
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      final admin = FakeAdminService(
+        sessions: [
+          testSession('s1', emails: ['jane@gmail.com', 'john@gmail.com', 'pat@example.com']),
+        ],
+        sessionPhotos: {'s1': _photos},
+      );
+      await _pumpSession(tester, admin: admin);
+
+      expect(
+        find.widgetWithText(
+            SelectableText, 'Anyone signed in with Google as jane@gmail.com, john@gmail.com or pat@example.com'),
+        findsOneWidget,
+      );
+      const message = 'Your photos from Brooke are ready. Open https://brookestapletonphoto.com/#/profile and sign in '
+          'with Google as jane@gmail.com, john@gmail.com or pat@example.com to download them.';
+      await tapInView(tester, find.text('Copy message'));
+      await tester.pumpAndSettle();
+      expect(copied, message);
+
+      await tapInView(tester, find.text('Make photos available'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('3 photos. Anyone signed in with Google as jane@gmail.com, john@gmail.com or pat@example.com can '
+            'download them.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('an ad hoc session from before several emails: its one email', (tester) async {
+      final admin = FakeAdminService(sessions: [testSession('s1', email: 'harper@example.com')]);
+      await _pumpSession(tester, admin: admin);
+
+      expect(find.widgetWithText(SelectableText, 'Anyone signed in with Google as harper@example.com'),
+          findsOneWidget);
+    });
+
+    testWidgets('an ad hoc session with no email: nobody yet, and how to fix it', (tester) async {
+      final admin = FakeAdminService(sessions: [testSession('s1', emails: const [])]);
+      await _pumpSession(tester, admin: admin);
+
+      expect(find.text('Nobody yet: the session has no email. Add one with “Edit details”.'), findsOneWidget);
+    });
+
     testWidgets('a booking: the Google account that paid, and the email noted on it', (tester) async {
       await _pumpSession(tester, id: 'paid');
 

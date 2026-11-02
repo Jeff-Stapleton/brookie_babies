@@ -12,7 +12,8 @@ class UnreadableBooking {
   /// What's wrong, from [Booking.problemWith]: "date isn’t YYYY-MM-DD".
   final String problem;
 
-  /// The document's `email` and `date` fields as typed, if they are text.
+  /// The document's `email` (or else its `emails`, joined by commas) and
+  /// `date` fields as typed, if they are text.
   final String? email;
   final String? date;
 }

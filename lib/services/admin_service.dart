@@ -92,8 +92,10 @@ abstract class AdminService {
   /// (they may have been edited since), and returns its id.
   Future<String> createSession(SessionDetails details, {String? id});
 
-  /// Changes an ad hoc session's details. A new email also deletes the
-  /// cached zip, so links the old one was given stop working.
+  /// Changes an ad hoc session's details. Taking an email off it also
+  /// deletes the cached zip, so links that email was given stop working. A
+  /// session from before there could be several emails moves its one email
+  /// into `emails`.
   ///
   /// Deleting a cached zip is best effort, here and below: it follows a
   /// change that's saved, so it never fails the call. If it fails, the
@@ -226,7 +228,8 @@ class FirebaseAdminService implements AdminService {
   }
 
   /// Saves what [details] change in the ad hoc [session], with updatedAt;
-  /// nothing if nothing changes. A new email also deletes the cached zip.
+  /// nothing if nothing changes. Taking an email off also deletes the cached
+  /// zip.
   Future<void> _change(Booking session, SessionDetails details) async {
     final changes = sessionChanges(session, details);
     if (changes.isEmpty) return;
@@ -234,9 +237,10 @@ class FirebaseAdminService implements AdminService {
       'edit session ${session.id}',
       () => _bookings.doc(session.id).update({...changes, 'updatedAt': FieldValue.serverTimestamp()}),
     );
-    // After the change, so no download in between rebuilds it for the old
-    // email.
-    if (changes.containsKey('email')) await _deleteZip(session.id);
+    // After the change, so no download in between rebuilds it for an email
+    // taken off.
+    final emails = _emailsOf(details);
+    if (session.guestEmails.any((email) => !emails.contains(email))) await _deleteZip(session.id);
   }
 
   @override
@@ -579,7 +583,7 @@ AdminException adminExceptionFrom(
 const _cancelledMessage = 'Cancelled before it finished. Try again.';
 
 /// Why firestore.rules would refuse an ad hoc session with [details] (its
-/// validName, validEmail, validDate, ... functions), or why no guest could
+/// validName, validGuests, validDate, ... functions), or why no guest could
 /// ever sign in to it (SessionRules.googleEmailProblem), written for the
 /// admin; null if neither. Change the rules and this together.
 ///
@@ -597,11 +601,16 @@ String? sessionDetailsProblem(SessionDetails details, {Booking? before}) {
       return 'The name is too long. Shorten it to ${SessionRules.nameMaxLength} characters or fewer.';
     }
   }
-  if (checks('email')) {
-    final googleEmailProblem = SessionRules.googleEmailProblem(details.email);
-    if (googleEmailProblem != null) return googleEmailProblem;
-    if (!SessionRules.emailPattern.hasMatch(SessionRules.normalizeEmail(details.email))) {
-      return 'That email doesn’t look right. Enter the Google email they sign in with, like name@gmail.com.';
+  if (checks('emails')) {
+    final emails = _emailsOf(details);
+    if (emails.isEmpty) return 'Enter the Google email of whoever will download the photos, like name@gmail.com.';
+    if (emails.length > SessionRules.emailListMaxLength) {
+      return 'A session can have at most ${SessionRules.emailListMaxLength} emails. Remove one and save again.';
+    }
+    for (final (i, email) in emails.indexed) {
+      final problem = _emailProblem(email);
+      if (problem != null) return emails.length == 1 ? problem : 'Check “$email”. $problem';
+      if (emails.indexOf(email) < i) return '“$email” is in the list twice. Remove one and save again.';
     }
   }
   final packageName = _optional(details.packageName);
@@ -623,6 +632,28 @@ String? sessionDetailsProblem(SessionDetails details, {Booking? before}) {
   return null;
 }
 
+/// Why firestore.rules would refuse [email] (validEmail), or why no Google
+/// sign-in could ever match it; null if neither.
+String? _emailProblem(String email) {
+  final googleEmailProblem = SessionRules.googleEmailProblem(email);
+  if (googleEmailProblem != null) return googleEmailProblem;
+  final normalized = SessionRules.normalizeEmail(email);
+  if (normalized.length > SessionRules.emailMaxLength) {
+    return 'That email is too long: an address has at most ${SessionRules.emailMaxLength} characters.';
+  }
+  if (!SessionRules.emailPattern.hasMatch(normalized)) {
+    return 'That email doesn’t look right. Enter the Google email they sign in with, like name@gmail.com.';
+  }
+  return null;
+}
+
+/// [details]' emails as the session stores them (SessionRules.normalizeEmail),
+/// in order, leaving out any left blank.
+List<String> _emailsOf(SessionDetails details) => [
+      for (final email in details.emails)
+        if (SessionRules.normalizeEmail(email) case final normalized when normalized.isNotEmpty) normalized,
+    ];
+
 /// The `bookings` document for a new ad hoc session: exactly the keys
 /// firestore.rules lets an admin create, with the optional ones left out
 /// when empty (the rules refuse nulls). Check [sessionDetailsProblem] first.
@@ -633,6 +664,7 @@ Map<String, Object> newSessionData(SessionDetails details, {required String crea
     'status': BookingStatus.adhoc.name,
     for (final MapEntry(:key, :value) in fields.entries)
       if (value != null) key: value,
+    'emails': _emailsOf(details),
     'photosReady': false,
     'createdAt': FieldValue.serverTimestamp(),
     'createdBy': createdBy,
@@ -642,28 +674,32 @@ Map<String, Object> newSessionData(SessionDetails details, {required String crea
 /// What [details] change in the ad hoc [session], for update(): only the
 /// fields that differ (the rules check only what changes), and
 /// FieldValue.delete() for an optional one cleared (the rules refuse
-/// nulls). Empty if nothing changed. The caller adds `updatedAt`.
+/// nulls). A session from before there could be several emails always
+/// gets `emails`, with its one `email` deleted. Empty if nothing changed.
+/// The caller adds `updatedAt`.
 @visibleForTesting
 Map<String, Object> sessionChanges(Booking session, SessionDetails details) {
   final before = _fields(
     name: session.name,
-    email: session.email,
     packageName: session.packageName,
     date: session.date,
     time: session.time,
     location: session.location,
   );
+  final emails = _emailsOf(details);
+  final oneEmail = session.isAdHoc && session.email != null;
   return {
     for (final MapEntry(:key, :value) in _sessionFields(details).entries)
       if (value != before[key]) key: value ?? FieldValue.delete(),
+    if (oneEmail || !listEquals(emails, session.emails)) 'emails': emails,
+    if (oneEmail) 'email': FieldValue.delete(),
   };
 }
 
-/// [details] as the document's text fields: name trimmed, email as stored
-/// (SessionRules.normalizeEmail), null for an optional field left empty.
+/// [details] as the document's text fields: name trimmed, null for an
+/// optional field left empty.
 Map<String, String?> _sessionFields(SessionDetails details) => _fields(
       name: details.name.trim(),
-      email: SessionRules.normalizeEmail(details.email),
       packageName: _optional(details.packageName),
       date: details.date,
       time: details.time,
@@ -672,7 +708,6 @@ Map<String, String?> _sessionFields(SessionDetails details) => _fields(
 
 Map<String, String?> _fields({
   required String? name,
-  required String? email,
   required String? packageName,
   required DateTime date,
   required ({int hour, int minute})? time,
@@ -681,7 +716,6 @@ Map<String, String?> _fields({
   String two(int n) => n.toString().padLeft(2, '0');
   return {
     'name': name,
-    'email': email,
     'packageName': packageName,
     // YYYY-MM-DD and 24-hour HH:mm, as Booking.fromMap reads them.
     'date': '${date.year.toString().padLeft(4, '0')}-${two(date.month)}-${two(date.day)}',
@@ -719,11 +753,12 @@ SessionLookup _sessionLookupFrom(String id, Map<String, dynamic>? data) {
 
 UnreadableBooking _unreadable(String id, Map<String, dynamic> data) {
   final email = data['email'];
+  final emails = [if (data['emails'] case final List<dynamic> list) ...list.whereType<String>()];
   final date = data['date'];
   return UnreadableBooking(
     id: id,
     problem: Booking.problemWith(data) ?? 'it couldn’t be read',
-    email: email is String ? email : null,
+    email: email is String ? email : (emails.isEmpty ? null : emails.join(', ')),
     date: date is String ? date : null,
   );
 }

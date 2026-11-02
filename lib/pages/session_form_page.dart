@@ -19,6 +19,7 @@ import 'package:brookie_babies/widgets/busy_button.dart';
 import 'package:brookie_babies/widgets/focus_ring.dart';
 import 'package:brookie_babies/widgets/status_tag.dart';
 import 'package:brookie_babies/widgets/top_bar.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -66,14 +67,22 @@ String? _nameProblem(String? name) {
   return null;
 }
 
-String? _emailProblem(String? email) {
+/// Why [email] can't be saved, or null if it can. [first] says whether it's
+/// the first email field; [earlier] holds what the fields above it say.
+String? _emailProblem(String? email, {required bool first, required Iterable<String> earlier}) {
   final normalized = SessionRules.normalizeEmail(email ?? '');
-  if (normalized.isEmpty) return 'Enter the email they use to sign in to Google.';
+  if (normalized.isEmpty) {
+    return first ? 'Enter the email they use to sign in to Google.' : 'Enter another email, or remove this one.';
+  }
   final googleProblem = SessionRules.googleEmailProblem(normalized);
   if (googleProblem != null) return googleProblem;
+  if (normalized.length > SessionRules.emailMaxLength) {
+    return 'That’s too long for an email address: they have at most ${SessionRules.emailMaxLength} characters.';
+  }
   if (!SessionRules.emailPattern.hasMatch(normalized)) {
     return 'That isn’t a whole email address. Check it, like name@gmail.com.';
   }
+  if (earlier.map(SessionRules.normalizeEmail).contains(normalized)) return 'That email is already above.';
   return null;
 }
 
@@ -112,6 +121,22 @@ InputDecoration _decoration(
 /// controls (Material would set it in the reading face).
 TextStyle? _inputStyle(BuildContext context) => Theme.of(context).textTheme.bodyMedium;
 
+/// One of the form's email fields, which keeps what's typed in it and its
+/// focus as fields above it come and go.
+class _EmailField {
+  _EmailField(this.id, String text) : controller = TextEditingController(text: text);
+
+  /// Tells the fields apart as the list changes: their widgets' keys.
+  final int id;
+  final TextEditingController controller;
+  late final focusNode = FocusNode(debugLabel: 'Email $id');
+
+  void dispose() {
+    controller.dispose();
+    focusNode.dispose();
+  }
+}
+
 class _SessionForm extends StatefulWidget {
   const _SessionForm({required this.session, required this.now});
 
@@ -125,12 +150,19 @@ class _SessionForm extends StatefulWidget {
 class _SessionFormState extends State<_SessionForm> {
   final _form = GlobalKey<FormState>();
   late final _name = TextEditingController(text: widget.session?.name);
-  late final _email = TextEditingController(text: widget.session?.email);
   late final _location = TextEditingController(text: widget.session?.location);
   final _nameFocus = FocusNode(debugLabel: 'Name');
-  final _emailFocus = FocusNode(debugLabel: 'Email');
   final _dateFocus = FocusNode(debugLabel: 'Date');
   final _locationFocus = FocusNode(debugLabel: 'Location');
+
+  /// What the email fields start with: the session's emails, or one empty
+  /// field.
+  late final List<String> _startEmails = switch (widget.session?.guestEmails) {
+    final emails? when emails.isNotEmpty => emails,
+    _ => const [''],
+  };
+  var _nextEmailId = 0;
+  late final _emails = [for (final email in _startEmails) _EmailField(_nextEmailId++, email)];
 
   late final String? _startPackage = widget.session?.packageName;
   late String? _package = _startPackage;
@@ -181,7 +213,7 @@ class _SessionFormState extends State<_SessionForm> {
   @override
   void initState() {
     super.initState();
-    for (final text in [_name, _email, _location]) {
+    for (final text in [_name, for (final field in _emails) field.controller, _location]) {
       text.addListener(_checkChanges);
     }
   }
@@ -197,7 +229,7 @@ class _SessionFormState extends State<_SessionForm> {
     final session = widget.session;
     final changed = !_saved &&
         (_name.text != (session?.name ?? '') ||
-            _email.text != (session?.email ?? '') ||
+            !listEquals(_typedEmails, _startEmails) ||
             _location.text != (session?.location ?? '') ||
             _package != _startPackage ||
             _date != session?.date ||
@@ -205,6 +237,32 @@ class _SessionFormState extends State<_SessionForm> {
     if (changed == _hasChanges) return;
     LeaveWarning.set(this, changed);
     setState(() => _hasChanges = changed);
+  }
+
+  /// What's in the email fields, as typed.
+  List<String> get _typedEmails => [for (final field in _emails) field.controller.text];
+
+  String? _emailProblemAt(int index, String? text) =>
+      _emailProblem(text, first: index == 0, earlier: _typedEmails.take(index));
+
+  void _addEmail() {
+    final field = _EmailField(_nextEmailId++, '')..controller.addListener(_checkChanges);
+    setState(() => _emails.add(field));
+    _checkChanges();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) field.focusNode.requestFocus();
+    });
+  }
+
+  /// Takes [field] away, with focus going to the field now in its place (or
+  /// the one before), rather than to the top of the page with its button.
+  void _removeEmail(_EmailField field) {
+    final index = _emails.indexOf(field);
+    setState(() => _emails.remove(field));
+    _checkChanges();
+    _emails[math.min(index, _emails.length - 1)].focusNode.requestFocus();
+    // Its widget goes with the next frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) => field.dispose());
   }
 
   /// Back (the top bar's, the browser's, Cancel) with changes to lose, or
@@ -238,10 +296,11 @@ class _SessionFormState extends State<_SessionForm> {
   void dispose() {
     LeaveWarning.set(this, false);
     _name.dispose();
-    _email.dispose();
+    for (final field in _emails) {
+      field.dispose();
+    }
     _location.dispose();
     _nameFocus.dispose();
-    _emailFocus.dispose();
     _dateFocus.dispose();
     _locationFocus.dispose();
     super.dispose();
@@ -264,11 +323,15 @@ class _SessionFormState extends State<_SessionForm> {
 
   /// Takes keyboard focus to the first field that needs fixing.
   void _focusFirstProblem() {
+    final email = [
+      for (final (i, field) in _emails.indexed)
+        if (_emailProblemAt(i, field.controller.text) != null) field.focusNode,
+    ].firstOrNull;
     final FocusNode? first;
     if (_nameProblem(_name.text) != null) {
       first = _nameFocus;
-    } else if (_emailProblem(_email.text) != null) {
-      first = _emailFocus;
+    } else if (email != null) {
+      first = email;
     } else if (_dateProblem(_date) != null) {
       first = _dateFocus;
     } else if (_locationProblem(_location.text) != null) {
@@ -296,26 +359,33 @@ class _SessionFormState extends State<_SessionForm> {
     final location = _location.text.trim();
     final details = SessionDetails(
       name: _name.text.trim(),
-      email: SessionRules.normalizeEmail(_email.text),
+      emails: [for (final email in _typedEmails) SessionRules.normalizeEmail(email)],
       date: _date!,
       packageName: _package,
       time: _time,
       location: location.isEmpty ? null : location,
     );
     final session = widget.session;
-    // A new email hands the photos to someone else.
-    if (session != null && session.photosReady && details.email != session.email) {
-      final oldEmail = session.email;
-      final confirmed = await showBrookieConfirm(
-        context,
-        title: 'Change who can download?',
-        message: oldEmail == null
-            ? 'Anyone signed in with Google as ${details.email} will be able to download these photos.'
-            : 'Anyone signed in with Google as ${details.email} will be able to download these photos, '
-                'and $oldEmail won’t.',
-        confirmLabel: 'Save changes',
-      );
-      if (!confirmed || !mounted) return;
+    // An email added or taken off changes who has the photos.
+    if (session != null && session.photosReady) {
+      final before = session.guestEmails;
+      final added = [for (final email in details.emails) if (!before.contains(email)) email];
+      final removed = [for (final email in before) if (!details.emails.contains(email)) email];
+      if (added.isNotEmpty || removed.isNotEmpty) {
+        final confirmed = await showBrookieConfirm(
+          context,
+          title: 'Change who can download?',
+          message: switch ((added.isEmpty, removed.isEmpty)) {
+            (false, true) => 'Anyone signed in with Google as ${formatList(added, last: 'or')} will also be able '
+                'to download these photos.',
+            (true, false) => '${formatList(removed)} won’t be able to download these photos any more.',
+            _ => 'Anyone signed in with Google as ${formatList(added, last: 'or')} will be able to download these '
+                'photos, and ${formatList(removed)} won’t.',
+          },
+          confirmLabel: 'Save changes',
+        );
+        if (!confirmed || !mounted) return;
+      }
     }
 
     final admin = AppServices.of(context).admin;
@@ -413,24 +483,51 @@ class _SessionFormState extends State<_SessionForm> {
               validator: _nameProblem,
             ),
             gap,
-            TextFormField(
-              controller: _email,
-              focusNode: _emailFocus,
-              style: _inputStyle(context),
-              decoration: _decoration(
-                context,
-                label: 'Email',
-                // The guest is matched by exact address. Google signs in a
-                // Gmail address typed without its dots, but tells the app
-                // the account's own, dots and all.
-                helper: 'The email they use to sign in to Google. For Gmail, copy it exactly as it appears in '
-                    'their Google account, dots included.',
+            for (final (i, field) in _emails.indexed) ...[
+              if (i > 0) const SizedBox(height: BrookieSpace.s4),
+              TextFormField(
+                key: ValueKey(field.id),
+                controller: field.controller,
+                focusNode: field.focusNode,
+                style: _inputStyle(context),
+                decoration: _decoration(
+                  context,
+                  label: i == 0 ? 'Email' : 'Email ${i + 1}',
+                  // The guest is matched by exact address. Google signs in a
+                  // Gmail address typed without its dots, but tells the app
+                  // the account's own, dots and all.
+                  helper: i == 0
+                      ? 'The email they use to sign in to Google. For Gmail, copy it exactly as it appears in '
+                          'their Google account, dots included.'
+                      : null,
+                  suffixIcon: _emails.length < 2
+                      ? null
+                      : IconButton(
+                          tooltip: 'Remove this email',
+                          onPressed: () => _removeEmail(field),
+                          icon: const Icon(Icons.close),
+                        ),
+                ),
+                keyboardType: TextInputType.emailAddress,
+                autocorrect: false,
+                textInputAction: TextInputAction.next,
+                validator: (text) => _emailProblemAt(i, text),
               ),
-              keyboardType: TextInputType.emailAddress,
-              autocorrect: false,
-              textInputAction: TextInputAction.next,
-              validator: _emailProblem,
+            ],
+            const SizedBox(height: BrookieSpace.s2),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                onPressed: _emails.length < SessionRules.emailListMaxLength ? _addEmail : null,
+                icon: const Icon(Icons.add),
+                label: const Text('Add another email'),
+              ),
             ),
+            if (_emails.length >= SessionRules.emailListMaxLength)
+              Text(
+                'A session can have up to ${SessionRules.emailListMaxLength} emails.',
+                style: BrookieType.small.copyWith(color: BrookieColors.of(context).inkSoft),
+              ),
             gap,
             _Choice<String?>(
               label: 'Package',

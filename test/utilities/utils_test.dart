@@ -31,4 +31,11 @@ void main() {
     expect(formatFileSize(4800000000), '4.8 GB');
     expect(formatFileSize(12340000000), '12.3 GB');
   });
+
+  test('lists in a sentence, without a comma before the last', () {
+    expect(formatList([]), '');
+    expect(formatList(['a@x.com']), 'a@x.com');
+    expect(formatList(['a@x.com', 'b@x.com']), 'a@x.com and b@x.com');
+    expect(formatList(['a@x.com', 'b@x.com', 'c@x.com'], last: 'or'), 'a@x.com, b@x.com or c@x.com');
+  });
 }

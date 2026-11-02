@@ -52,11 +52,11 @@ class AdminSessionPage extends StatefulWidget {
   /// The message to send the family: where to go, and which account to
   /// sign in with.
   static String shareMessage(Booking booking) {
-    final email = booking.email;
-    // An ad hoc session is shared with its email; a booking with the Google
+    final emails = booking.guestEmails;
+    // An ad hoc session is shared with its emails; a booking with the Google
     // account that paid, whatever email was noted on it.
-    final account = booking.isAdHoc && email != null
-        ? 'sign in with Google as $email'
+    final account = emails.isNotEmpty
+        ? 'sign in with Google as ${formatList(emails, last: 'or')}'
         : 'sign in with the Google account you booked with';
     return 'Your photos from Brooke are ready. Open $familyLink and $account to download them.';
   }
@@ -92,8 +92,8 @@ String _photoCount(int count) => '$count ${count == 1 ? 'photo' : 'photos'}';
 /// a uid.
 String? _whoCanDownload(Booking booking) {
   if (booking.isAdHoc) {
-    final email = booking.email;
-    return email == null ? null : 'Anyone signed in with Google as $email';
+    final emails = booking.guestEmails;
+    return emails.isEmpty ? null : 'Anyone signed in with Google as ${formatList(emails, last: 'or')}';
   }
   final uid = booking.uid;
   return uid == null ? null : 'The Google account with user ID $uid';

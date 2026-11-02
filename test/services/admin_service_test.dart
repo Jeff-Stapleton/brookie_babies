@@ -13,11 +13,12 @@ import '../support/fake_firebase.dart';
 import '../support/fakes.dart';
 
 // What firestore.rules accepts from admins in `bookings` (copied here, so a
-// change to either side shows up as a failing test).
+// change to either side shows up as a failing test), but `email` on create:
+// only sites from before several emails send that.
 const _createKeys = {
   'status',
   'name',
-  'email',
+  'emails',
   'packageName',
   'date',
   'time',
@@ -26,15 +27,27 @@ const _createKeys = {
   'createdAt',
   'createdBy',
 };
-const _requiredCreateKeys = {'status', 'name', 'email', 'date', 'photosReady', 'createdAt', 'createdBy'};
-const _adHocUpdateKeys = {'name', 'email', 'packageName', 'date', 'time', 'location', 'photosReady', 'updatedAt'};
-const _removableKeys = {'packageName', 'time', 'location'};
+const _requiredCreateKeys = {'status', 'name', 'emails', 'date', 'photosReady', 'createdAt', 'createdBy'};
+const _adHocUpdateKeys = {
+  'name',
+  'emails',
+  'email',
+  'packageName',
+  'date',
+  'time',
+  'location',
+  'photosReady',
+  'updatedAt',
+};
+const _removableKeys = {'email', 'packageName', 'time', 'location'};
 
 const _mb = 1024 * 1024;
 
+/// The Harpers' details: shared with [emails], or with just [email].
 SessionDetails _details({
   String name = 'The Harper family',
-  String email = 'harper@example.com',
+  String? email,
+  List<String>? emails,
   DateTime? date,
   String? packageName,
   ({int hour, int minute})? time,
@@ -42,7 +55,7 @@ SessionDetails _details({
 }) =>
     SessionDetails(
       name: name,
-      email: email,
+      emails: emails ?? [email ?? 'harper@example.com'],
       date: date ?? DateTime(2026, 11, 14),
       packageName: packageName,
       time: time,
@@ -76,7 +89,7 @@ void main() {
   void addAdHoc(String id, {bool photosReady = false}) => db.docs['bookings/$id'] = {
         'status': 'adhoc',
         'name': 'The Harper family',
-        'email': 'harper@example.com',
+        'emails': ['harper@example.com'],
         'date': '2026-11-14',
         'photosReady': photosReady,
         'createdAt': FakeFirestore.serverTime,
@@ -200,8 +213,37 @@ void main() {
         (_details(time: (hour: 9, minute: 60)), 'Choose a time'),
         (_details(location: 'y' * 201), '200 characters or fewer'),
       ]) {
-        expect(sessionDetailsProblem(details), contains(says), reason: '${details.name} ${details.email}');
+        expect(sessionDetailsProblem(details), contains(says), reason: '${details.name} ${details.emails}');
       }
+    });
+
+    test('several emails: up to ten, each checked as one is, none twice', () {
+      final ten = [for (var i = 0; i < 10; i++) 'guest$i@example.com'];
+      expect(sessionDetailsProblem(_details(emails: ten)), isNull);
+      expect(sessionDetailsProblem(_details(emails: [' Harper@Example.com', 'pat@example.com'])), isNull);
+      // Fields left blank aren't emails.
+      expect(sessionDetailsProblem(_details(emails: ['harper@example.com', '  '])), isNull);
+
+      for (final (emails, says) in [
+        (<String>[], 'Enter the Google email of whoever will download the photos'),
+        (['', ' '], 'Enter the Google email of whoever will download the photos'),
+        ([...ten, 'one@more.com'], 'A session can have at most 10 emails. Remove one and save again.'),
+        (['harper@example.com', 'pat@example'], 'Check “pat@example”. That email doesn’t look right.'),
+        (['harper@example.com', 'pat+kids@gmail.com'], 'Check “pat+kids@gmail.com”. “+kids” isn’t part of a Gmail'),
+        (['harper@example.com', 'Harper@example.com '], '“harper@example.com” is in the list twice.'),
+        (['${'a' * 245}@example.com'], 'That email is too long: an address has at most 254 characters.'),
+      ]) {
+        expect(sessionDetailsProblem(_details(emails: emails)), contains(says), reason: '$emails');
+      }
+    });
+
+    test('editing: the emails are checked only when they change, as the rules check them', () {
+      // Typed into the console, as the app never would.
+      final odd = testSession('s1', date: DateTime(2026, 11, 14), emails: ['not an email']);
+
+      expect(sessionDetailsProblem(_details(name: 'The Harpers', emails: ['not an email']), before: odd), isNull);
+      expect(sessionDetailsProblem(_details(emails: ['not an email', 'pat@example.com']), before: odd),
+          contains('Check “not an email”.'));
     });
   });
 
@@ -210,7 +252,7 @@ void main() {
       final data = newSessionData(
         _details(
           name: '  The Harper family ',
-          email: ' Harper@Example.COM ',
+          emails: [' Harper@Example.COM ', 'Pat@example.com'],
           packageName: 'Premium',
           date: DateTime(2026, 3, 4, 15, 30),
           time: (hour: 9, minute: 5),
@@ -222,7 +264,7 @@ void main() {
       expect(data, {
         'status': 'adhoc',
         'name': 'The Harper family',
-        'email': 'harper@example.com',
+        'emails': ['harper@example.com', 'pat@example.com'],
         'packageName': 'Premium',
         'date': '2026-03-04',
         'time': '09:05',
@@ -238,6 +280,12 @@ void main() {
       final data = newSessionData(_details(packageName: '', location: '   '), createdBy: 'admin-uid');
 
       expect(data.keys.toSet(), _requiredCreateKeys);
+    });
+
+    test('leaves out an email field left blank', () {
+      final data = newSessionData(_details(emails: ['harper@example.com', ' ']), createdBy: 'admin-uid');
+
+      expect(data['emails'], ['harper@example.com']);
     });
 
     test('pads the date and time, and ignores the time of day', () {
@@ -261,7 +309,9 @@ void main() {
 
       expect(booking.status, BookingStatus.adhoc);
       expect(booking.name, 'The Harper family');
-      expect(booking.email, 'harper@example.com');
+      expect(booking.emails, ['harper@example.com']);
+      expect(booking.guestEmails, ['harper@example.com']);
+      expect(booking.email, isNull);
       expect(booking.packageName, 'Basic');
       expect(booking.date, DateTime(2026, 11, 14));
       expect(booking.time, (hour: 14, minute: 45));
@@ -282,12 +332,21 @@ void main() {
     SessionDetails same({
       String name = 'The Harper family',
       String email = 'harper@example.com',
+      List<String>? emails,
       DateTime? date,
       String? packageName = 'Premium',
       ({int hour, int minute})? time = (hour: 9, minute: 0),
       String? location = 'Liberty Park',
     }) =>
-        _details(name: name, email: email, date: date, packageName: packageName, time: time, location: location);
+        _details(
+          name: name,
+          email: email,
+          emails: emails,
+          date: date,
+          packageName: packageName,
+          time: time,
+          location: location,
+        );
 
     test('nothing, when only spaces, capitals or the time of day differ', () {
       expect(
@@ -301,11 +360,56 @@ void main() {
 
     test('only the fields that changed', () {
       expect(sessionChanges(session, same(name: 'The Harpers')), {'name': 'The Harpers'});
-      expect(sessionChanges(session, same(email: 'pat@example.com')), {'email': 'pat@example.com'});
+      expect(sessionChanges(session, same(email: 'pat@example.com')), {
+        'emails': ['pat@example.com'],
+      });
       expect(sessionChanges(session, same(date: DateTime(2026, 12, 1))), {'date': '2026-12-01'});
       expect(sessionChanges(session, same(packageName: 'Basic')), {'packageName': 'Basic'});
       expect(sessionChanges(session, same(time: (hour: 10, minute: 30))), {'time': '10:30'});
       expect(sessionChanges(session, same(location: 'The studio')), {'location': 'The studio'});
+    });
+
+    test('the emails as a whole, when one is added, taken off or moved', () {
+      final both = testSession(
+        's1',
+        emails: ['harper@example.com', 'pat@example.com'],
+        date: DateTime(2026, 11, 14),
+        packageName: 'Premium',
+        time: (hour: 9, minute: 0),
+        location: 'Liberty Park',
+      );
+
+      expect(sessionChanges(session, same(emails: ['harper@example.com', ' Pat@Example.com'])), {
+        'emails': ['harper@example.com', 'pat@example.com'],
+      });
+      expect(sessionChanges(both, same(emails: ['pat@example.com'])), {
+        'emails': ['pat@example.com'],
+      });
+      expect(sessionChanges(both, same(emails: ['pat@example.com', 'harper@example.com'])), {
+        'emails': ['pat@example.com', 'harper@example.com'],
+      });
+      expect(sessionChanges(both, same(emails: ['Harper@Example.com', 'pat@example.com'])), isEmpty);
+    });
+
+    test('a session from before several emails moves its one email to emails, whatever else changes', () {
+      final oneEmail = testSession('s1', email: 'harper@example.com', date: DateTime(2026, 11, 14));
+
+      expect(sessionChanges(oneEmail, _details()), {
+        'emails': ['harper@example.com'],
+        'email': FieldValue.delete(),
+      });
+      expect(sessionChanges(oneEmail, _details(name: 'The Harpers', emails: ['harper@example.com', 'pat@example.com'])),
+          {
+            'name': 'The Harpers',
+            'emails': ['harper@example.com', 'pat@example.com'],
+            'email': FieldValue.delete(),
+          });
+    });
+
+    test('a booking’s email is a note: never deleted', () {
+      final paid = testSession('p1', status: BookingStatus.paid, email: 'parent@example.com');
+
+      expect(sessionChanges(paid, _details(name: 'The Harper family')), isNot(contains('email')));
     });
 
     test('clears optional fields with FieldValue.delete(), never null', () {
@@ -316,7 +420,8 @@ void main() {
         'time': FieldValue.delete(),
         'location': FieldValue.delete(),
       });
-      expect(changes.keys.toSet(), _removableKeys);
+      // The optional fields: `email` goes only as a session moves to emails.
+      expect(changes.keys.toSet(), _removableKeys.difference({'email'}));
     });
 
     test('fills in optional fields the session didn’t have', () {
@@ -328,12 +433,14 @@ void main() {
     });
 
     test('changes only what the rules let an ad hoc update change', () {
-      final changes = sessionChanges(
-        session,
-        _details(name: 'Pat', email: 'pat@example.com', date: DateTime(2027), location: 'Home'),
-      );
+      for (final before in [session, testSession('s1', email: 'harper@example.com')]) {
+        final changes = sessionChanges(
+          before,
+          _details(name: 'Pat', email: 'pat@example.com', date: DateTime(2027), location: 'Home'),
+        );
 
-      expect(_adHocUpdateKeys.containsAll(changes.keys), isTrue, reason: '${changes.keys}');
+        expect(_adHocUpdateKeys.containsAll(changes.keys), isTrue, reason: '${changes.keys}');
+      }
     });
   });
 
@@ -434,11 +541,11 @@ void main() {
         'delete gallery-zips/a1.zip',
       ]);
       expect(db.writes.last.data, {
-        'email': 'harper@example.com',
+        'emails': ['harper@example.com'],
         'location': 'The studio',
         'updatedAt': FieldValue.serverTimestamp(),
       });
-      expect(db.docs['bookings/a1']!['email'], 'harper@example.com');
+      expect(db.docs['bookings/a1']!['emails'], ['harper@example.com']);
       expect(db.docs['bookings/a1']!['createdBy'], 'admin-uid');
     });
 
@@ -548,7 +655,7 @@ void main() {
 
       await admin.updateSession(session, _details(email: 'grandma@example.com'));
 
-      expect(db.docs['bookings/s1']!['email'], 'grandma@example.com');
+      expect(db.docs['bookings/s1']!['emails'], ['grandma@example.com']);
       expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
       expect(storage.objects, hasLength(1));
     });
@@ -564,6 +671,65 @@ void main() {
 
       expect(log, ['update bookings/s1']);
       expect(storage.objects, hasLength(1));
+    });
+
+    test('adding an email leaves the zip: everyone it was given to still has the photos', () async {
+      addAdHoc('s1', photosReady: true);
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      final session = testSession('s1', date: DateTime(2026, 11, 14), photosReady: true);
+
+      await admin.updateSession(session, _details(emails: ['harper@example.com', 'pat@example.com']));
+
+      expect(db.docs['bookings/s1']!['emails'], ['harper@example.com', 'pat@example.com']);
+      expect(log, ['update bookings/s1']);
+      expect(storage.objects, hasLength(1));
+    });
+
+    test('taking off one email of several deletes the zip, so its links stop working', () async {
+      addAdHoc('s1', photosReady: true);
+      db.docs['bookings/s1']!['emails'] = ['harper@example.com', 'pat@example.com'];
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      final session = testSession(
+        's1',
+        emails: ['harper@example.com', 'pat@example.com'],
+        date: DateTime(2026, 11, 14),
+        photosReady: true,
+      );
+
+      await admin.updateSession(session, _details(emails: ['pat@example.com']));
+
+      expect(db.docs['bookings/s1']!['emails'], ['pat@example.com']);
+      expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
+      expect(storage.objects, isEmpty);
+    });
+
+    test('a session from before several emails moves to emails, keeping the zip for the same email', () async {
+      db.docs['bookings/s1'] = {'status': 'adhoc', 'name': 'The Harper family', 'email': 'harper@example.com'};
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      final session = testSession('s1', email: 'harper@example.com', date: DateTime(2026, 11, 14));
+
+      await admin.updateSession(session, _details(email: 'harper@example.com'));
+
+      expect(db.writes.single.data, {
+        'emails': ['harper@example.com'],
+        'email': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      expect(db.docs['bookings/s1'], isNot(contains('email')));
+      expect(db.docs['bookings/s1']!['emails'], ['harper@example.com']);
+      expect(log, ['update bookings/s1']);
+      expect(storage.objects, hasLength(1));
+    });
+
+    test('a session from before several emails whose email changes deletes the zip', () async {
+      db.docs['bookings/s1'] = {'status': 'adhoc', 'name': 'The Harper family', 'email': 'harper@example.com'};
+      storage.objects['gallery-zips/s1.zip'] = 'application/zip';
+      final session = testSession('s1', email: 'harper@example.com', date: DateTime(2026, 11, 14));
+
+      await admin.updateSession(session, _details(email: 'pat@example.com'));
+
+      expect(db.docs['bookings/s1']!['emails'], ['pat@example.com']);
+      expect(log, ['update bookings/s1', 'delete gallery-zips/s1.zip']);
     });
 
     test('a new email whose change is refused leaves the zip', () async {
@@ -708,6 +874,18 @@ void main() {
       expect(bad.problem, Booking.problemWith(db.docs['bookings/c']!));
       expect(bad.email, 'x@example.com');
       expect(bad.date, 'soon');
+    });
+
+    test('an unreadable session shared with several emails is named by them', () async {
+      db.docs['bookings/c'] = {
+        'status': 'adhoc',
+        'emails': ['harper@example.com', 7, 'pat@example.com'],
+        'date': 'soon',
+      };
+
+      final bad = (await admin.watchSessions().first).unreadable.single;
+
+      expect(bad.email, 'harper@example.com, pat@example.com');
     });
 
     test('updates live', () async {

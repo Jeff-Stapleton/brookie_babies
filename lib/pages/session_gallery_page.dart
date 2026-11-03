@@ -37,6 +37,8 @@ class SessionGalleryPage extends StatefulWidget {
 
 class _SessionGalleryPageState extends State<SessionGalleryPage> {
   late Future<List<GalleryPhoto>> _photos;
+  List<GalleryPhoto?>? _loadingPhotos;
+  int _request = 0;
 
   @override
   void initState() {
@@ -44,14 +46,30 @@ class _SessionGalleryPageState extends State<SessionGalleryPage> {
     _photos = _load();
   }
 
-  Future<List<GalleryPhoto>> _load() => AppServices.of(context).gallery.loadPhotos(
-        widget.booking.id,
-        adminPreview: widget.adminPreview,
-      );
+  Future<List<GalleryPhoto>> _load() {
+    final request = ++_request;
+    return AppServices.of(context).gallery.loadPhotos(
+          widget.booking.id,
+          adminPreview: widget.adminPreview,
+          onProgress: (progress) => _showProgress(request, progress),
+        );
+  }
+
+  void _showProgress(int request, GalleryPhotosProgress progress) {
+    if (!mounted || request != _request) return;
+    final current = _loadingPhotos;
+    final next = current?.length == progress.photoCount
+        ? List<GalleryPhoto?>.of(current!)
+        : List<GalleryPhoto?>.filled(progress.photoCount, null);
+    final index = progress.index;
+    if (index != null) next[index] = progress.photo;
+    setState(() => _loadingPhotos = next);
+  }
 
   void _retry() {
     final photos = _load();
     setState(() {
+      _loadingPhotos = null;
       _photos = photos;
     });
   }
@@ -62,14 +80,12 @@ class _SessionGalleryPageState extends State<SessionGalleryPage> {
       // A customer has no Admin link. Keep it out of the preview too, so the
       // gallery itself is what the family will see; Back still returns to the
       // session's admin page.
-      appBar: BrookieTopBar(title: 'Photo gallery', showAdminLink: !widget.adminPreview),
+      appBar: BrookieTopBar(
+          title: 'Photo gallery', showAdminLink: !widget.adminPreview),
       body: FutureBuilder<List<GalleryPhoto>>(
         future: _photos,
         builder: (context, snapshot) {
           final photos = snapshot.data;
-          if (photos != null && photos.isNotEmpty) {
-            return _Gallery(booking: widget.booking, photos: photos);
-          }
           if (snapshot.hasError || (photos != null && photos.isEmpty)) {
             final error = snapshot.error;
             if (error != null && error is! GalleryException) {
@@ -77,9 +93,18 @@ class _SessionGalleryPageState extends State<SessionGalleryPage> {
             }
             return _GalleryStatus(
               booking: widget.booking,
-              message: error is GalleryException ? error.message : kGalleryLoadErrorFallback,
+              message: error is GalleryException
+                  ? error.message
+                  : kGalleryLoadErrorFallback,
               onRetry: _retry,
             );
+          }
+          if (photos != null && photos.isNotEmpty) {
+            return _Gallery(booking: widget.booking, photos: photos);
+          }
+          final loadingPhotos = _loadingPhotos;
+          if (loadingPhotos != null && loadingPhotos.isNotEmpty) {
+            return _Gallery(booking: widget.booking, photos: loadingPhotos);
           }
           return _GalleryStatus(booking: widget.booking);
         },
@@ -90,7 +115,8 @@ class _SessionGalleryPageState extends State<SessionGalleryPage> {
 
 /// Always includes the year: galleries are keepsakes that may be revisited
 /// long after the session.
-String galleryDateLabel(DateTime date) => '${formatDayHeading(date)}, ${date.year}';
+String galleryDateLabel(DateTime date) =>
+    '${formatDayHeading(date)}, ${date.year}';
 
 class _GalleryStatus extends StatelessWidget {
   const _GalleryStatus({
@@ -117,7 +143,8 @@ class _GalleryStatus extends StatelessWidget {
           child: Align(
             alignment: AlignmentDirectional.topStart,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: BrookieSize.readingWidth),
+              constraints:
+                  const BoxConstraints(maxWidth: BrookieSize.readingWidth),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -164,13 +191,15 @@ class _Gallery extends StatelessWidget {
   const _Gallery({required this.booking, required this.photos});
 
   final Booking booking;
-  final List<GalleryPhoto> photos;
+  final List<GalleryPhoto?> photos;
 
   void _open(BuildContext context, int index) {
+    final complete = photos.whereType<GalleryPhoto>().toList();
+    if (complete.length != photos.length) return;
     showSessionPhotoViewer(
       context,
       booking: booking,
-      photos: photos,
+      photos: complete,
       initialIndex: index,
     );
   }
@@ -178,9 +207,11 @@ class _Gallery extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = photos.length;
+    final complete = photos.every((photo) => photo != null);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = MediaQuery.sizeOf(context).width < BrookieBreakpoint.gutter;
+        final compact =
+            MediaQuery.sizeOf(context).width < BrookieBreakpoint.gutter;
         // A normal caption completes the first screen. A long or enlarged
         // title may make the landing section taller, without squeezing the
         // cover below a useful size or overflowing a fixed-height column.
@@ -202,14 +233,19 @@ class _Gallery extends StatelessWidget {
                       child: LayoutBuilder(
                         builder: (context, coverConstraints) {
                           final ratio = MediaQuery.devicePixelRatioOf(context);
-                          return NetworkPhoto(
-                            key: ValueKey(photos.first.url),
-                            url: photos.first.url,
-                            decodeSize: Size(
-                              coverConstraints.maxWidth * ratio,
-                              coverConstraints.maxHeight * ratio,
-                            ),
-                          );
+                          final photo = photos.first;
+                          return photo == null
+                              ? ColoredBox(
+                                  color: BrookieColors.of(context).surfaceSunk)
+                              : NetworkPhoto(
+                                  key: ValueKey(photo.url),
+                                  url: photo.url,
+                                  previewUrl: photo.previewUrl,
+                                  decodeSize: Size(
+                                    coverConstraints.maxWidth * ratio,
+                                    coverConstraints.maxHeight * ratio,
+                                  ),
+                                );
                         },
                       ),
                     ),
@@ -250,7 +286,9 @@ class _Gallery extends StatelessWidget {
             SliverLayoutBuilder(
               builder: (context, gridConstraints) {
                 final viewportWidth = gridConstraints.crossAxisExtent;
-                final gutter = viewportWidth >= BrookieBreakpoint.gutter ? BrookieSpace.s5 : BrookieSpace.s4;
+                final gutter = viewportWidth >= BrookieBreakpoint.gutter
+                    ? BrookieSpace.s5
+                    : BrookieSpace.s4;
                 final side = math.max(
                   gutter,
                   (viewportWidth - BrookieSize.contentWidth) / 2,
@@ -276,13 +314,20 @@ class _Gallery extends StatelessWidget {
                       crossAxisSpacing: BrookieSpace.s4,
                       childAspectRatio: 4 / 5,
                     ),
-                    itemBuilder: (context, index) => _GalleryTile(
-                      key: ValueKey(photos[index].name),
-                      photo: photos[index],
-                      index: index,
-                      count: count,
-                      onOpen: () => _open(context, index),
-                    ),
+                    itemBuilder: (context, index) {
+                      final photo = photos[index];
+                      return photo == null
+                          ? ColoredBox(
+                              color: BrookieColors.of(context).surfaceSunk)
+                          : _GalleryTile(
+                              key: ValueKey(photo.name),
+                              photo: photo,
+                              index: index,
+                              count: count,
+                              onOpen:
+                                  complete ? () => _open(context, index) : null,
+                            );
+                    },
                   ),
                 );
               },
@@ -314,7 +359,9 @@ class _SessionCaption extends StatelessWidget {
                 header: true,
                 child: Text(
                   booking.familyTitle,
-                  style: compact ? BrookieType.displayCompact : BrookieType.display,
+                  style: compact
+                      ? BrookieType.displayCompact
+                      : BrookieType.display,
                 ),
               ),
               const SizedBox(height: BrookieSpace.s2),
@@ -344,7 +391,7 @@ class _GalleryTile extends StatefulWidget {
   final GalleryPhoto photo;
   final int index;
   final int count;
-  final VoidCallback onOpen;
+  final VoidCallback? onOpen;
 
   @override
   State<_GalleryTile> createState() => _GalleryTileState();
@@ -355,25 +402,36 @@ class _GalleryTileState extends State<_GalleryTile> {
 
   @override
   Widget build(BuildContext context) {
-    final open = CallbackAction<Intent>(
-      onInvoke: (_) {
-        widget.onOpen();
-        return null;
-      },
-    );
+    final onOpen = widget.onOpen;
+    final actions = onOpen == null
+        ? const <Type, Action<Intent>>{}
+        : <Type, Action<Intent>>{
+            ActivateIntent: CallbackAction<Intent>(
+              onInvoke: (_) {
+                onOpen();
+                return null;
+              },
+            ),
+            ButtonActivateIntent: CallbackAction<Intent>(
+              onInvoke: (_) {
+                onOpen();
+                return null;
+              },
+            ),
+          };
     return MergeSemantics(
       child: Semantics(
-        button: true,
-        label: 'View photo ${widget.index + 1} of ${widget.count}',
+        button: onOpen != null,
+        label: onOpen == null
+            ? 'Photo ${widget.index + 1} of ${widget.count}'
+            : 'View photo ${widget.index + 1} of ${widget.count}',
         child: FocusableActionDetector(
-          mouseCursor: SystemMouseCursors.click,
+          enabled: onOpen != null,
+          mouseCursor: onOpen == null ? MouseCursor.defer : SystemMouseCursors.click,
           onShowFocusHighlight: (value) => setState(() => _focused = value),
-          actions: {
-            ActivateIntent: open,
-            ButtonActivateIntent: open,
-          },
+          actions: actions,
           child: GestureDetector(
-            onTap: widget.onOpen,
+            onTap: onOpen,
             behavior: HitTestBehavior.opaque,
             child: FocusRing.onPhoto(
               visible: _focused,
@@ -383,10 +441,13 @@ class _GalleryTileState extends State<_GalleryTile> {
                 ),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final pixels = constraints.maxWidth * MediaQuery.devicePixelRatioOf(context);
-                    final decodeWidth = ((pixels / 128).ceil() * 128).toDouble();
+                    final pixels = constraints.maxWidth *
+                        MediaQuery.devicePixelRatioOf(context);
+                    final decodeWidth =
+                        ((pixels / 128).ceil() * 128).toDouble();
                     return NetworkPhoto(
                       url: widget.photo.url,
+                      previewUrl: widget.photo.previewUrl,
                       decodeSize: Size(decodeWidth, decodeWidth / (4 / 5)),
                     );
                   },
@@ -414,13 +475,16 @@ Future<void> showSessionPhotoViewer(
     barrierDismissible: true,
     barrierLabel: 'Close photo',
     barrierColor: BrookieColors.of(context).scrim,
-    transitionDuration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : kBrookieFadeDuration,
+    transitionDuration: MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : kBrookieFadeDuration,
     pageBuilder: (context, animation, secondaryAnimation) => _PhotoViewer(
       booking: booking,
       photos: photos,
       initialIndex: initialIndex,
     ),
-    transitionBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(
+    transitionBuilder: (context, animation, secondaryAnimation, child) =>
+        FadeTransition(
       opacity: animation.drive(_viewerFade),
       child: child,
     ),
@@ -531,7 +595,8 @@ class _PhotoViewerState extends State<_PhotoViewer> {
                   child: Semantics(
                     image: true,
                     excludeSemantics: true,
-                    label: 'Photo $number of $count from ${widget.booking.familyTitle}',
+                    label:
+                        'Photo $number of $count from ${widget.booking.familyTitle}',
                     child: LayoutBuilder(
                       builder: (context, constraints) => InteractiveViewer(
                         key: ValueKey(photo.url),
@@ -540,21 +605,24 @@ class _PhotoViewerState extends State<_PhotoViewer> {
                         child: SizedBox(
                           width: constraints.maxWidth,
                           height: constraints.maxHeight,
-                          child: Image.network(
-                            photo.url.toString(),
+                          child: NetworkPhoto(
+                            url: photo.url,
+                            previewUrl: photo.previewUrl,
                             fit: BoxFit.contain,
-                            excludeFromSemantics: true,
-                            loadingBuilder: (context, child, loadingProgress) => loadingProgress == null
-                                ? child
-                                : const Center(
-                                    child: SizedBox.square(
-                                      dimension: 24,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                                  ),
-                            errorBuilder: (context, error, stackTrace) => Center(
+                            decodeSize: Size(
+                              constraints.maxWidth *
+                                  MediaQuery.devicePixelRatioOf(context),
+                              constraints.maxHeight *
+                                  MediaQuery.devicePixelRatioOf(context),
+                            ),
+                            placeholderBuilder: (context) => const Center(
+                              child: SizedBox.square(
+                                dimension: 24,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            ),
+                            errorBuilder: (context) => Center(
                               child: ConstrainedBox(
                                 constraints: const BoxConstraints(
                                   maxWidth: BrookieSize.readingWidth,

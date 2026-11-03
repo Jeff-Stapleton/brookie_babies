@@ -16,10 +16,22 @@ import 'package:flutter/foundation.dart';
 
 /// Every session in `bookings`, plus the documents that couldn't be read, so
 /// the admin page can name them instead of silently leaving them out.
-typedef AllSessions = ({List<Booking> sessions, List<UnreadableBooking> unreadable});
+typedef AllSessions = ({
+  List<Booking> sessions,
+  List<UnreadableBooking> unreadable
+});
 
 /// Why an [AdminService] call failed.
-enum AdminErrorKind { denied, offline, notFound, cancelled, alreadyExists, quota, invalid, unknown }
+enum AdminErrorKind {
+  denied,
+  offline,
+  notFound,
+  cancelled,
+  alreadyExists,
+  quota,
+  invalid,
+  unknown
+}
 
 /// Thrown by [AdminService] with a message to show the admin.
 class AdminException implements Exception {
@@ -42,14 +54,17 @@ const kAdminDeniedMessage =
 /// read, so besides a claim not yet in the token, the site may be running
 /// ahead of its rules: deployed before the rules that let admins read (see
 /// the README's deploy order).
-const kAdminReadDeniedMessage = 'We couldn’t load this. If you were just made an admin, refresh the page and try '
+const kAdminReadDeniedMessage =
+    'We couldn’t load this. If you were just made an admin, refresh the page and try '
     'again. If that doesn’t help, the site’s security rules may not be deployed yet.';
 
 /// [AdminErrorKind.offline].
-const kAdminOfflineMessage = 'We couldn’t reach the server. Check your connection and try again.';
+const kAdminOfflineMessage =
+    'We couldn’t reach the server. Check your connection and try again.';
 
 /// [AdminErrorKind.quota].
-const kAdminQuotaMessage = 'Storage is full. Delete photos you no longer need, or upgrade the Firebase plan.';
+const kAdminQuotaMessage =
+    'Storage is full. Delete photos you no longer need, or upgrade the Firebase plan.';
 
 /// [AdminErrorKind.offline] for a write that got no answer in time: it may
 /// still reach the server, so trying again could make it twice.
@@ -115,7 +130,8 @@ abstract class AdminService {
 
   /// Every photo in the session's folder, subfolders included, sorted by
   /// [StoredPhoto.name] (relative to the folder). Leaves out folder markers
-  /// (names ending in '/') and hidden files (basenames starting with '.').
+  /// (names ending in '/'), hidden files and hidden folders (including the
+  /// gallery function's generated `.previews` folder).
   /// Session photos never get a [StoredPhoto.url].
   Future<List<StoredPhoto>> listSessionPhotos(String id);
 
@@ -128,7 +144,8 @@ abstract class AdminService {
   /// Uploads [photo] into the session's folder as [name], a
   /// PhotoRules.safeObjectName. Never overwrites: a photo already there
   /// fails with [AdminErrorKind.alreadyExists].
-  PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name);
+  PhotoUpload uploadSessionPhoto(
+      String sessionId, PickedPhoto photo, String name);
 
   /// Deletes one photo. One that's already gone counts as deleted, and a
   /// failure means it wasn't. A session photo's cached zip goes too, so
@@ -160,7 +177,8 @@ abstract class AdminService {
 /// [newSessionData], [sessionChanges] and PhotoRules check what the rules
 /// check before anything is sent.
 class FirebaseAdminService implements AdminService {
-  FirebaseAdminService(this.firestore, this.storage, this.auth, {this.writeTimeLimit = const Duration(seconds: 20)});
+  FirebaseAdminService(this.firestore, this.storage, this.auth,
+      {this.writeTimeLimit = const Duration(seconds: 20)});
 
   final FirebaseFirestore firestore;
   final FirebaseStorage storage;
@@ -178,9 +196,11 @@ class FirebaseAdminService implements AdminService {
 
   static const _galleries = 'galleries';
 
-  CollectionReference<Map<String, dynamic>> get _bookings => firestore.collection('bookings');
+  CollectionReference<Map<String, dynamic>> get _bookings =>
+      firestore.collection('bookings');
 
-  DocumentReference<Map<String, dynamic>> get _home => firestore.doc('site/home');
+  DocumentReference<Map<String, dynamic>> get _home =>
+      firestore.doc('site/home');
 
   @override
   Stream<AllSessions> watchSessions() => _reading(
@@ -193,7 +213,10 @@ class FirebaseAdminService implements AdminService {
   @override
   Stream<SessionLookup> watchSession(String id) => _reading(
         'watch session $id',
-        _bookings.doc(id).snapshots().map((doc) => _sessionLookupFrom(doc.id, doc.data())),
+        _bookings
+            .doc(id)
+            .snapshots()
+            .map((doc) => _sessionLookupFrom(doc.id, doc.data())),
       );
 
   @override
@@ -207,7 +230,8 @@ class FirebaseAdminService implements AdminService {
     // answers and a retry can use it again.
     final doc = _bookings.doc(id == null ? newSessionId() : _sessionId(id));
     try {
-      await _write('add a session', () => doc.set(newSessionData(details, createdBy: uid)));
+      await _write('add a session',
+          () => doc.set(newSessionData(details, createdBy: uid)));
     } on AdminException catch (e) {
       // A retry after a try that got no answer but was saved: the rules
       // take set() on a document that's there as an update, and refuse it.
@@ -242,12 +266,15 @@ class FirebaseAdminService implements AdminService {
     if (changes.isEmpty) return;
     await _write(
       'edit session ${session.id}',
-      () => _bookings.doc(session.id).update({...changes, 'updatedAt': FieldValue.serverTimestamp()}),
+      () => _bookings
+          .doc(session.id)
+          .update({...changes, 'updatedAt': FieldValue.serverTimestamp()}),
     );
     // After the change, so no download in between rebuilds it for an email
     // taken off.
     final emails = _emailsOf(details);
-    if (session.guestEmails.any((email) => !emails.contains(email))) await _deleteZip(session.id);
+    if (session.guestEmails.any((email) => !emails.contains(email)))
+      await _deleteZip(session.id);
   }
 
   @override
@@ -255,7 +282,8 @@ class FirebaseAdminService implements AdminService {
     _signedInUid();
     await _write(
       'set photosReady on session $id',
-      () => _bookings.doc(id).update({'photosReady': ready, 'updatedAt': FieldValue.serverTimestamp()}),
+      () => _bookings.doc(id).update(
+          {'photosReady': ready, 'updatedAt': FieldValue.serverTimestamp()}),
     );
     // Hidden first, so no download in between rebuilds it.
     if (!ready) await _deleteZip(id);
@@ -266,7 +294,8 @@ class FirebaseAdminService implements AdminService {
     _signedInUid();
     final folder = _galleryPath(id);
     final doc = _bookings.doc(id);
-    final data = (await _attempt('read session $id', _Doing.writing, doc.get)).data();
+    final data =
+        (await _attempt('read session $id', _Doing.writing, doc.get)).data();
     // Already gone: a retry after a failure part way, or another tab. The
     // rules would refuse deleting it again.
     if (data == null) return;
@@ -281,12 +310,15 @@ class FirebaseAdminService implements AdminService {
     if (data['photosReady'] == true) {
       await _write(
         'hide the photos of session $id',
-        () => doc.update({'photosReady': false, 'updatedAt': FieldValue.serverTimestamp()}),
+        () => doc.update(
+            {'photosReady': false, 'updatedAt': FieldValue.serverTimestamp()}),
       );
     }
-    await _attempt('delete the photos of session $id', _Doing.writing, () async {
+    await _attempt('delete the photos of session $id', _Doing.writing,
+        () async {
       // Everything, hidden files included: the folder goes with the session.
-      await _forEachLimited(await _listAllUnder(storage.ref(folder)), _deleteIfThere);
+      await _forEachLimited(
+          await _listAllUnder(storage.ref(folder)), _deleteIfThere);
       // Not best effort, as _deleteZip is: once the document is gone,
       // nothing would delete it.
       await _deleteIfThere(storage.ref(_zipPath(id)));
@@ -296,15 +328,16 @@ class FirebaseAdminService implements AdminService {
     } on AdminException catch (e) {
       // Deleted since it was read (in another tab, say): the rules refuse
       // deleting a document that isn't there, since they check its status.
-      if (e.kind != AdminErrorKind.denied || await _isThere(doc) != false) rethrow;
+      if (e.kind != AdminErrorKind.denied || await _isThere(doc) != false)
+        rethrow;
     }
   }
 
   @override
   Future<List<StoredPhoto>> listSessionPhotos(String id) async {
     final folder = _galleryPath(id);
-    final files =
-        await _attempt('list the photos of session $id', _Doing.reading, () => _listAllUnder(storage.ref(folder)));
+    final files = await _attempt('list the photos of session $id',
+        _Doing.reading, () => _listAllUnder(storage.ref(folder)));
     final prefix = '$folder/';
     final photos = <StoredPhoto>[];
     for (final file in files) {
@@ -312,8 +345,16 @@ class FirebaseAdminService implements AdminService {
       final name = file.fullPath.substring(prefix.length);
       // What getGalleryDownloadUrl zips (functions/src/gallery.ts,
       // selectPhotos), so the count here is the count families get.
-      final basename = name.split(RegExp(r'[\\/]')).last;
-      if (name.endsWith('/') || basename.isEmpty || basename.startsWith('.')) continue;
+      final segments = name.split(RegExp(r'[\\/]'));
+      final basename = segments.last;
+      final hiddenFolder = segments.take(segments.length - 1).any(
+            (segment) =>
+                segment.startsWith('.') && segment != '.' && segment != '..',
+          );
+      if (name.endsWith('/') ||
+          basename.isEmpty ||
+          basename.startsWith('.') ||
+          hiddenFolder) continue;
       photos.add(StoredPhoto(name: name, fullPath: file.fullPath));
     }
     // By UTF-16 code unit, as the function sorts the zip.
@@ -344,7 +385,9 @@ class FirebaseAdminService implements AdminService {
   }
 
   @override
-  PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name) => _upload(
+  PhotoUpload uploadSessionPhoto(
+          String sessionId, PickedPhoto photo, String name) =>
+      _upload(
         photo,
         name,
         problem: PhotoRules.sessionPhotoProblem(photo) ?? _nameProblem(name),
@@ -354,7 +397,8 @@ class FirebaseAdminService implements AdminService {
   @override
   Future<void> deletePhoto(StoredPhoto photo, {bool deleteZip = true}) async {
     _signedInUid();
-    await _attempt('delete ${photo.fullPath}', _Doing.writing, () => _deleteIfThere(storage.ref(photo.fullPath)));
+    await _attempt('delete ${photo.fullPath}', _Doing.writing,
+        () => _deleteIfThere(storage.ref(photo.fullPath)));
     if (!deleteZip) return;
     // 'galleries/<id>/<name>': after the photo, so no download in between
     // rebuilds the zip with it.
@@ -365,10 +409,13 @@ class FirebaseAdminService implements AdminService {
   @override
   Future<List<StoredPhoto>> listHomeLibrary() async {
     const folder = StoragePortfolioService.folder;
-    final listing = await _attempt('list the home page library', _Doing.reading, () => storage.ref(folder).listAll());
+    final listing = await _attempt('list the home page library', _Doing.reading,
+        () => storage.ref(folder).listAll());
     final files = [...listing.items]..sort((a, b) => a.name.compareTo(b.name));
     final urls = <String, Uri>{};
-    await _forEachLimited(files.where((file) => StoragePortfolioService.isPhoto(file.name)), (file) async {
+    await _forEachLimited(
+        files.where((file) => StoragePortfolioService.isPhoto(file.name)),
+        (file) async {
       // A link that can't be fetched leaves that photo without a thumbnail,
       // not the library without its list.
       try {
@@ -378,7 +425,9 @@ class FirebaseAdminService implements AdminService {
       }
     });
     return [
-      for (final file in files) StoredPhoto(name: file.name, fullPath: file.fullPath, url: urls[file.fullPath]),
+      for (final file in files)
+        StoredPhoto(
+            name: file.name, fullPath: file.fullPath, url: urls[file.fullPath]),
     ];
   }
 
@@ -396,7 +445,8 @@ class FirebaseAdminService implements AdminService {
       );
 
   @override
-  Future<List<String>?> homePhotoNames() => _attempt('read the home page photos', _Doing.reading, () async {
+  Future<List<String>?> homePhotoNames() =>
+      _attempt('read the home page photos', _Doing.reading, () async {
         final photos = (await _home.get()).data()?['photos'];
         // Null: none chosen yet (no document), so the site lists the library.
         if (photos is! List) return null;
@@ -428,12 +478,16 @@ class FirebaseAdminService implements AdminService {
     required String? problem,
     required Reference Function() target,
   }) {
-    if (problem != null) return _StorageUpload.failed(AdminException(problem, AdminErrorKind.invalid));
+    if (problem != null)
+      return _StorageUpload.failed(
+          AdminException(problem, AdminErrorKind.invalid));
     if (auth.currentUser == null) return _StorageUpload.failed(_signedOut);
     try {
-      return _StorageUpload.start(target(), photo.data, PhotoRules.contentTypeFor(photo)!);
+      return _StorageUpload.start(
+          target(), photo.data, PhotoRules.contentTypeFor(photo)!);
     } catch (e) {
-      return _StorageUpload.failed(_failure('upload $name', e, _Doing.uploading));
+      return _StorageUpload.failed(
+          _failure('upload $name', e, _Doing.uploading));
     }
   }
 
@@ -471,7 +525,8 @@ class FirebaseAdminService implements AdminService {
 
   /// The ad hoc session saved as [doc]; null if there's none, if what's
   /// there isn't one or can't be read as one, or if reading it fails.
-  static Future<Booking?> _savedAdHoc(DocumentReference<Map<String, dynamic>> doc) async {
+  static Future<Booking?> _savedAdHoc(
+      DocumentReference<Map<String, dynamic>> doc) async {
     try {
       final data = (await doc.get()).data();
       final session = data == null ? null : Booking.fromMap(doc.id, data);
@@ -483,7 +538,8 @@ class FirebaseAdminService implements AdminService {
   }
 
   /// Whether [doc] is there; null if that can't be read either.
-  static Future<bool?> _isThere(DocumentReference<Map<String, dynamic>> doc) async {
+  static Future<bool?> _isThere(
+      DocumentReference<Map<String, dynamic>> doc) async {
     try {
       return (await doc.get()).exists;
     } catch (e) {
@@ -492,7 +548,8 @@ class FirebaseAdminService implements AdminService {
     }
   }
 
-  static String? _nameProblem(String name) => name == PhotoRules.safeObjectName(name)
+  static String? _nameProblem(String name) => name ==
+          PhotoRules.safeObjectName(name)
       ? null
       : '$name can’t be used as a file name. Rename it and upload it again.';
 
@@ -539,12 +596,14 @@ class FirebaseAdminService implements AdminService {
         _Doing.writing,
         () => write().timeout(writeTimeLimit, onTimeout: () {
           log('Admin: no answer in ${writeTimeLimit.inSeconds} s when trying to $what');
-          throw const AdminException(kAdminTimedOutMessage, AdminErrorKind.offline);
+          throw const AdminException(
+              kAdminTimedOutMessage, AdminErrorKind.offline);
         }),
       );
 
   /// [run], with any failure as an [AdminException].
-  static Future<T> _attempt<T>(String what, _Doing doing, Future<T> Function() run) async {
+  static Future<T> _attempt<T>(
+      String what, _Doing doing, Future<T> Function() run) async {
     try {
       return await run();
     } catch (e) {
@@ -553,9 +612,11 @@ class FirebaseAdminService implements AdminService {
   }
 
   /// [stream], with its errors as [AdminException]s.
-  static Stream<T> _reading<T>(String what, Stream<T> stream) => stream.transform(
+  static Stream<T> _reading<T>(String what, Stream<T> stream) =>
+      stream.transform(
         StreamTransformer<T, T>.fromHandlers(
-          handleError: (error, stackTrace, sink) => sink.addError(_failure(what, error, _Doing.reading), stackTrace),
+          handleError: (error, stackTrace, sink) =>
+              sink.addError(_failure(what, error, _Doing.reading), stackTrace),
         ),
       );
 }
@@ -567,7 +628,9 @@ enum _Doing {
     failed: 'We couldn’t load this. Refresh the page to try again.',
   ),
   writing(denied: kAdminDeniedMessage, failed: _writeFailedMessage),
-  uploading(denied: kAdminDeniedMessage, failed: 'This photo didn’t upload. Try again.');
+  uploading(
+      denied: kAdminDeniedMessage,
+      failed: 'This photo didn’t upload. Try again.');
 
   const _Doing({required this.denied, required this.failed});
 
@@ -575,7 +638,8 @@ enum _Doing {
   final String failed;
 }
 
-const _writeFailedMessage = 'We couldn’t save that change. Refresh the page and try again.';
+const _writeFailedMessage =
+    'We couldn’t save that change. Refresh the page and try again.';
 
 /// Logs [error] (never with an email: [what] names ids and paths only) and
 /// returns it as an [AdminException].
@@ -587,7 +651,8 @@ AdminException _failure(String what, Object error, _Doing doing) {
 
 /// A Firebase error's code without the web SDKs' prefix
 /// ('storage/unauthorized' is 'unauthorized'), or null for anything else.
-String? _codeOf(Object error) => error is FirebaseException ? error.code.split('/').last : null;
+String? _codeOf(Object error) =>
+    error is FirebaseException ? error.code.split('/').last : null;
 
 /// [error] from Firestore or Storage as an [AdminException], with a message
 /// for the admin: [denied] when the rules refuse, [failed] when nothing more
@@ -599,11 +664,15 @@ AdminException adminExceptionFrom(
   String failed = _writeFailedMessage,
 }) {
   if (error is AdminException) return error;
-  if (error is TimeoutException) return const AdminException(kAdminOfflineMessage, AdminErrorKind.offline);
+  if (error is TimeoutException)
+    return const AdminException(kAdminOfflineMessage, AdminErrorKind.offline);
   // Firestore's codes and Storage's (as the web SDK reports them) never mean
   // different things by the same name, so one switch serves both.
   return switch (_codeOf(error)) {
-    'permission-denied' || 'unauthenticated' || 'unauthorized' => AdminException(denied, AdminErrorKind.denied),
+    'permission-denied' ||
+    'unauthenticated' ||
+    'unauthorized' =>
+      AdminException(denied, AdminErrorKind.denied),
     'unavailable' ||
     'deadline-exceeded' ||
     'retry-limit-exceeded' =>
@@ -612,8 +681,11 @@ AdminException adminExceptionFrom(
         'That’s no longer there. Refresh the page to see what’s there now.',
         AdminErrorKind.notFound,
       ),
-    'cancelled' || 'canceled' => const AdminException(_cancelledMessage, AdminErrorKind.cancelled),
-    'quota-exceeded' => const AdminException(kAdminQuotaMessage, AdminErrorKind.quota),
+    'cancelled' ||
+    'canceled' =>
+      const AdminException(_cancelledMessage, AdminErrorKind.cancelled),
+    'quota-exceeded' =>
+      const AdminException(kAdminQuotaMessage, AdminErrorKind.quota),
     _ => AdminException(failed),
   };
 }
@@ -630,29 +702,36 @@ const _cancelledMessage = 'Cancelled before it finished. Try again.';
 /// fields nobody touches.
 @visibleForTesting
 String? sessionDetailsProblem(SessionDetails details, {Booking? before}) {
-  final changed = before == null ? null : sessionChanges(before, details).keys.toSet();
+  final changed =
+      before == null ? null : sessionChanges(before, details).keys.toSet();
   bool checks(String field) => changed == null || changed.contains(field);
   final name = details.name.trim();
   if (checks('name')) {
-    if (name.isEmpty) return 'Enter who the session is for, like “The Harper family”.';
+    if (name.isEmpty)
+      return 'Enter who the session is for, like “The Harper family”.';
     if (name.length > SessionRules.nameMaxLength) {
       return 'The name is too long. Shorten it to ${SessionRules.nameMaxLength} characters or fewer.';
     }
   }
   if (checks('emails')) {
     final emails = _emailsOf(details);
-    if (emails.isEmpty) return 'Enter the Google email of whoever will download the photos, like name@gmail.com.';
+    if (emails.isEmpty)
+      return 'Enter the Google email of whoever will download the photos, like name@gmail.com.';
     if (emails.length > SessionRules.emailListMaxLength) {
       return 'A session can have at most ${SessionRules.emailListMaxLength} emails. Remove one and save again.';
     }
     for (final (i, email) in emails.indexed) {
       final problem = _emailProblem(email);
-      if (problem != null) return emails.length == 1 ? problem : 'Check “$email”. $problem';
-      if (emails.indexOf(email) < i) return '“$email” is in the list twice. Remove one and save again.';
+      if (problem != null)
+        return emails.length == 1 ? problem : 'Check “$email”. $problem';
+      if (emails.indexOf(email) < i)
+        return '“$email” is in the list twice. Remove one and save again.';
     }
   }
   final packageName = _optional(details.packageName);
-  if (checks('packageName') && packageName != null && !SessionRules.packageNames.contains(packageName)) {
+  if (checks('packageName') &&
+      packageName != null &&
+      !SessionRules.packageNames.contains(packageName)) {
     return 'That package doesn’t exist. Choose ${SessionRules.packageNames.join(', ')} or no package.';
   }
   // YYYY-MM-DD needs a four-digit year.
@@ -660,11 +739,18 @@ String? sessionDetailsProblem(SessionDetails details, {Booking? before}) {
     return 'That date can’t be saved. Choose a date from the calendar.';
   }
   final time = details.time;
-  if (checks('time') && time != null && (time.hour < 0 || time.hour > 23 || time.minute < 0 || time.minute > 59)) {
+  if (checks('time') &&
+      time != null &&
+      (time.hour < 0 ||
+          time.hour > 23 ||
+          time.minute < 0 ||
+          time.minute > 59)) {
     return 'That time can’t be saved. Choose a time from the list.';
   }
   final location = _optional(details.location);
-  if (checks('location') && location != null && location.length > SessionRules.locationMaxLength) {
+  if (checks('location') &&
+      location != null &&
+      location.length > SessionRules.locationMaxLength) {
     return 'The location is too long. Shorten it to ${SessionRules.locationMaxLength} characters or fewer.';
   }
   return null;
@@ -689,14 +775,17 @@ String? _emailProblem(String email) {
 /// in order, leaving out any left blank.
 List<String> _emailsOf(SessionDetails details) => [
       for (final email in details.emails)
-        if (SessionRules.normalizeEmail(email) case final normalized when normalized.isNotEmpty) normalized,
+        if (SessionRules.normalizeEmail(email) case final normalized
+            when normalized.isNotEmpty)
+          normalized,
     ];
 
 /// The `bookings` document for a new ad hoc session: exactly the keys
 /// firestore.rules lets an admin create, with the optional ones left out
 /// when empty (the rules refuse nulls). Check [sessionDetailsProblem] first.
 @visibleForTesting
-Map<String, Object> newSessionData(SessionDetails details, {required String createdBy}) {
+Map<String, Object> newSessionData(SessionDetails details,
+    {required String createdBy}) {
   final fields = _sessionFields(details);
   return {
     'status': BookingStatus.adhoc.name,
@@ -756,7 +845,8 @@ Map<String, String?> _fields({
     'name': name,
     'packageName': packageName,
     // YYYY-MM-DD and 24-hour HH:mm, as Booking.fromMap reads them.
-    'date': '${date.year.toString().padLeft(4, '0')}-${two(date.month)}-${two(date.day)}',
+    'date':
+        '${date.year.toString().padLeft(4, '0')}-${two(date.month)}-${two(date.day)}',
     'time': time == null ? null : '${two(time.hour)}:${two(time.minute)}',
     'location': location,
   };
@@ -786,17 +876,23 @@ AllSessions _sessionsFrom(Iterable<BookingDoc> docs) {
 SessionLookup _sessionLookupFrom(String id, Map<String, dynamic>? data) {
   if (data == null) return const SessionMissing();
   final booking = Booking.fromMap(id, data);
-  return booking == null ? SessionUnreadable(_unreadable(id, data)) : SessionFound(booking);
+  return booking == null
+      ? SessionUnreadable(_unreadable(id, data))
+      : SessionFound(booking);
 }
 
 UnreadableBooking _unreadable(String id, Map<String, dynamic> data) {
   final email = data['email'];
-  final emails = [if (data['emails'] case final List<dynamic> list) ...list.whereType<String>()];
+  final emails = [
+    if (data['emails'] case final List<dynamic> list)
+      ...list.whereType<String>()
+  ];
   final date = data['date'];
   return UnreadableBooking(
     id: id,
     problem: Booking.problemWith(data) ?? 'it couldn’t be read',
-    email: email is String ? email : (emails.isEmpty ? null : emails.join(', ')),
+    email:
+        email is String ? email : (emails.isEmpty ? null : emails.join(', ')),
     date: date is String ? date : null,
   );
 }
@@ -826,7 +922,8 @@ Future<void> _deleteIfThere(Reference file) async {
 /// Runs [action] on each of [items], [FirebaseAdminService.storageConcurrency]
 /// at a time. After a failure it starts no more, and rethrows the first
 /// failure once the ones running have finished.
-Future<void> _forEachLimited<T>(Iterable<T> items, Future<void> Function(T item) action) async {
+Future<void> _forEachLimited<T>(
+    Iterable<T> items, Future<void> Function(T item) action) async {
   final queue = items.iterator;
   Object? failure;
   StackTrace failureTrace = StackTrace.empty;
@@ -842,7 +939,9 @@ Future<void> _forEachLimited<T>(Iterable<T> items, Future<void> Function(T item)
     }
   }
 
-  await Future.wait([for (var i = 0; i < FirebaseAdminService.storageConcurrency; i++) worker()]);
+  await Future.wait([
+    for (var i = 0; i < FirebaseAdminService.storageConcurrency; i++) worker()
+  ]);
   final error = failure;
   if (error != null) Error.throwWithStackTrace(error, failureTrace);
 }
@@ -858,13 +957,16 @@ class _StorageUpload implements PhotoUpload {
 
   /// Starts sending [data] to [target] as [contentType]. Never throws: a
   /// failure to start fails [done].
-  _StorageUpload.start(Reference target, Object data, String contentType) : _target = target {
+  _StorageUpload.start(Reference target, Object data, String contentType)
+      : _target = target {
     final metadata = SettableMetadata(contentType: contentType);
     final UploadTask task;
     try {
       // On the web [data] is the browser's File, which the plugin needs as
       // it is (a Blob); tests pass bytes.
-      task = data is Uint8List ? target.putData(data, metadata) : target.putBlob(data, metadata);
+      task = data is Uint8List
+          ? target.putData(data, metadata)
+          : target.putBlob(data, metadata);
     } catch (e) {
       _settle(e);
       return;
@@ -916,7 +1018,8 @@ class _StorageUpload implements PhotoUpload {
   void _onSnapshot(TaskSnapshot snapshot) {
     if (_settled) return;
     final total = snapshot.totalBytes;
-    _progress.value = total > 0 ? (snapshot.bytesTransferred / total).clamp(0.0, 1.0) : 0;
+    _progress.value =
+        total > 0 ? (snapshot.bytesTransferred / total).clamp(0.0, 1.0) : 0;
   }
 
   Future<void> _settle(Object? error) async {
@@ -933,7 +1036,8 @@ class _StorageUpload implements PhotoUpload {
 
   Future<AdminException> _explain(Object error) async {
     // After cancel(), however the task ends counts as cancelled.
-    if (_cancelled) return const AdminException(_cancelledMessage, AdminErrorKind.cancelled);
+    if (_cancelled)
+      return const AdminException(_cancelledMessage, AdminErrorKind.cancelled);
     final target = _target!;
     if (_codeOf(error) == 'unauthorized') {
       // storage.rules never overwrites, so a name taken since the folder
@@ -946,7 +1050,8 @@ class _StorageUpload implements PhotoUpload {
           AdminErrorKind.alreadyExists,
         );
       } catch (e) {
-        if (_codeOf(e) != 'object-not-found') log('Admin: could not check ${target.fullPath}: $e');
+        if (_codeOf(e) != 'object-not-found')
+          log('Admin: could not check ${target.fullPath}: $e');
       }
     }
     return _failure('upload ${target.fullPath}', error, _Doing.uploading);

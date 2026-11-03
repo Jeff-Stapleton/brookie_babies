@@ -45,7 +45,7 @@ Always run and build with `-d chrome` / `flutter build web`.
 | Bookings | `cloud_firestore`: `bookings` collection behind `BookingService` (customers read their own by uid, ad hoc sessions shared with their email and sessions their owner shared with them; they write only their own sessions' `sharedWith`) |
 | Admin | `AdminService` + `FirebaseAdminService` (`cloud_firestore`, `firebase_storage`): ad hoc sessions, session photos, the home page library and `site/home`, written straight from the browser and guarded by the rules |
 | File picking | The browser's `<input type=file>` through `package:web` (`lib/utilities/web_photo_picker.dart`), as `AppServices.pickPhotos`; no file-picker package |
-| Private session photos | `cloud_functions`: `getGalleryPhotoUrls` returns one-hour links for the gallery; `getGalleryDownloadUrl` streams progress while it builds the zip, then its one-hour link; both are behind `GalleryService` |
+| Private session photos | `cloud_functions`: `getGalleryPhotoUrls` streams one-hour links for cached 480 px previews and originals; `getGalleryDownloadUrl` streams progress while it builds the zip, then its one-hour link; both are behind `GalleryService` |
 | Backend | Cloud Functions for Firebase, TypeScript on Node 24 (`functions/`); Firestore and Storage security rules |
 | Lints | `flutter_lints` (`analysis_options.yaml`, default rules) |
 
@@ -82,9 +82,10 @@ lib/
                           with ad hoc sessions shared with their email and sessions shared with them, marked
                           in sharedWithUser; mergeUserBookings); share/stopSharing (arrayUnion/arrayRemove on
                           sharedWith, 20 s limit, SharingException) and sharingProblem, the rules' check
-    gallery_service.dart  GalleryService + FunctionsGalleryService (loads getGalleryPhotoUrls into GalleryPhoto;
-                          streams getGalleryDownloadUrl: GalleryProgress while a zip is built, then
-                          GalleryDownload; parsers and the 10-minute zip limit are testable on the VM)
+    gallery_service.dart  GalleryService + FunctionsGalleryService (streams getGalleryPhotoUrls into indexed
+                          GalleryPhotosProgress placeholders/photos, then its final GalleryPhoto list; streams
+                          getGalleryDownloadUrl: GalleryProgress while a zip is built, then GalleryDownload;
+                          parsers and time limits are testable on the VM)
     portfolio_service.dart PortfolioService + StoragePortfolioService (home page photo links: the names in
                           site/home, or with none chosen or no answer in 3 s, image files in _admin/gallery by
                           name; at most `limit`, each fetched on its own so one failure drops one photo)
@@ -157,7 +158,8 @@ lib/
                           requestFocusInView: keyboard traversal scrolls focused controls clear of the edges
     empty_state.dart      EmptyState: the shared "nothing here yet" band with its action
     google_sign_in_button.dart  Google's sign-in button (official G from assets/google/, Google's colors)
-    network_photo.dart    A photograph with a placeholder and a fade-in
+    network_photo.dart    A photograph with a placeholder; optionally loads a small preview first, then
+                          crossfades to its fitted/cropped original
     account_avatar.dart   The butter initial disc
     brookie_logo.dart     BrookieLogo: assets/logo.png at its fixed aspect, so nothing moves when it loads
   utilities/
@@ -193,10 +195,11 @@ test/                     Widget and unit tests; mirrors lib/
 functions/                Cloud Functions, TypeScript on Node 24 (own package.json; not a Dart package)
   src/index.ts            Function definitions (region us-central1); getGalleryPhotoUrls, getGalleryDownloadUrl
   src/gallery.ts          Shared gallery access/listing logic with injected Firestore/Storage, so tests use
-                          in-memory fakes; puts a valid bookings.mainPhoto first for the gallery cover, then
-                          signs individual photo links with bounded concurrency; an explicit admin preview
-                          checks the admin claim and bypasses customer payment/readiness without enabling zip
-                          downloads; canDownload():
+                          in-memory fakes; puts a valid bookings.mainPhoto first for the gallery cover, creates
+                          or reuses private 480 px WebPs under its hidden .previews folder with Sharp, then
+                          streams and signs preview/original links with bounded concurrency; an explicit admin
+                          preview checks the admin claim and bypasses customer payment/readiness without enabling
+                          zip downloads; canDownload():
                           the booking's uid, or a verified email in an ad hoc session's emails or any session's
                           sharedWith; progressSender: progress
                           chunks to the caller, at most one per 500 ms (the first and last always)
@@ -265,11 +268,14 @@ scripts/
    caller (its uid, one of an ad hoc session's emails matching the caller's
    verified Google email, or its `sharedWith`). `getGalleryPhotoUrls` lists
    `galleries/<bookingId>/`, moves the booking's valid `mainPhoto` to the
-   front (otherwise leaving name order), and returns a one-hour signed link
-   per photo. `SessionGalleryPage` uses that first link as a full-bleed cover,
-   places the title and date below it, then lazily builds a responsive 4:5
-   print grid; a print opens the original in a full-screen previous/next,
-   keyboard-accessible viewer. `getGalleryDownloadUrl` zips the same files
+   front (otherwise leaving name order), streams the count, then each indexed
+   photo's one-hour preview/original links (creating and caching the 480 px
+   preview when needed), and finally returns the complete list.
+   `SessionGalleryPage` lays out placeholders from the count, uses the first
+   preview/original pair as a full-bleed cover, places the title and date below
+   it, then lazily builds a responsive 4:5 print grid; each preview crossfades
+   to its original. A print opens the same pair in a full-screen previous/next,
+   keyboard-accessible viewer. `getGalleryDownloadUrl` zips the same source files
    (cached in `gallery-zips/`), streaming its progress while it builds a new
    zip (the card shows photo N of M and a bar; a caller who leaves doesn't stop
    the build), and returns a signed link that expires after an hour, opened in
@@ -567,6 +573,18 @@ gsutil cors set cors.json gs://brookie-babies.firebasestorage.app
 - Individual gallery links are not cached objects the admin can revoke:
   hiding or changing a gallery stops new links, but any already issued expire
   naturally within an hour.
+- Gallery previews are private generated objects under
+  `galleries/<bookingId>/.previews/<source-name-sha256>.webp`. The function
+  fingerprints the source name, generation and size in object metadata, so an
+  unchanged source reuses its 480 px WebP and a replacement refreshes it.
+  `selectPhotos` and `FirebaseAdminService.listSessionPhotos` both skip hidden
+  folders, which keeps previews out of the gallery, zip and admin count; a full
+  session deletion still removes them with the rest of its folder. The first
+  streamed chunk is `{stage: "listing", photoCount}`, followed by indexed
+  `{stage: "photo", ...}` chunks, cover first. The final result still carries
+  every photo, so old non-streaming clients work; a new client against an old
+  function gets the final originals without progressive previews. Never log a
+  malformed response or URL: each query contains a one-hour credential.
 - Gallery IDs: `getGalleryPhotoUrls` and `getGalleryDownloadUrl` only accept
   booking IDs matching `^[A-Za-z0-9_-]{1,128}$`
   (`BOOKING_ID_PATTERN`); the admin session page mirrors it and warns instead

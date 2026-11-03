@@ -3,6 +3,7 @@ import {createHash} from "node:crypto";
 import {Readable, Writable} from "node:stream";
 import {beforeEach, describe, test} from "node:test";
 import {HttpsError} from "firebase-functions/https";
+import sharp = require("sharp");
 import * as yauzl from "yauzl";
 import {
   BucketLike,
@@ -11,9 +12,12 @@ import {
   computeFingerprint,
   DocumentSnapshotLike,
   FirestoreLike,
+  galleryPreviewObjectName,
   getGalleryDownload,
   getGalleryPhotos,
   GalleryDeps,
+  GalleryPhotoChunk,
+  GalleryPhotoStream,
   GalleryProgress,
   handleGalleryDownloadRequest,
   handleGalleryPhotosRequest,
@@ -135,7 +139,6 @@ class FakeBucket implements BucketLike {
 
   file(name: string): ZipObjectLike {
     return {
-      exists: async () => [this.objects.has(name)],
       getMetadata: async () => {
         const object = this.objects.get(name);
         if (!object) throw Object.assign(new Error("Not found"), {code: 404});
@@ -192,6 +195,25 @@ class FakeStream implements ProgressStream {
 
   get photosDone(): number[] {
     return this.chunks.map((chunk) => chunk.photosDone);
+  }
+}
+
+class FakePhotoStream implements GalleryPhotoStream {
+  readonly chunks: GalleryPhotoChunk[] = [];
+  readonly controller = new AbortController();
+  mode: "resolve" | "reject" | "throw" = "resolve";
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  sendChunk(chunk: GalleryPhotoChunk): Promise<boolean> {
+    this.chunks.push(chunk);
+    if (this.mode === "throw") throw new Error("simulated response gone");
+    if (this.mode === "reject") {
+      return Promise.reject(new Error("simulated write failure"));
+    }
+    return Promise.resolve(!this.signal.aborted);
   }
 }
 
@@ -655,9 +677,113 @@ describe("getGalleryPhotos", {timeout: 10_000}, () => {
       {version: "v4", action: "read", expires},
       {version: "v4", action: "read", expires},
     ]);
-    assert.equal(bucket.writeStreamsOpened, 0);
-    assert.equal(bucket.readStreamsOpened, 0);
+    // These fake bytes are not an image: previewing each source is attempted,
+    // then the original-only response above is returned.
+    assert.equal(bucket.writeStreamsOpened, 2);
+    assert.equal(bucket.uploadsFinished, 0);
+    assert.equal(bucket.readStreamsOpened, 2);
   });
+
+  test("streams the layout and cover first, then reuses cached low-resolution previews", async () => {
+    addBooking(BOOKING_ID, {mainPhoto: "z-cover.jpg"});
+    const original = await sharp({
+      create: {
+        width: 1200,
+        height: 800,
+        channels: 3,
+        background: {r: 175, g: 120, b: 90},
+      },
+    })
+      .jpeg({quality: 90})
+      .toBuffer();
+    bucket.put("galleries/b1/a-second.jpg", original);
+    bucket.put("galleries/b1/z-cover.jpg", original);
+    const stream = new FakePhotoStream();
+
+    const result = await getGalleryPhotos(
+      deps,
+      {uid: UID},
+      {bookingId: BOOKING_ID},
+      stream,
+    );
+
+    assert.deepEqual(result.photos.map((photo) => photo.name), [
+      "z-cover.jpg",
+      "a-second.jpg",
+    ]);
+    for (const photo of result.photos) {
+      assert.match(photo.previewUrl ?? "", /\/\.previews\/[0-9a-f]{64}\.webp/);
+    }
+    assert.deepEqual(stream.chunks, [
+      {stage: "listing", photoCount: 2},
+      {
+        stage: "photo",
+        photoCount: 2,
+        index: 0,
+        photo: result.photos[0],
+      },
+      {
+        stage: "photo",
+        photoCount: 2,
+        index: 1,
+        photo: result.photos[1],
+      },
+    ]);
+
+    const coverPreviewName = galleryPreviewObjectName(BOOKING_ID, {
+      name: "galleries/b1/z-cover.jpg",
+    });
+    const coverPreview = bucket.objects.get(coverPreviewName);
+    assert.ok(coverPreview);
+    assert.equal(coverPreview.contentType, "image/webp");
+    assert.match(coverPreview.metadata.sourceFingerprint, /^[0-9a-f]{64}$/);
+    const previewMetadata = await sharp(coverPreview.data).metadata();
+    assert.equal(previewMetadata.format, "webp");
+    assert.equal(previewMetadata.width, 480);
+    assert.equal(previewMetadata.height, 320);
+    assert.equal(bucket.uploadsFinished, 2);
+    assert.equal(bucket.readStreamsOpened, 2);
+
+    // A later visit lists the hidden preview objects too, but never returns
+    // them as gallery photos and does not read or upload the sources again.
+    const second = await callPhotos();
+    assert.deepEqual(second.photos.map((photo) => photo.name), [
+      "z-cover.jpg",
+      "a-second.jpg",
+    ]);
+    assert.ok(second.photos.every((photo) => photo.previewUrl !== undefined));
+    assert.equal(bucket.uploadsFinished, 2);
+    assert.equal(bucket.readStreamsOpened, 2);
+
+    // Replacing the source keeps the stable preview path but invalidates its
+    // fingerprint and rebuilds it.
+    bucket.put("galleries/b1/z-cover.jpg", Buffer.concat([original, Buffer.from("changed")]));
+    await callPhotos();
+    assert.equal(bucket.uploadsFinished, 3);
+    assert.equal(bucket.readStreamsOpened, 3);
+  });
+
+  for (const mode of ["reject", "throw"] as const) {
+    test(`a gallery chunk that fails (${mode}) does not fail the final list`, async () => {
+      addBooking(BOOKING_ID);
+      bucket.put("galleries/b1/a.jpg", "not a decodable image");
+      const stream = new FakePhotoStream();
+      stream.mode = mode;
+
+      const result = await getGalleryPhotos(
+        deps,
+        {uid: UID},
+        {bookingId: BOOKING_ID},
+        stream,
+      );
+
+      assert.deepEqual(result.photos.map((photo) => photo.name), ["a.jpg"]);
+      assert.deepEqual(
+        stream.chunks.map((chunk) => chunk.stage),
+        ["listing", "photo"],
+      );
+    });
+  }
 
   test("puts the booking's exact main photo first for the cover", async () => {
     addBooking(BOOKING_ID, {mainPhoto: "album/hero:portrait.jpg"});
@@ -1362,7 +1488,15 @@ describe("helpers", () => {
       createReadStream: () => Readable.from([]),
     });
     const photos = selectPhotos(
-      [file("p/a.jpg"), file("p//a.jpg"), file("p/A.JPG"), file("p/../a.jpg"), file("p/README")],
+      [
+        file("p/a.jpg"),
+        file("p//a.jpg"),
+        file("p/A.JPG"),
+        file("p/../a.jpg"),
+        file("p/README"),
+        file("p/.previews/generated.webp"),
+        file("p/album/.hidden/generated.webp"),
+      ],
       "p/",
     );
     assert.deepEqual(

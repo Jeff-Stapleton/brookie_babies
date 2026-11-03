@@ -3,8 +3,10 @@
 // booking, an ad hoc session shared with their verified Google email, or a
 // session its owner shared with that email), then lists the photos in
 // galleries/{bookingId}/. An admin may also ask getGalleryPhotoUrls for a
-// preview before the photos are available. It returns short-lived signed URLs
-// for the individual photos. getGalleryDownloadUrl zips them into
+// preview before the photos are available. It streams the gallery layout and
+// each photo as it creates or reuses a private low-resolution WebP, then
+// returns short-lived signed URLs for each preview and original.
+// getGalleryDownloadUrl zips the source photos into
 // gallery-zips/{bookingId}.zip (reusing the zip while the photos are
 // unchanged) and returns a short-lived signed URL for it. While it builds a
 // zip, it streams its progress to callers that ask for it (the site).
@@ -21,13 +23,21 @@ import {createHash} from "node:crypto";
 import type {Readable, Writable} from "node:stream";
 import {pipeline} from "node:stream/promises";
 import {HttpsError} from "firebase-functions/https";
+import sharp = require("sharp");
 import * as yazl from "yazl";
 
 export const GALLERY_PREFIX = "galleries/";
+export const GALLERY_PREVIEW_FOLDER = ".previews";
 export const ZIP_PREFIX = "gallery-zips/";
 export const SIGNED_URL_TTL_MS = 60 * 60 * 1000;
 export const BOOKING_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 export const PHOTO_URL_CONCURRENCY = 12;
+export const GALLERY_PREVIEW_CONCURRENCY = 4;
+export const GALLERY_PREVIEW_MAX_DIMENSION = 480;
+export const GALLERY_PREVIEW_QUALITY = 55;
+// Bump when preview dimensions, format or encoding settings change.
+export const GALLERY_PREVIEW_FORMAT_VERSION =
+  "brookie-babies-gallery-preview-v1";
 
 // Bump when the zip layout changes (entry naming, options) so zips cached by
 // an older version are rebuilt.
@@ -87,6 +97,11 @@ export interface GalleryPhoto {
   /** Safe relative name, stable for the life of this version of the photo. */
   name: string;
   url: string;
+  /**
+   * A cached low-resolution WebP through a signed URL with the same expiry.
+   * Missing only when that source format could not be previewed.
+   */
+  previewUrl?: string;
 }
 
 /** Response of getGalleryPhotoUrls, shared with the Flutter client. */
@@ -95,6 +110,20 @@ export interface GalleryPhotoList {
   /** ISO 8601; every URL has this expiry. */
   expiresAt: string;
 }
+
+/**
+ * Streamed before GalleryPhotoList. The listing lets the site lay the whole
+ * gallery out immediately; each photo then replaces its placeholder as its
+ * private links become ready. Older callers ignore these chunks.
+ */
+export type GalleryPhotoChunk =
+  | {stage: "listing"; photoCount: number}
+  | {
+      stage: "photo";
+      photoCount: number;
+      index: number;
+      photo: GalleryPhoto;
+    };
 
 // ---------------------------------------------------------------------------
 // Injected dependencies (subsets of the Admin SDK's Firestore and Bucket).
@@ -128,6 +157,7 @@ export interface SignedUrlConfig {
 }
 
 export interface ZipWriteStreamOptions {
+  resumable?: boolean;
   metadata: {
     contentType: string;
     metadata: {sourceFingerprint: string};
@@ -136,7 +166,6 @@ export interface ZipWriteStreamOptions {
 
 /** The cached zip object, as returned by Bucket.file(). */
 export interface ZipObjectLike {
-  exists(): Promise<[boolean, ...unknown[]]>;
   getMetadata(): Promise<
     [{metadata?: Record<string, unknown> | null}, ...unknown[]]
   >;
@@ -180,15 +209,18 @@ export interface CallableRequestLike {
  * What getGalleryDownload needs from onCall's response. A
  * CallableResponse<GalleryProgress> fits it as it is.
  */
-export interface ProgressStream {
+export interface CallableStream<T> {
   /** Resolves false, writing nothing, when the caller doesn't stream or has left. */
-  sendChunk(chunk: GalleryProgress): Promise<boolean>;
+  sendChunk(chunk: T): Promise<boolean>;
   /**
    * Aborted when the caller disconnects, and also when a response ends: remove
    * listeners before returning.
    */
   readonly signal: AbortSignal;
 }
+
+export type ProgressStream = CallableStream<GalleryProgress>;
+export type GalleryPhotoStream = CallableStream<GalleryPhotoChunk>;
 
 /**
  * Thin wrapper used by the onCall handler: requires sign-in, passes
@@ -227,13 +259,14 @@ export async function handleGalleryDownloadRequest(
 export async function handleGalleryPhotosRequest(
   deps: GalleryDeps & {logError: (message: string, error: unknown) => void},
   request: CallableRequestLike,
+  stream?: GalleryPhotoStream,
 ): Promise<GalleryPhotoList> {
   const auth = request.auth;
   if (!auth?.uid) {
     throw new HttpsError("unauthenticated", MESSAGES.unauthenticated);
   }
   try {
-    return await getGalleryPhotos(deps, auth, request.data);
+    return await getGalleryPhotos(deps, auth, request.data, stream);
   } catch (error) {
     if (error instanceof HttpsError) throw error;
     const bookingId = (request.data as {bookingId?: unknown} | null)?.bookingId;
@@ -255,19 +288,33 @@ export async function getGalleryPhotos(
   deps: GalleryDeps,
   caller: CallerAuth,
   data: unknown,
+  stream?: GalleryPhotoStream,
 ): Promise<GalleryPhotoList> {
-  const {booking, photos} = await authorizedGallery(
+  const {bookingId, booking, photos} = await authorizedGallery(
     deps,
     caller,
     data,
     adminPreviewRequested(data),
   );
   const expires = new Date(deps.now().getTime() + SIGNED_URL_TTL_MS);
+  const ordered = mainPhotoFirst(photos, booking.mainPhoto);
+  await sendGalleryPhotoChunk(stream, {
+    stage: "listing",
+    photoCount: ordered.length,
+  });
   return {
-    photos: await signGalleryPhotos(
-      deps.bucket,
-      mainPhotoFirst(photos, booking.mainPhoto),
+    photos: await prepareGalleryPhotos(
+      deps,
+      bookingId,
+      ordered,
       expires,
+      (photo, index) =>
+        sendGalleryPhotoChunk(stream, {
+          stage: "photo",
+          photoCount: ordered.length,
+          index,
+          photo,
+        }),
     ),
     expiresAt: expires.toISOString(),
   };
@@ -295,7 +342,7 @@ export async function getGalleryDownload(
   const zipObject = deps.bucket.file(`${ZIP_PREFIX}${bookingId}.zip`);
   // From the listing, so a cached zip reports the same size as a new one.
   const totalBytes = totalSize(photos);
-  if (!(await isCachedZipCurrent(zipObject, fingerprint))) {
+  if (!(await isCachedObjectCurrent(zipObject, fingerprint))) {
     const started = deps.now().getTime();
     const elapsed = (): number => deps.now().getTime() - started;
     const log = (message: string): void =>
@@ -406,6 +453,169 @@ function adminPreviewRequested(data: unknown): boolean {
     data !== null &&
     (data as {adminPreview?: unknown}).adminPreview === true
   );
+}
+
+/**
+ * Sends one gallery chunk without letting a caller that left or a failed
+ * connection fail thumbnail generation and the final response.
+ */
+async function sendGalleryPhotoChunk(
+  stream: GalleryPhotoStream | undefined,
+  chunk: GalleryPhotoChunk,
+): Promise<void> {
+  if (!stream || stream.signal.aborted) return;
+  try {
+    await stream.sendChunk(chunk);
+  } catch {
+    // The final result still gets built, so a retry can use the previews.
+  }
+}
+
+/**
+ * Signs originals and cached low-resolution previews with bounded
+ * concurrency. The cover is completed first, so a streaming page gets its
+ * first useful image before work begins on the rest of a large gallery.
+ */
+export async function prepareGalleryPhotos(
+  deps: GalleryDeps,
+  bookingId: string,
+  photos: readonly Photo[],
+  expires: Date,
+  onPhoto?: (
+    photo: GalleryPhoto,
+    index: number,
+  ) => void | Promise<void>,
+  concurrency = GALLERY_PREVIEW_CONCURRENCY,
+): Promise<GalleryPhoto[]> {
+  const signed = new Array<GalleryPhoto>(photos.length);
+  const prepare = async (index: number): Promise<void> => {
+    const source = photos[index];
+    const originalUrl = deps.bucket
+      .file(source.name)
+      .getSignedUrl({version: "v4", action: "read", expires});
+    const previewUrl = galleryPreviewUrl(
+      deps,
+      bookingId,
+      source,
+      expires,
+      index,
+      photos.length,
+    );
+    const [[url], preview] = await Promise.all([originalUrl, previewUrl]);
+    const photo: GalleryPhoto = {
+      name: source.entryName,
+      url,
+      ...(preview === undefined ? {} : {previewUrl: preview}),
+    };
+    signed[index] = photo;
+    await onPhoto?.(photo, index);
+  };
+
+  if (photos.length === 0) return signed;
+  await prepare(0);
+  let next = 1;
+  const worker = async (): Promise<void> => {
+    while (next < photos.length) {
+      const index = next++;
+      await prepare(index);
+    }
+  };
+  const workers = Math.min(
+    Math.max(1, concurrency),
+    photos.length - 1,
+  );
+  await Promise.all(Array.from({length: workers}, worker));
+  return signed;
+}
+
+/**
+ * Returns the stable private object name for [photo]'s generated preview.
+ * The source name is hashed so nested or unusual names cannot escape the
+ * reserved hidden folder.
+ */
+export function galleryPreviewObjectName(
+  bookingId: string,
+  photo: Pick<Photo, "name">,
+): string {
+  const digest = createHash("sha256").update(photo.name).digest("hex");
+  return `${GALLERY_PREFIX}${bookingId}/${GALLERY_PREVIEW_FOLDER}/${digest}.webp`;
+}
+
+/** Builds or reuses [photo]'s 480 px WebP and returns its Storage object. */
+export async function ensureGalleryPreview(
+  bucket: BucketLike,
+  bookingId: string,
+  photo: Photo,
+): Promise<ZipObjectLike> {
+  const object = bucket.file(galleryPreviewObjectName(bookingId, photo));
+  const fingerprint = computePreviewFingerprint(photo);
+  if (await isCachedObjectCurrent(object, fingerprint)) return object;
+
+  const transform = sharp({
+    failOn: "none",
+    sequentialRead: true,
+  })
+    .rotate()
+    .resize({
+      width: GALLERY_PREVIEW_MAX_DIMENSION,
+      height: GALLERY_PREVIEW_MAX_DIMENSION,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .webp({quality: GALLERY_PREVIEW_QUALITY});
+  const upload = object.createWriteStream({
+    // The output is at most 480 px; a resumable upload adds round trips but
+    // cannot meaningfully recover one this small.
+    resumable: false,
+    metadata: {
+      contentType: "image/webp",
+      metadata: {sourceFingerprint: fingerprint},
+    },
+  });
+  await pipeline(photo.file.createReadStream(), transform, upload);
+  return object;
+}
+
+function computePreviewFingerprint(
+  photo: Pick<Photo, "name" | "generation" | "size">,
+): string {
+  return createHash("sha256")
+    .update(
+      `${GALLERY_PREVIEW_FORMAT_VERSION}\n${photo.name}\n` +
+        `${photo.generation}\n${photo.size ?? ""}\n`,
+    )
+    .digest("hex");
+}
+
+async function galleryPreviewUrl(
+  deps: GalleryDeps,
+  bookingId: string,
+  photo: Photo,
+  expires: Date,
+  index: number,
+  count: number,
+): Promise<string | undefined> {
+  try {
+    const preview = await ensureGalleryPreview(
+      deps.bucket,
+      bookingId,
+      photo,
+    );
+    const [url] = await preview.getSignedUrl({
+      version: "v4",
+      action: "read",
+      expires,
+    });
+    return url;
+  } catch (error) {
+    const kind = error instanceof Error ? error.name : typeof error;
+    deps.log?.(
+      "warning",
+      `Could not create preview ${index + 1} of ${count} for booking ` +
+        `${bookingId} (${kind}); serving the original only`,
+    );
+    return undefined;
+  }
 }
 
 /**
@@ -522,7 +732,7 @@ export interface Photo {
 /**
  * Keeps real photo files under `prefix`, sorted by object name, and gives
  * each a safe, unique zip entry name. Skips folder placeholders (names ending
- * in '/') and hidden files (basename starting with '.', e.g. .DS_Store).
+ * in '/'), hidden files and hidden folders (including generated .previews).
  */
 export function selectPhotos(
   files: readonly SourceFileLike[],
@@ -532,8 +742,19 @@ export function selectPhotos(
     .filter((file) => file.name.startsWith(prefix))
     .filter((file) => !file.name.endsWith("/"))
     .filter((file) => {
-      const basename = file.name.split(/[\\/]/).pop() ?? "";
-      return basename !== "" && !basename.startsWith(".");
+      const segments = file.name.slice(prefix.length).split(/[\\/]/);
+      const basename = segments.pop() ?? "";
+      const hiddenFolder = segments.some(
+        (segment) =>
+          segment.startsWith(".") &&
+          segment !== "." &&
+          segment !== "..",
+      );
+      return (
+        basename !== "" &&
+        !basename.startsWith(".") &&
+        !hiddenFolder
+      );
     })
     .sort((a, b) => compareStrings(a.name, b.name));
 
@@ -648,14 +869,23 @@ export function computeFingerprint(
   return hash.digest("hex");
 }
 
-async function isCachedZipCurrent(
-  zipObject: ZipObjectLike,
+async function isCachedObjectCurrent(
+  object: ZipObjectLike,
   fingerprint: string,
 ): Promise<boolean> {
-  const [exists] = await zipObject.exists();
-  if (!exists) return false;
-  const [metadata] = await zipObject.getMetadata();
-  return metadata.metadata?.sourceFingerprint === fingerprint;
+  try {
+    const [metadata] = await object.getMetadata();
+    return metadata.metadata?.sourceFingerprint === fingerprint;
+  } catch (error) {
+    // getMetadata is one request; exists() followed by getMetadata() would
+    // double the round trips for every preview in a large cached gallery.
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? (error as {code?: unknown}).code
+        : undefined;
+    if (code === 404 || code === "404") return false;
+    throw error;
+  }
 }
 
 /**

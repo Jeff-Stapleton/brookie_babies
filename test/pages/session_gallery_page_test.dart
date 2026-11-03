@@ -24,6 +24,7 @@ void main() {
       GalleryPhoto(
         name: 'IMG_$i.jpg',
         url: Uri.parse('https://storage.example/galleries/fall-family/IMG_$i.jpg?signature=$i'),
+        previewUrl: Uri.parse('https://storage.example/galleries/fall-family/.previews/$i.webp?signature=preview$i'),
       ),
   ];
 
@@ -82,6 +83,7 @@ void main() {
     expect(find.bySemanticsLabel('Cover photo from The Harper family'), findsOneWidget);
 
     final cover = find.byType(NetworkPhoto).first;
+    expect(tester.widget<NetworkPhoto>(cover).previewUrl, galleryPhotos.first.previewUrl);
     final title = find.text('The Harper family');
     expect(tester.getTopLeft(cover).dy, 64);
     expect(tester.getBottomLeft(cover).dy, lessThan(tester.getTopLeft(title).dy));
@@ -130,6 +132,14 @@ void main() {
       find.bySemanticsLabel(RegExp('Photo 2 of 5 from The Harper family')),
       findsOneWidget,
     );
+    final viewerPhoto = tester.widget<NetworkPhoto>(
+      find.descendant(
+        of: find.bySemanticsLabel(RegExp('Photo 2 of 5 from The Harper family')),
+        matching: find.byType(NetworkPhoto),
+      ),
+    );
+    expect(viewerPhoto.previewUrl, galleryPhotos[1].previewUrl);
+    expect(viewerPhoto.fit, BoxFit.contain);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
@@ -204,6 +214,41 @@ void main() {
     await tester.pumpAndSettle();
     await scrollToPhotos(tester);
     expect(find.text('Your photos'), findsOneWidget);
+  });
+
+  testWidgets('lays out placeholders, then shows streamed previews before every link arrives', (tester) async {
+    gallery.holdGalleryPhotos = true;
+    await pumpGallery(tester);
+
+    gallery.photosProgress(const GalleryPhotosProgress(photoCount: 5));
+    await tester.pump();
+
+    expect(find.text('The Harper family'), findsOneWidget);
+    expect(find.byType(CustomScrollView), findsOneWidget);
+    await scrollToPhotos(tester);
+    expect(find.text('Your photos'), findsOneWidget);
+    expect(find.text('5 photographs'), findsOneWidget);
+    expect(find.byType(NetworkPhoto), findsNothing);
+
+    gallery.photosProgress(
+      GalleryPhotosProgress(
+        photoCount: 5,
+        index: 0,
+        photo: galleryPhotos.first,
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(NetworkPhoto), findsWidgets);
+    expect(
+      tester.widget<NetworkPhoto>(find.byType(NetworkPhoto).first).previewUrl,
+      galleryPhotos.first.previewUrl,
+    );
+
+    gallery.completePhotos();
+    await tester.pumpAndSettle();
+    await scrollToPhotos(tester);
+    expect(find.bySemanticsLabel('View photo 5 of 5'), findsOneWidget);
   });
 
   for (final brightness in Brightness.values) {

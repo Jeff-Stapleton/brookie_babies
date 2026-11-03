@@ -13,16 +13,28 @@ GalleryCallEvent _progress(Object? data) => (isResult: false, data: data);
 GalleryCallEvent _result(Object? data) => (isResult: true, data: data);
 
 const _link = 'https://storage.googleapis.com/bucket/gallery-zips/b1.zip?X-Goog-Signature=abc';
+const _photoLink = 'https://storage.example/galleries/b1/IMG_0001.jpg?sig=full';
+const _previewLink = 'https://storage.example/galleries/b1/.previews/abc.webp?sig=preview';
 
 /// The function's final answer.
 final _answer = {'url': _link, 'photoCount': 150, 'expiresAt': '2026-10-25T12:00:00.000Z', 'totalBytes': 4800000000};
+final _galleryAnswer = {
+  'photos': [
+    {'name': 'IMG_0001.jpg', 'url': _photoLink, 'previewUrl': _previewLink},
+  ],
+  'expiresAt': '2026-11-02T07:00:00.000Z',
+};
 
 void main() {
   group('individual gallery photos', () {
     test('reads their names and private links in order', () {
       final photos = parseGalleryPhotos({
         'photos': [
-          {'name': 'IMG_0001.jpg', 'url': 'https://storage.example/galleries/b1/IMG_0001.jpg?sig=one'},
+          {
+            'name': 'IMG_0001.jpg',
+            'url': 'https://storage.example/galleries/b1/IMG_0001.jpg?sig=one',
+            'previewUrl': _previewLink,
+          },
           {'name': 'album/IMG_0002.jpg', 'url': 'http://localhost:9199/galleries/b1/IMG_0002.jpg?sig=two'},
         ],
         'expiresAt': '2026-11-02T07:00:00.000Z',
@@ -30,7 +42,9 @@ void main() {
 
       expect(photos.map((photo) => photo.name), ['IMG_0001.jpg', 'album/IMG_0002.jpg']);
       expect(photos.first.url.queryParameters['sig'], 'one');
+      expect(photos.first.previewUrl?.queryParameters['sig'], 'preview');
       expect(photos.last.url.host, 'localhost');
+      expect(photos.last.previewUrl, isNull);
     });
 
     test('refuses an empty or malformed response', () {
@@ -55,6 +69,16 @@ void main() {
         {
           'photos': [
             {'name': 'a.jpg', 'url': 'javascript:alert(1)'}
+          ]
+        },
+        {
+          'photos': [
+            {'name': 'a.jpg', 'url': 'https://example.com/a.jpg', 'previewUrl': 42}
+          ]
+        },
+        {
+          'photos': [
+            {'name': 'a.jpg', 'url': 'https://example.com/a.jpg', 'previewUrl': 'file:///tmp/a.webp'}
           ]
         },
         {
@@ -87,6 +111,160 @@ void main() {
         'Your sign-in has expired. Sign out, sign in again, then open your photos.',
       );
       expect(galleryPhotoErrorMessage('internal', 'private detail'), kGalleryLoadErrorFallback);
+    });
+  });
+
+  group('streamed gallery photos', () {
+    Map<String, Object?> listing(Object? count) => {'stage': 'listing', 'photoCount': count};
+    Map<String, Object?> photo(Object? index, Object? count, [Object? value]) => {
+          'stage': 'photo',
+          'index': index,
+          'photoCount': count,
+          'photo': value ??
+              {
+                'name': 'IMG_0001.jpg',
+                'url': _photoLink,
+                'previewUrl': _previewLink,
+              },
+        };
+
+    test('reads the layout and an indexed preview photo', () {
+      final first = GalleryPhotosProgress.fromChunk(listing(5))!;
+      expect(first.photoCount, 5);
+      expect(first.index, isNull);
+      expect(first.photo, isNull);
+
+      final loaded = GalleryPhotosProgress.fromChunk(photo(2, 5))!;
+      expect(loaded.photoCount, 5);
+      expect(loaded.index, 2);
+      expect(loaded.photo?.name, 'IMG_0001.jpg');
+      expect(loaded.photo?.previewUrl, Uri.parse(_previewLink));
+    });
+
+    test('ignores unknown and malformed chunks', () {
+      final bad = <Object?>[
+        null,
+        {},
+        {'stage': 'future', 'photoCount': 5},
+        listing(null),
+        listing(0),
+        listing(-1),
+        listing(double.nan),
+        photo(null, 5),
+        photo(-1, 5),
+        photo(5, 5),
+        photo(0, 0),
+        photo(0, 5, {'name': 'a.jpg', 'url': 'javascript:alert(1)'}),
+        photo(0, 5, {'name': 'a.jpg', 'url': _photoLink, 'previewUrl': 42}),
+      ];
+      for (final data in bad) {
+        expect(GalleryPhotosProgress.fromChunk(data), isNull, reason: '$data');
+      }
+    });
+
+    test('hands chunks to the page, then returns the complete result', () async {
+      final seen = <GalleryPhotosProgress>[];
+      final photos = await readGalleryPhotos(
+        Stream.fromIterable([
+          _progress(listing(1)),
+          _progress(photo(0, 1)),
+          _result(_galleryAnswer),
+        ]),
+        onProgress: seen.add,
+      );
+
+      expect(seen.map((progress) => progress.index), [null, 0]);
+      expect(photos.single.name, 'IMG_0001.jpg');
+      expect(photos.single.previewUrl, Uri.parse(_previewLink));
+    });
+
+    test('a result from an older function works without chunks', () async {
+      var heard = 0;
+      final photos = await readGalleryPhotos(
+        Stream.value(_result({
+          'photos': [
+            {'name': 'IMG_0001.jpg', 'url': _photoLink},
+          ],
+        })),
+        onProgress: (_) => heard++,
+      );
+
+      expect(heard, 0);
+      expect(photos.single.previewUrl, isNull);
+    });
+
+    test('skips chunks it does not understand', () async {
+      var heard = 0;
+      final photos = await readGalleryPhotos(
+        Stream.fromIterable([
+          _progress({'stage': 'future', 'photoCount': 1}),
+          _progress(photo(4, 1)),
+          _result(_galleryAnswer),
+        ]),
+        onProgress: (_) => heard++,
+      );
+
+      expect(heard, 0);
+      expect(photos, hasLength(1));
+    });
+
+    test('a display failure does not throw away the final gallery', () async {
+      final photos = await readGalleryPhotos(
+        Stream.fromIterable([
+          _progress(listing(1)),
+          _result(_galleryAnswer),
+        ]),
+        onProgress: (_) => throw StateError('a display bug'),
+      );
+
+      expect(photos, hasLength(1));
+    });
+
+    test('maps function errors to gallery messages', () async {
+      Stream<GalleryCallEvent> failed() async* {
+        yield _progress(listing(1));
+        throw FirebaseFunctionsException(
+          code: 'failed-precondition',
+          message: 'Your photos aren’t ready yet. [0]',
+        );
+      }
+
+      await expectLater(
+        readGalleryPhotos(failed()),
+        throwsA(
+          isA<GalleryException>().having(
+            (error) => error.message,
+            'message',
+            'Your photos aren’t ready yet.',
+          ),
+        ),
+      );
+    });
+
+    test('gives up after its time limit and ignores later chunks', () async {
+      final events = StreamController<GalleryCallEvent>();
+      addTearDown(events.close);
+      var heard = 0;
+
+      await expectLater(
+        readGalleryPhotos(
+          events.stream,
+          onProgress: (_) => heard++,
+          timeLimit: const Duration(milliseconds: 10),
+        ),
+        throwsA(
+          isA<GalleryException>().having(
+            (error) => error.message,
+            'message',
+            kGalleryLoadErrorFallback,
+          ),
+        ),
+      );
+      events.add(_progress(listing(1)));
+      await pumpEventQueue();
+
+      expect(heard, 0);
+      expect(events.hasListener, isFalse);
     });
   });
 

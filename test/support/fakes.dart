@@ -17,11 +17,13 @@ import 'package:brookie_babies/theme/brookie_theme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-const testUser = AppUser(uid: 'uid123', email: 'parent@example.com', displayName: 'Pat Parent');
+const testUser = AppUser(
+    uid: 'uid123', email: 'parent@example.com', displayName: 'Pat Parent');
 
 /// In-memory [AuthService] for widget tests.
 class FakeAuthService implements AuthService {
-  FakeAuthService({AppUser? signedInAs, this.admin = false}) : _user = signedInAs;
+  FakeAuthService({AppUser? signedInAs, this.admin = false})
+      : _user = signedInAs;
 
   final _changes = StreamController<AppUser?>.broadcast();
   AppUser? _user;
@@ -100,7 +102,10 @@ class FakeAuthService implements AuthService {
 /// [BookingService] with the same bookings (or [error]) for any user, live:
 /// sharing one changes it, and the page hears of it, as from Firestore.
 class FakeBookingService implements BookingService {
-  FakeBookingService([List<Booking> bookings = const [], this.unreadable = 0, Set<String> sharedWithUser = const {}])
+  FakeBookingService(
+      [List<Booking> bookings = const [],
+      this.unreadable = 0,
+      Set<String> sharedWithUser = const {}])
       : bookings = [...bookings],
         sharedWithUser = {...sharedWithUser};
 
@@ -138,8 +143,11 @@ class FakeBookingService implements BookingService {
     watchedUsers.add(user);
     final error = this.error;
     if (error != null) return Stream.error(error);
-    UserBookings current() =>
-        (bookings: List.of(bookings), unreadable: unreadable, sharedWithUser: {...sharedWithUser});
+    UserBookings current() => (
+          bookings: List.of(bookings),
+          unreadable: unreadable,
+          sharedWithUser: {...sharedWithUser}
+        );
     return Stream.multi((controller) {
       controller.add(current());
       final changes = _changes.stream.listen((_) => controller.add(current()));
@@ -148,12 +156,15 @@ class FakeBookingService implements BookingService {
   }
 
   @override
-  Future<void> share(Booking booking, String email) => _changeSharing('share', booking, email);
+  Future<void> share(Booking booking, String email) =>
+      _changeSharing('share', booking, email);
 
   @override
-  Future<void> stopSharing(Booking booking, String email) => _changeSharing('stopSharing', booking, email);
+  Future<void> stopSharing(Booking booking, String email) =>
+      _changeSharing('stopSharing', booking, email);
 
-  Future<void> _changeSharing(String method, Booking booking, String email) async {
+  Future<void> _changeSharing(
+      String method, Booking booking, String email) async {
     final normalized = SessionRules.normalizeEmail(email);
     calls.add('$method(${booking.id}, $normalized)');
     if (writeDelay > Duration.zero) await Future<void>.delayed(writeDelay);
@@ -207,24 +218,35 @@ class FakeGalleryService implements GalleryService {
   // fake-async zone and completing it reaches the widget.
   Completer<List<GalleryPhoto>>? _pendingPhotos;
   Completer<GalleryDownload>? _pending;
+  GalleryPhotosProgressCallback? _onPhotosProgress;
   GalleryProgressCallback? _onProgress;
 
   @override
-  Future<List<GalleryPhoto>> loadPhotos(String bookingId, {bool adminPreview = false}) {
+  Future<List<GalleryPhoto>> loadPhotos(
+    String bookingId, {
+    bool adminPreview = false,
+    GalleryPhotosProgressCallback? onProgress,
+  }) {
     photoRequests.add(bookingId);
     if (adminPreview) adminPreviewRequests.add(bookingId);
+    _onPhotosProgress = onProgress;
     final error = galleryPhotosError;
     if (error != null) return Future.error(error);
     if (holdGalleryPhotos) return (_pendingPhotos = Completer()).future;
     return Future.value(List.of(galleryPhotos));
   }
 
-  void completePhotos([List<GalleryPhoto>? photos]) => _pendingPhotos!.complete(List.of(photos ?? galleryPhotos));
+  void photosProgress(GalleryPhotosProgress progress) =>
+      _onPhotosProgress!(progress);
+
+  void completePhotos([List<GalleryPhoto>? photos]) =>
+      _pendingPhotos!.complete(List.of(photos ?? galleryPhotos));
 
   void failPhotos(Object error) => _pendingPhotos!.completeError(error);
 
   @override
-  Future<GalleryDownload> prepareDownload(String bookingId, {GalleryProgressCallback? onProgress}) {
+  Future<GalleryDownload> prepareDownload(String bookingId,
+      {GalleryProgressCallback? onProgress}) {
     requested.add(bookingId);
     _onProgress = onProgress;
     return (_pending = Completer()).future;
@@ -288,14 +310,18 @@ class FakePhotoPicker {
 
   Future<List<PickedPhoto>> call({required String accept}) {
     accepts.add(accept);
-    return neverAnswers ? Completer<List<PickedPhoto>>().future : Future.value(next);
+    return neverAnswers
+        ? Completer<List<PickedPhoto>>().future
+        : Future.value(next);
   }
 }
 
 /// A picked file named [name] (its contents are empty bytes; [size] is what
 /// the rules see).
-PickedPhoto testPhoto(String name, {int size = 2 * 1024 * 1024, String contentType = 'image/jpeg'}) =>
-    PickedPhoto(name: name, size: size, contentType: contentType, data: Uint8List(0));
+PickedPhoto testPhoto(String name,
+        {int size = 2 * 1024 * 1024, String contentType = 'image/jpeg'}) =>
+    PickedPhoto(
+        name: name, size: size, contentType: contentType, data: Uint8List(0));
 
 /// A session for admin tests: ad hoc unless [status] says otherwise (then
 /// with a package unless one is given). An ad hoc session is shared with
@@ -328,7 +354,8 @@ Booking testSession(
     mainPhoto: mainPhoto,
     uid: uid ?? (adHoc ? null : 'uid-$id'),
     email: email,
-    emails: emails ?? (adHoc && email == null ? const ['harper@example.com'] : const []),
+    emails: emails ??
+        (adHoc && email == null ? const ['harper@example.com'] : const []),
     sharedWith: sharedWith,
     name: name,
   );
@@ -336,7 +363,8 @@ Booking testSession(
 
 /// An [AdminException] of [kind], with the app's message for the kinds that
 /// have one.
-AdminException adminError(AdminErrorKind kind, [String? message]) => AdminException(
+AdminException adminError(AdminErrorKind kind, [String? message]) =>
+    AdminException(
       message ??
           switch (kind) {
             AdminErrorKind.denied => kAdminDeniedMessage,
@@ -350,7 +378,11 @@ AdminException adminError(AdminErrorKind kind, [String? message]) => AdminExcept
 /// One upload by [FakeAdminService]: it runs until the test calls
 /// [setProgress], [complete] or [fail], or the app calls [cancel].
 class FakePhotoUpload implements PhotoUpload {
-  FakePhotoUpload({required this.fullPath, required this.photo, required this.name, this.onStored}) {
+  FakePhotoUpload(
+      {required this.fullPath,
+      required this.photo,
+      required this.name,
+      this.onStored}) {
     // Nobody may be waiting on a failure (a test that drops the upload), and
     // that mustn't count as an uncaught error.
     _done.future.ignore();
@@ -389,7 +421,8 @@ class FakePhotoUpload implements PhotoUpload {
   }
 
   /// Fails with [adminError] of [kind].
-  void fail([AdminErrorKind kind = AdminErrorKind.unknown, String? message]) => failWith(adminError(kind, message));
+  void fail([AdminErrorKind kind = AdminErrorKind.unknown, String? message]) =>
+      failWith(adminError(kind, message));
 
   void failWith(Object error) {
     if (!isFinished) _done.completeError(error);
@@ -561,7 +594,9 @@ class FakeAdminService implements AdminService {
         mainPhoto: mainPhoto,
         emails: [
           for (final email in details.emails)
-            if (SessionRules.normalizeEmail(email) case final normalized when normalized.isNotEmpty) normalized,
+            if (SessionRules.normalizeEmail(email) case final normalized
+                when normalized.isNotEmpty)
+              normalized,
         ],
         sharedWith: sharedWith,
         name: details.name.trim(),
@@ -570,7 +605,8 @@ class FakeAdminService implements AdminService {
   @override
   Stream<AllSessions> watchSessions() {
     calls.add('watchSessions()');
-    return _live(() => (sessions: sessions.values.toList(), unreadable: List.of(unreadable)));
+    return _live(() =>
+        (sessions: sessions.values.toList(), unreadable: List.of(unreadable)));
   }
 
   @override
@@ -591,7 +627,8 @@ class FakeAdminService implements AdminService {
     // second session, and changes it to these details, the ones sent last.
     // Anything else there is refused, as the rules refuse it.
     final saved = sessions[sessionId];
-    if (saved != null && (id == null || !saved.isAdHoc)) throw adminError(AdminErrorKind.denied);
+    if (saved != null && (id == null || !saved.isAdHoc))
+      throw adminError(AdminErrorKind.denied);
     sessions[sessionId] = _adHoc(
       sessionId,
       details,
@@ -606,7 +643,9 @@ class FakeAdminService implements AdminService {
   @override
   Future<void> updateSession(Booking session, SessionDetails details) async {
     // The app only offers this for ad hoc sessions; anything else is a bug.
-    if (!session.isAdHoc) throw StateError('updateSession(${session.id}) is for ad hoc sessions only');
+    if (!session.isAdHoc)
+      throw StateError(
+          'updateSession(${session.id}) is for ad hoc sessions only');
     await _write('updateSession', 'updateSession(${session.id})');
     final current = _session(session.id);
     sessions[session.id] = _adHoc(
@@ -643,7 +682,8 @@ class FakeAdminService implements AdminService {
 
   @override
   Future<void> deleteSession(String id) async {
-    if (sessions[id]?.isAdHoc == false) throw StateError('deleteSession($id) is for ad hoc sessions only');
+    if (sessions[id]?.isAdHoc == false)
+      throw StateError('deleteSession($id) is for ad hoc sessions only');
     await _write('deleteSession', 'deleteSession($id)');
     // Already gone counts as deleted, as it does for the real one.
     sessions.remove(id);
@@ -656,12 +696,16 @@ class FakeAdminService implements AdminService {
     calls.add('listSessionPhotos($id)');
     _fail('listSessionPhotos');
     final names = [...?sessionPhotos[id]]..sort();
-    return [for (final name in names) StoredPhoto(name: name, fullPath: 'galleries/$id/$name')];
+    return [
+      for (final name in names)
+        StoredPhoto(name: name, fullPath: 'galleries/$id/$name')
+    ];
   }
 
   @override
   Future<void> setMainPhoto(String id, String? name) async {
-    await _write('setMainPhoto', 'setMainPhoto($id, ${name ?? 'first by name'})');
+    await _write(
+        'setMainPhoto', 'setMainPhoto($id, ${name ?? 'first by name'})');
     final session = _session(id);
     if (name != null && !(sessionPhotos[id]?.contains(name) ?? false)) {
       throw const AdminException(
@@ -688,14 +732,17 @@ class FakeAdminService implements AdminService {
   }
 
   @override
-  PhotoUpload uploadSessionPhoto(String sessionId, PickedPhoto photo, String name) => _upload(
-      'uploadSessionPhoto', 'galleries/$sessionId/$name', photo, name, sessionPhotos.putIfAbsent(sessionId, () => []));
+  PhotoUpload uploadSessionPhoto(
+          String sessionId, PickedPhoto photo, String name) =>
+      _upload('uploadSessionPhoto', 'galleries/$sessionId/$name', photo, name,
+          sessionPhotos.putIfAbsent(sessionId, () => []));
 
   /// One that leaves the zip is logged with ', deleteZip: false' after its
   /// path.
   @override
   Future<void> deletePhoto(StoredPhoto photo, {bool deleteZip = true}) async {
-    await _write('deletePhoto', 'deletePhoto(${photo.fullPath}${deleteZip ? '' : ', deleteZip: false'})');
+    await _write('deletePhoto',
+        'deletePhoto(${photo.fullPath}${deleteZip ? '' : ', deleteZip: false'})');
     if (photo.fullPath.startsWith('${StoragePortfolioService.folder}/')) {
       library.remove(photo.name);
     } else {
@@ -722,12 +769,21 @@ class FakeAdminService implements AdminService {
   }
 
   @override
-  PhotoUpload uploadToHomeLibrary(PickedPhoto photo, String name) =>
-      _upload('uploadToHomeLibrary', '${StoragePortfolioService.folder}/$name', photo, name, library);
+  PhotoUpload uploadToHomeLibrary(PickedPhoto photo, String name) => _upload(
+      'uploadToHomeLibrary',
+      '${StoragePortfolioService.folder}/$name',
+      photo,
+      name,
+      library);
 
-  FakePhotoUpload _upload(String method, String fullPath, PickedPhoto photo, String name, List<String> into) {
+  FakePhotoUpload _upload(String method, String fullPath, PickedPhoto photo,
+      String name, List<String> into) {
     calls.add('$method($fullPath)');
-    final upload = FakePhotoUpload(fullPath: fullPath, photo: photo, name: name, onStored: () => into.add(name));
+    final upload = FakePhotoUpload(
+        fullPath: fullPath,
+        photo: photo,
+        name: name,
+        onStored: () => into.add(name));
     uploads.add(upload);
     final error = errors[method];
     if (error != null) {
@@ -779,6 +835,7 @@ Widget testApp({
     openUrl: (urlOpener ?? FakeUrlOpener()).call,
     pickPhotos: pickPhotos ?? FakePhotoPicker().call,
     isEmbeddedBrowser: isEmbeddedBrowser,
-    child: MaterialApp(theme: brookieTheme(brightness), routes: routes, home: home),
+    child: MaterialApp(
+        theme: brookieTheme(brightness), routes: routes, home: home),
   );
 }

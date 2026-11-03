@@ -994,7 +994,9 @@ void main() {
       storage.objects.addAll({
         'galleries/s1/a.jpg': 'image/jpeg',
         'galleries/s1/.DS_Store': null,
+        'galleries/s1/.previews/generated.webp': 'image/webp',
         'galleries/s1/edits/.hidden.jpg': 'image/jpeg',
+        'galleries/s1/edits/.cache/generated.webp': 'image/webp',
         'galleries/s1/edits\\._IMG_1.jpg': 'image/jpeg',
         'galleries/s1/marker/': null,
       });
